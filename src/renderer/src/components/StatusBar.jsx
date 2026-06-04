@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Icon } from './icons.jsx'
-import { BLOCK_TYPES, labelForBlockId } from '../blocks.js'
+import { BLOCK_TYPES, blockById, labelForBlockId } from '../blocks.js'
+import { useI18n } from '../i18n.jsx'
+import { THEMES, themeById } from '../themes.js'
+import { LANGS } from '../i18n.jsx'
 
 function stats(md) {
   const text = (md || '')
@@ -13,10 +16,10 @@ function stats(md) {
   return { words, chars, readMin }
 }
 
-function BlockSwitcher({ activeBlock, onPickBlock }) {
+// Small popover that closes on outside click.
+function usePopover() {
   const [open, setOpen] = useState(false)
   const ref = useRef(null)
-
   useEffect(() => {
     if (!open) return
     const onDown = (e) => {
@@ -25,15 +28,18 @@ function BlockSwitcher({ activeBlock, onPickBlock }) {
     window.addEventListener('mousedown', onDown)
     return () => window.removeEventListener('mousedown', onDown)
   }, [open])
+  return { open, setOpen, ref }
+}
 
+function BlockSwitcher({ activeBlock, onPickBlock }) {
+  const { t } = useI18n()
+  const { open, setOpen, ref } = usePopover()
+  const known = blockById(activeBlock)
+  const label = known ? t('block.' + activeBlock) : labelForBlockId(activeBlock)
   return (
     <div className="block-switch" ref={ref}>
-      <button
-        className="status-btn"
-        onClick={() => setOpen((v) => !v)}
-        title="Change block type"
-      >
-        <Icon name="heading" size={14} /> {labelForBlockId(activeBlock)}
+      <button className="status-btn" onClick={() => setOpen((v) => !v)} title={t('tip.changeBlock')}>
+        <Icon name="heading" size={14} /> {label}
         <span className="block-switch-caret">▾</span>
       </button>
       {open && (
@@ -48,8 +54,68 @@ function BlockSwitcher({ activeBlock, onPickBlock }) {
               }}
             >
               <span className="block-menu-short">{b.short}</span>
-              <span className="block-menu-name">{b.label}</span>
+              <span className="block-menu-name">{t('block.' + b.id)}</span>
               <span className="block-menu-sc">{b.shortcut}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function ThemePicker({ theme, setTheme }) {
+  const { lang, t } = useI18n()
+  const { open, setOpen, ref } = usePopover()
+  const cur = themeById(theme)
+  return (
+    <div className="block-switch" ref={ref}>
+      <button className="status-btn" onClick={() => setOpen((v) => !v)} title={t('tip.toggleTheme')}>
+        <span className="theme-swatch" style={{ background: cur.swatch }} />
+        {lang === 'zh' ? cur.zh : cur.en}
+        <span className="block-switch-caret">▾</span>
+      </button>
+      {open && (
+        <div className="block-switch-menu theme-menu">
+          {THEMES.map((th) => (
+            <button
+              key={th.id}
+              className={`block-menu-item${th.id === theme ? ' active' : ''}`}
+              onClick={() => {
+                setTheme(th.id)
+                setOpen(false)
+              }}
+            >
+              <span className="theme-swatch" style={{ background: th.swatch }} />
+              <span className="block-menu-name">{lang === 'zh' ? th.zh : th.en}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function LangSwitch({ lang, setLang }) {
+  const { t } = useI18n()
+  const { open, setOpen, ref } = usePopover()
+  return (
+    <div className="block-switch" ref={ref}>
+      <button className="status-btn" onClick={() => setOpen((v) => !v)} title={t('tip.language')}>
+        <Icon name="globe" size={14} /> {lang === 'zh' ? '中文' : 'EN'}
+      </button>
+      {open && (
+        <div className="block-switch-menu">
+          {LANGS.map((l) => (
+            <button
+              key={l.id}
+              className={`block-menu-item${l.id === lang ? ' active' : ''}`}
+              onClick={() => {
+                setLang(l.id)
+                setOpen(false)
+              }}
+            >
+              <span className="block-menu-name">{l.label}</span>
             </button>
           ))}
         </div>
@@ -61,12 +127,15 @@ function BlockSwitcher({ activeBlock, onPickBlock }) {
 export default function StatusBar({
   tab,
   theme,
-  onToggleTheme,
+  setTheme,
+  lang,
+  setLang,
   sourceMode,
   onToggleSource,
   activeBlock,
   onPickBlock
 }) {
+  const { t } = useI18n()
   const s = useMemo(() => stats(tab?.content), [tab?.content])
   const dirty = tab && tab.content !== tab.savedContent
   return (
@@ -74,32 +143,31 @@ export default function StatusBar({
       <div className="status-left">
         {tab ? (
           <>
-            <span className="status-path" title={tab.path || 'Unsaved'}>
-              {tab.path || 'Unsaved'}
+            <span className="status-path" title={tab.path || t('status.unsaved')}>
+              {tab.path || t('status.unsaved')}
             </span>
-            <span className={`status-dot ${dirty ? 'mod' : 'ok'}`}>{dirty ? '● Modified' : '✓ Saved'}</span>
+            <span className={`status-dot ${dirty ? 'mod' : 'ok'}`}>
+              {dirty ? '● ' + t('status.modified') : '✓ ' + t('status.saved')}
+            </span>
           </>
         ) : (
-          <span className="status-path">Ready</span>
+          <span className="status-path">{t('status.ready')}</span>
         )}
       </div>
       <div className="status-right">
         {tab && (
           <>
-            <span>{s.words} words</span>
-            <span>{s.chars} chars</span>
-            <span>{s.readMin} min read</span>
+            <span>{t('status.words', { n: s.words })}</span>
+            <span>{t('status.chars', { n: s.chars })}</span>
+            <span>{t('status.read', { n: s.readMin })}</span>
           </>
         )}
-        {tab && !sourceMode && (
-          <BlockSwitcher activeBlock={activeBlock} onPickBlock={onPickBlock} />
-        )}
-        <button className="status-btn" onClick={onToggleSource} title="Toggle source mode (Ctrl+/)">
-          <Icon name="code" size={14} /> {sourceMode ? 'Source' : 'Rich'}
+        {tab && !sourceMode && <BlockSwitcher activeBlock={activeBlock} onPickBlock={onPickBlock} />}
+        <button className="status-btn" onClick={onToggleSource} title={t('tip.toggleSource')}>
+          <Icon name="code" size={14} /> {sourceMode ? t('status.source') : t('status.rich')}
         </button>
-        <button className="status-btn" onClick={onToggleTheme} title="Toggle theme (Ctrl+Shift+T)">
-          <Icon name={theme === 'dark' ? 'sun' : 'moon'} size={14} />
-        </button>
+        <ThemePicker theme={theme} setTheme={setTheme} />
+        <LangSwitch lang={lang} setLang={setLang} />
       </div>
     </div>
   )

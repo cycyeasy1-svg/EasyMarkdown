@@ -1,6 +1,8 @@
 import { Icon } from './icons.jsx'
+import { useI18n } from '../i18n.jsx'
 
 export default function Tabs({ tabs, activeId, onActivate, onClose, onNew }) {
+  const { t } = useI18n()
   return (
     <div className="tabs">
       <div className="tabs-scroll">
@@ -33,7 +35,7 @@ export default function Tabs({ tabs, activeId, onActivate, onClose, onNew }) {
           )
         })}
       </div>
-      <button className="tab-new" title="New tab (Ctrl+N)" onClick={onNew}>
+      <button className="tab-new" title={t('tab.new')} onClick={onNew}>
         <Icon name="plus" size={16} />
       </button>
     </div>

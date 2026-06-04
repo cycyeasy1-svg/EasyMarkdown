@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Icon } from './icons.jsx'
+import { useI18n } from '../i18n.jsx'
 
 const join = (dir, name) => `${dir.replace(/[\\/]+$/, '')}/${name}`
 const baseName = (p) => p.split(/[\\/]/).pop()
 const parentDir = (p) => p.replace(/[\\/][^\\/]*$/, '')
 
 export default function Sidebar({ workspace, activePath, onOpenFile, refreshNonce }) {
+  const { t } = useI18n()
   const [childrenMap, setChildrenMap] = useState({}) // path -> nodes[]
   const [expanded, setExpanded] = useState(() => new Set())
   const [menu, setMenu] = useState(null) // { x, y, node }
@@ -61,7 +63,7 @@ export default function Sidebar({ workspace, activePath, onOpenFile, refreshNonc
 
   const doNewFile = async (dirNode) => {
     const dir = dirNode ? dirNode.path : workspace.rootPath
-    let name = window.prompt('New file name', 'untitled.md')
+    let name = window.prompt(t('prompt.newFile'), 'untitled.md')
     if (!name) return
     if (!/\.[a-z0-9]+$/i.test(name)) name += '.md'
     const path = join(dir, name)
@@ -74,13 +76,13 @@ export default function Sidebar({ workspace, activePath, onOpenFile, refreshNonc
       await loadDir(dir)
       onOpenFile(path)
     } catch (e) {
-      window.alert('Could not create file: ' + e.message)
+      window.alert(t('err.createFile') + e.message)
     }
   }
 
   const doNewFolder = async (dirNode) => {
     const dir = dirNode ? dirNode.path : workspace.rootPath
-    const name = window.prompt('New folder name', 'New Folder')
+    const name = window.prompt(t('prompt.newFolder'), t('prompt.newFolderDefault'))
     if (!name) return
     await window.api.createDir(join(dir, name))
     await loadDir(dir)
@@ -88,7 +90,7 @@ export default function Sidebar({ workspace, activePath, onOpenFile, refreshNonc
   }
 
   const doDelete = async (node) => {
-    if (!window.confirm(`Move "${node.name}" to trash?`)) return
+    if (!window.confirm(t('confirm.trash', { name: node.name }))) return
     await window.api.deleteItem(node.path)
     await refreshParentOf(node.path)
   }
@@ -108,9 +110,9 @@ export default function Sidebar({ workspace, activePath, onOpenFile, refreshNonc
     return (
       <div className="sidebar-empty">
         <Icon name="folder" size={26} />
-        <p>No folder open</p>
+        <p>{t('side.noFolder')}</p>
         <button className="btn-primary" onClick={() => window.dispatchEvent(new Event('mm:openFolder'))}>
-          Open Folder
+          {t('side.openFolder')}
         </button>
       </div>
     )
@@ -171,20 +173,20 @@ export default function Sidebar({ workspace, activePath, onOpenFile, refreshNonc
           {workspace.rootName}
         </span>
         <div className="sidebar-head-actions">
-          <button title="New file" onClick={() => doNewFile(null)}>
+          <button title={t('side.newFile')} onClick={() => doNewFile(null)}>
             <Icon name="file-plus" size={15} />
           </button>
-          <button title="New folder" onClick={() => doNewFolder(null)}>
+          <button title={t('side.newFolder')} onClick={() => doNewFolder(null)}>
             <Icon name="folder-plus" size={15} />
           </button>
-          <button title="Collapse all" onClick={() => setExpanded(new Set([workspace.rootPath]))}>
+          <button title={t('side.collapseAll')} onClick={() => setExpanded(new Set([workspace.rootPath]))}>
             <Icon name="collapse" size={15} />
           </button>
         </div>
       </div>
       <div className="tree" onContextMenu={(e) => { e.preventDefault(); setMenu({ x: e.clientX, y: e.clientY, node: null }) }}>
         {rootNodes.length === 0 ? (
-          <div className="tree-empty">No markdown files here yet.</div>
+          <div className="tree-empty">{t('side.empty')}</div>
         ) : (
           rootNodes.map((n) => renderNode(n, 0))
         )}
@@ -192,12 +194,12 @@ export default function Sidebar({ workspace, activePath, onOpenFile, refreshNonc
 
       {menu && (
         <div className="context-menu" style={{ left: menu.x, top: menu.y }} onClick={(e) => e.stopPropagation()}>
-          <button onClick={() => { doNewFile(menu.node?.type === 'dir' ? menu.node : null); setMenu(null) }}>New File</button>
-          <button onClick={() => { doNewFolder(menu.node?.type === 'dir' ? menu.node : null); setMenu(null) }}>New Folder</button>
+          <button onClick={() => { doNewFile(menu.node?.type === 'dir' ? menu.node : null); setMenu(null) }}>{t('side.ctxNewFile')}</button>
+          <button onClick={() => { doNewFolder(menu.node?.type === 'dir' ? menu.node : null); setMenu(null) }}>{t('side.ctxNewFolder')}</button>
           {menu.node && <div className="menu-sep" />}
-          {menu.node && <button onClick={() => { setRename({ path: menu.node.path, value: menu.node.name }); setMenu(null) }}>Rename</button>}
-          {menu.node && <button onClick={() => { window.api.showInFolder(menu.node.path); setMenu(null) }}>Reveal in Explorer</button>}
-          {menu.node && <button className="danger" onClick={() => { doDelete(menu.node); setMenu(null) }}>Delete</button>}
+          {menu.node && <button onClick={() => { setRename({ path: menu.node.path, value: menu.node.name }); setMenu(null) }}>{t('side.rename')}</button>}
+          {menu.node && <button onClick={() => { window.api.showInFolder(menu.node.path); setMenu(null) }}>{t('side.reveal')}</button>}
+          {menu.node && <button className="danger" onClick={() => { doDelete(menu.node); setMenu(null) }}>{t('side.delete')}</button>}
         </div>
       )}
     </div>

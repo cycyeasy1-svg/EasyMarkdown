@@ -121,6 +121,52 @@ body.dark {
 }
 
 /* =====================================================
+   Morandi palettes — muted, low-saturation color schemes.
+   Each carries a light/dark base class; these only override the palette vars.
+   ===================================================== */
+body.theme-morandi {
+  --bg: #e7e8e2; --bg-elevated: #f3f4ef; --bg-sidebar: #dfe1d9; --bg-editor: #f6f7f2; --bg-activity: #d4d6cc;
+  --text: #3a3d35; --text-strong: #23261f; --muted: #6c6f63; --faint: #97998d;
+  --border: #c5c8bc; --border-soft: #d9dbd0; --hover: #d7dace; --active: #cbcec1; --hover-elevated: #ecede6;
+  --accent: #7d8a6a; --accent-strong: #5f6b4e; --accent-soft: rgba(125, 138, 106, 0.16); --accent-glow: rgba(125, 138, 106, 0.3);
+  --code-bg: #eceee6; --code-border: #d9dbd0; --danger: #b3645f; --success: #6f8a66;
+}
+body.theme-morandi-rose {
+  --bg: #ece5e2; --bg-elevated: #f6f1ef; --bg-sidebar: #e5ddd9; --bg-editor: #f8f4f2; --bg-activity: #dacfca;
+  --text: #423a37; --text-strong: #271f1c; --muted: #70645f; --faint: #9c918b;
+  --border: #ccc1bc; --border-soft: #ddd4cf; --hover: #ded3ce; --active: #d1c5bf; --hover-elevated: #efe8e5;
+  --accent: #a8807b; --accent-strong: #855e59; --accent-soft: rgba(168, 128, 123, 0.18); --accent-glow: rgba(168, 128, 123, 0.32);
+  --code-bg: #efe8e5; --code-border: #ddd4cf; --danger: #b85c57; --success: #7d8a6a;
+}
+body.theme-morandi-blue {
+  --bg: #e4e7ea; --bg-elevated: #f1f3f5; --bg-sidebar: #dce0e4; --bg-editor: #f5f7f8; --bg-activity: #d0d5da;
+  --text: #383d42; --text-strong: #1f242a; --muted: #656d74; --faint: #939ba2;
+  --border: #c2c8ce; --border-soft: #d6dade; --hover: #d4d9de; --active: #c7cdd3; --hover-elevated: #eaedf0;
+  --accent: #7e94a6; --accent-strong: #5d7385; --accent-soft: rgba(126, 148, 166, 0.18); --accent-glow: rgba(126, 148, 166, 0.3);
+  --code-bg: #e9edf0; --code-border: #d6dade; --danger: #b3645f; --success: #6f8a87;
+}
+body.theme-morandi-dark {
+  --bg: #21242b; --bg-elevated: #282c34; --bg-sidebar: #23262d; --bg-editor: #262a31; --bg-activity: #1b1e24;
+  --text: #c3c7cd; --text-strong: #e7eaef; --muted: #878c95; --faint: #5f636b;
+  --border: #3a3f49; --border-soft: #313640; --hover: #323843; --active: #3d4450; --hover-elevated: #2e333c;
+  --accent: #92a3b8; --accent-strong: #aebfd2; --accent-soft: rgba(146, 163, 184, 0.18); --accent-glow: rgba(146, 163, 184, 0.32);
+  --code-bg: #2b2f37; --code-border: #3a3f49; --danger: #cf7a76; --success: #8aa888;
+}
+
+/* Theme/language switcher bits */
+.theme-swatch {
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  display: inline-block;
+  flex: 0 0 auto;
+  border: 1px solid rgba(0, 0, 0, 0.18);
+}
+.theme-menu .block-menu-item {
+  gap: 9px;
+}
+
+/* =====================================================
    Base Styles
    ===================================================== */
 body {

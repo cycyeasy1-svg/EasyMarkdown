@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Icon } from './icons.jsx'
+import { useI18n } from '../i18n.jsx'
 
 function score(query, text) {
   if (!query) return 1
@@ -15,6 +16,7 @@ function score(query, text) {
 }
 
 export default function CommandPalette({ open, onClose, commands, files, onOpenFile }) {
+  const { t } = useI18n()
   const [query, setQuery] = useState('')
   const [sel, setSel] = useState(0)
   const inputRef = useRef(null)
@@ -65,7 +67,7 @@ export default function CommandPalette({ open, onClose, commands, files, onOpenF
           <input
             ref={inputRef}
             value={query}
-            placeholder="Search files and commands…"
+            placeholder={t('palette.placeholder')}
             onChange={(e) => {
               setQuery(e.target.value)
               setSel(0)
@@ -87,7 +89,7 @@ export default function CommandPalette({ open, onClose, commands, files, onOpenF
           />
         </div>
         <div className="palette-list">
-          {items.length === 0 && <div className="palette-empty">No matches</div>}
+          {items.length === 0 && <div className="palette-empty">{t('palette.empty')}</div>}
           {items.map((it, i) => (
             <div
               key={it.id}

@@ -6,6 +6,11 @@ import Outline from './components/Outline.jsx'
 import StatusBar from './components/StatusBar.jsx'
 import CommandPalette from './components/CommandPalette.jsx'
 import { Icon } from './components/icons.jsx'
+import { THEMES, DEFAULT_THEME, applyTheme } from './themes.js'
+import { I18nProvider, translate, DEFAULT_LANG } from './i18n.jsx'
+import { welcomeDoc } from './onboarding.js'
+
+const ONBOARDED_KEY = 'horsemd.onboarded.v1'
 
 const baseName = (p) => (p ? p.split(/[\\/]/).pop() : 'Untitled')
 let idCounter = 0
@@ -27,7 +32,8 @@ export default function App() {
   const [workspace, setWorkspace] = useState(session.workspace || null)
   const [sidebarOpen, setSidebarOpen] = useState(session.sidebarOpen ?? true)
   const [sidebarMode, setSidebarMode] = useState(session.sidebarMode || 'files') // 'files' or 'outline'
-  const [theme, setTheme] = useState(session.theme || 'light')
+  const [theme, setTheme] = useState(session.theme || DEFAULT_THEME)
+  const [lang, setLang] = useState(session.lang || DEFAULT_LANG)
   const [sourceMode, setSourceMode] = useState(false)
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [refreshNonce, setRefreshNonce] = useState(0)
@@ -47,11 +53,18 @@ export default function App() {
   const tabsRef = useRef(tabs)
   tabsRef.current = tabs
 
-  // ----------------------------- theme -----------------------------
+  // ----------------------------- theme / i18n -----------------------------
   useEffect(() => {
-    document.body.classList.toggle('dark', theme === 'dark')
-    document.body.classList.toggle('light', theme !== 'dark')
+    applyTheme(theme)
   }, [theme])
+
+  const t = useCallback((key, vars) => translate(lang, key, vars), [lang])
+  const cycleTheme = useCallback(() => {
+    setTheme((cur) => {
+      const i = THEMES.findIndex((x) => x.id === cur)
+      return THEMES[(i + 1) % THEMES.length].id
+    })
+  }, [])
 
   // --------------------------- open files --------------------------
   const openPaths = useCallback(async (paths) => {
@@ -100,10 +113,10 @@ export default function App() {
     const id = genId()
     setTabs((prev) => [
       ...prev,
-      { id, path: null, title: 'Untitled', content: '', savedContent: '', mtimeMs: null, reloadNonce: 0 }
+      { id, path: null, title: t('tab.untitled'), content: '', savedContent: '', mtimeMs: null, reloadNonce: 0 }
     ])
     setActiveId(id)
-  }, [])
+  }, [t])
 
   const updateContent = useCallback((id, md, isInitial) => {
     setTabs((prev) =>
@@ -270,7 +283,7 @@ export default function App() {
       setSidebarOpen(true)
     },
     toggleSource: () => setSourceMode((v) => !v),
-    toggleTheme: () => setTheme((t) => (t === 'dark' ? 'light' : 'dark')),
+    toggleTheme: cycleTheme,
     find: () => {
       setFind((f) => ({ ...f, open: true }))
       setTimeout(() => findInputRef.current?.focus(), 0)
@@ -326,30 +339,47 @@ export default function App() {
     const data = {
       workspace,
       theme,
+      lang,
       sidebarOpen,
       sidebarMode,
       openPaths: tabs.map((t) => t.path).filter(Boolean),
       activePath
     }
     localStorage.setItem(LS, JSON.stringify(data))
-  }, [workspace, theme, sidebarOpen, sidebarMode, tabs, activePath])
+  }, [workspace, theme, lang, sidebarOpen, sidebarMode, tabs, activePath])
+
+  // ------------------------- first-run onboarding ------------------
+  useEffect(() => {
+    if (localStorage.getItem(ONBOARDED_KEY)) return
+    localStorage.setItem(ONBOARDED_KEY, '1')
+    // Only greet on a genuinely fresh start (no restored session).
+    if ((session.openPaths || []).filter(Boolean).length) return
+    const doc = welcomeDoc(session.lang || DEFAULT_LANG)
+    const id = genId()
+    setTabs((prev) => [
+      ...prev,
+      { id, path: null, title: doc.title, content: doc.content, savedContent: doc.content, mtimeMs: null, reloadNonce: 0 }
+    ])
+    setActiveId(id)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   // --------------------------- commands ----------------------------
   const commands = useMemo(
     () => [
-      { id: 'cmd.new', title: 'New File', icon: 'file-plus', run: () => handlers.current.new() },
-      { id: 'cmd.open', title: 'Open File…', icon: 'file', run: () => handlers.current.open() },
-      { id: 'cmd.openFolder', title: 'Open Folder…', icon: 'folder', run: () => handlers.current.openFolder() },
-      { id: 'cmd.save', title: 'Save', icon: 'save', run: () => handlers.current.save() },
-      { id: 'cmd.saveAs', title: 'Save As…', icon: 'save', run: () => handlers.current.saveAs() },
-      { id: 'cmd.sidebar', title: 'Toggle Sidebar', icon: 'sidebar', run: () => handlers.current.toggleSidebar() },
-      { id: 'cmd.files', title: 'Show File Explorer', icon: 'folder', run: () => handlers.current.toggleFiles() },
-      { id: 'cmd.outline', title: 'Show Outline', icon: 'outline', run: () => handlers.current.toggleOutline() },
-      { id: 'cmd.source', title: 'Toggle Source Mode', icon: 'code', run: () => handlers.current.toggleSource() },
-      { id: 'cmd.theme', title: 'Toggle Theme', icon: 'moon', run: () => handlers.current.toggleTheme() },
-      { id: 'cmd.find', title: 'Find in File', icon: 'search', run: () => handlers.current.find() }
+      { id: 'cmd.new', title: t('cmd.new'), icon: 'file-plus', run: () => handlers.current.new() },
+      { id: 'cmd.open', title: t('cmd.open'), icon: 'file', run: () => handlers.current.open() },
+      { id: 'cmd.openFolder', title: t('cmd.openFolder'), icon: 'folder', run: () => handlers.current.openFolder() },
+      { id: 'cmd.save', title: t('cmd.save'), icon: 'save', run: () => handlers.current.save() },
+      { id: 'cmd.saveAs', title: t('cmd.saveAs'), icon: 'save', run: () => handlers.current.saveAs() },
+      { id: 'cmd.sidebar', title: t('cmd.sidebar'), icon: 'sidebar', run: () => handlers.current.toggleSidebar() },
+      { id: 'cmd.files', title: t('cmd.files'), icon: 'folder', run: () => handlers.current.toggleFiles() },
+      { id: 'cmd.outline', title: t('cmd.outline'), icon: 'outline', run: () => handlers.current.toggleOutline() },
+      { id: 'cmd.source', title: t('cmd.source'), icon: 'code', run: () => handlers.current.toggleSource() },
+      { id: 'cmd.theme', title: t('cmd.theme'), icon: 'moon', run: () => handlers.current.toggleTheme() },
+      { id: 'cmd.find', title: t('cmd.find'), icon: 'search', run: () => handlers.current.find() }
     ],
-    []
+    [t]
   )
 
   const runFind = (backwards = false) => {
@@ -361,18 +391,19 @@ export default function App() {
   const winClass = window.api.platform === 'win32' ? ' is-win' : ''
 
   return (
+    <I18nProvider lang={lang} setLang={setLang}>
     <div className={`app${winClass}`}>
       <div className="activity-bar">
         <button
           className={`activity-item${sidebarMode === 'files' ? ' active' : ''}`}
-          title="Explorer"
+          title={t('cmd.files')}
           onClick={() => handlers.current.toggleFiles()}
         >
           <Icon name="folder" size={20} />
         </button>
         <button
           className={`activity-item${sidebarMode === 'outline' ? ' active' : ''}`}
-          title="Outline"
+          title={t('outline.title')}
           onClick={() => handlers.current.toggleOutline()}
         >
           <Icon name="outline" size={20} />
@@ -416,15 +447,15 @@ export default function App() {
               <input
                 ref={findInputRef}
                 value={find.query}
-                placeholder="Find in document"
+                placeholder={t('find.placeholder')}
                 onChange={(e) => setFind((f) => ({ ...f, query: e.target.value }))}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') runFind(e.shiftKey)
                   if (e.key === 'Escape') setFind({ open: false, query: '' })
                 }}
               />
-              <button onClick={() => runFind(false)}>Next</button>
-              <button onClick={() => runFind(true)}>Prev</button>
+              <button onClick={() => runFind(false)}>{t('find.next')}</button>
+              <button onClick={() => runFind(true)}>{t('find.prev')}</button>
               <button onClick={() => setFind({ open: false, query: '' })}>
                 <Icon name="close" size={14} />
               </button>
@@ -454,7 +485,7 @@ export default function App() {
               </div>
             )
           ) : (
-            <Welcome onNew={newTab} onOpen={() => handlers.current.open()} onOpenFolder={openFolder} />
+            <Welcome t={t} onNew={newTab} onOpen={() => handlers.current.open()} onOpenFolder={openFolder} />
           )}
         </main>
       </div>
@@ -462,7 +493,10 @@ export default function App() {
       <StatusBar
         tab={activeTab}
         theme={theme}
-        onToggleTheme={() => setTheme((t) => (t === 'dark' ? 'light' : 'dark'))}
+        setTheme={setTheme}
+        cycleTheme={cycleTheme}
+        lang={lang}
+        setLang={setLang}
         sourceMode={sourceMode}
         onToggleSource={() => setSourceMode((v) => !v)}
         activeBlock={activeBlock}
@@ -477,24 +511,25 @@ export default function App() {
         onOpenFile={(p) => openPaths([p])}
       />
     </div>
+    </I18nProvider>
   )
 }
 
-function Welcome({ onNew, onOpen, onOpenFolder }) {
+function Welcome({ t, onNew, onOpen, onOpenFolder }) {
   return (
     <div className="welcome">
       <div className="welcome-card">
         <h1>HorseMD</h1>
-        <p>A calmer place to write Markdown — many files, one window.</p>
+        <p>{t('welcome.tagline')}</p>
         <div className="welcome-actions">
           <button className="btn-primary" onClick={onNew}>
-            <Icon name="file-plus" size={16} /> New File
+            <Icon name="file-plus" size={16} /> {t('welcome.newFile')}
           </button>
           <button onClick={onOpen}>
-            <Icon name="file" size={16} /> Open File
+            <Icon name="file" size={16} /> {t('welcome.openFile')}
           </button>
           <button onClick={onOpenFolder}>
-            <Icon name="folder" size={16} /> Open Folder
+            <Icon name="folder" size={16} /> {t('welcome.openFolder')}
           </button>
         </div>
         <div className="welcome-hints">

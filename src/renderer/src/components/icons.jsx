@@ -17,7 +17,8 @@ const paths = {
   code: 'M16 18l6-6-6-6 M8 6l-6 6 6 6',
   save: 'M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z M17 21v-8H7v8 M7 3v5h8',
   command: 'M18 3a3 3 0 0 0-3 3v12a3 3 0 1 0 3-3H6a3 3 0 1 0 3 3V6a3 3 0 1 0-3 3h12a3 3 0 1 0-3-3',
-  heading: 'M6 4v16 M18 4v16 M6 12h12'
+  heading: 'M6 4v16 M18 4v16 M6 12h12',
+  globe: 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18z M3 12h18 M12 3a14 14 0 0 1 0 18 M12 3a14 14 0 0 0 0 18'
 }
 
 export function Icon({ name, size = 16, className = '', strokeWidth = 1.8, style }) {

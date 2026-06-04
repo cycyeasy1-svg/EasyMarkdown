@@ -1,4 +1,5 @@
 import { useMemo } from 'react'
+import { useI18n } from '../i18n.jsx'
 
 export function parseHeadings(md) {
   const lines = (md || '').split('\n')
@@ -25,13 +26,14 @@ export function parseHeadings(md) {
 }
 
 export default function Outline({ content, onJump }) {
+  const { t } = useI18n()
   const headings = useMemo(() => parseHeadings(content), [content])
   return (
     <div className="outline">
-      <div className="panel-head">Outline</div>
+      <div className="panel-head">{t('outline.title')}</div>
       <div className="outline-list">
         {headings.length === 0 ? (
-          <div className="outline-empty">No headings</div>
+          <div className="outline-empty">{t('outline.empty')}</div>
         ) : (
           headings.map((h, i) => (
             <div

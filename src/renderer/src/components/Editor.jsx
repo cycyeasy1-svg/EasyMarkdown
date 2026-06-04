@@ -6,6 +6,7 @@ import '@milkdown/crepe/theme/common/style.css'
 import '@milkdown/crepe/theme/frame.css'
 import '@milkdown/crepe/theme/common/link-tooltip.css'
 import { BLOCK_TYPES, blockById, currentBlockId } from '../blocks.js'
+import { useI18n } from '../i18n.jsx'
 
 /**
  * WYSIWYG editor (Milkdown Crepe) with Typora-style block-level controls.
@@ -19,6 +20,9 @@ import { BLOCK_TYPES, blockById, currentBlockId } from '../blocks.js'
  *   - Plus Crepe's built-in slash menu (`/`) and block handle.
  */
 export default function Editor({ initialContent, docPath, onChange, onReady, onActiveBlock }) {
+  const { t } = useI18n()
+  const tRef = useRef(t)
+  tRef.current = t
   const hostRef = useRef(null)
   const viewRef = useRef(null)
   const apiRef = useRef(null)
@@ -221,10 +225,10 @@ export default function Editor({ initialContent, docPath, onChange, onReady, onA
         // Crepe's toolbar (bold/italic/strike…) has no submenu support, so we
         // append our own "H" item; hovering it reveals H1 / H2 / H3 / ¶.
         const HEAD_DEFS = [
-          ['h1', 'H1', 'Heading 1 (Ctrl+1)'],
-          ['h2', 'H2', 'Heading 2 (Ctrl+2)'],
-          ['h3', 'H3', 'Heading 3 (Ctrl+3)'],
-          ['paragraph', '¶', 'Paragraph (Ctrl+0)']
+          ['h1', 'H1', 'Ctrl+1'],
+          ['h2', 'H2', 'Ctrl+2'],
+          ['h3', 'H3', 'Ctrl+3'],
+          ['paragraph', '¶', 'Ctrl+0']
         ]
         const injectHeadingButton = (toolbar) => {
           if (toolbar.querySelector('.hm-heading-item')) return
@@ -234,7 +238,7 @@ export default function Editor({ initialContent, docPath, onChange, onReady, onA
           const item = document.createElement('div')
           item.className = 'toolbar-item hm-heading-item'
           item.setAttribute('role', 'button')
-          item.title = 'Heading level'
+          item.title = tRef.current('tip.changeBlock')
           item.innerHTML =
             '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 4v16"/><path d="M18 4v16"/><path d="M6 12h12"/></svg>'
 
@@ -246,7 +250,7 @@ export default function Editor({ initialContent, docPath, onChange, onReady, onA
             const b = document.createElement('button')
             b.type = 'button'
             b.textContent = label
-            b.title = tip
+            b.title = `${tRef.current('block.' + id)} (${tip})`
             b.addEventListener('mousedown', (e) => {
               e.preventDefault()
               e.stopPropagation()
@@ -317,11 +321,11 @@ export default function Editor({ initialContent, docPath, onChange, onReady, onA
         <>
           <div className="menu-backdrop" onMouseDown={() => setCtxMenu(null)} onContextMenu={(e) => { e.preventDefault(); setCtxMenu(null) }} />
           <div className="block-ctxmenu" style={{ left: ctxMenu.x, top: ctxMenu.y }}>
-            <div className="block-menu-label">Turn into</div>
+            <div className="block-menu-label">{t('block.turnInto')}</div>
             {BLOCK_TYPES.map((b) => (
               <button key={b.id} className="block-menu-item" onMouseDown={(e) => e.preventDefault()} onClick={() => pickBlock(b.id)}>
                 <span className="block-menu-short">{b.short}</span>
-                <span className="block-menu-name">{b.label}</span>
+                <span className="block-menu-name">{t('block.' + b.id)}</span>
                 <span className="block-menu-sc">{b.shortcut}</span>
               </button>
             ))}
