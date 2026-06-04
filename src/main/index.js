@@ -8,7 +8,8 @@ import chokidar from 'chokidar'
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
 let mainWindow = null
-const watchers = new Map() // path -> watcher
+const watchers = new Map() // folder path -> watcher
+const fileWatchers = new Map() // file path -> { watcher, timer }
 
 // ---- Single instance: route any second launch into the existing window ----
 const gotLock = app.requestSingleInstanceLock()
@@ -248,6 +249,43 @@ ipcMain.handle('watch:stop', async (_e, dir) => {
   if (w) {
     await w.close()
     watchers.delete(dir)
+  }
+  return true
+})
+
+// Watch a single open file for external content changes (e.g. an agent edits
+// the file on disk). Emits `file:changed` with the new mtime so the renderer
+// can reload the tab.
+ipcMain.handle('watch:file', async (_e, path) => {
+  if (fileWatchers.has(path)) return true
+  const w = chokidar.watch(path, {
+    ignoreInitial: true,
+    awaitWriteFinish: { stabilityThreshold: 200, pollInterval: 50 }
+  })
+  const entry = { watcher: w, timer: null }
+  const notify = async () => {
+    clearTimeout(entry.timer)
+    entry.timer = setTimeout(async () => {
+      let mtimeMs = 0
+      try {
+        mtimeMs = (await fs.stat(path)).mtimeMs
+      } catch {
+        /* file may have been removed */
+      }
+      sendToRenderer('file:changed', { path, mtimeMs })
+    }, 80)
+  }
+  w.on('change', notify).on('add', notify)
+  fileWatchers.set(path, entry)
+  return true
+})
+
+ipcMain.handle('watch:unfile', async (_e, path) => {
+  const entry = fileWatchers.get(path)
+  if (entry) {
+    clearTimeout(entry.timer)
+    await entry.watcher.close()
+    fileWatchers.delete(path)
   }
   return true
 })

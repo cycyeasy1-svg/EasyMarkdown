@@ -1,5 +1,6 @@
-import { useMemo } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Icon } from './icons.jsx'
+import { BLOCK_TYPES, labelForBlockId } from '../blocks.js'
 
 function stats(md) {
   const text = (md || '')
@@ -12,7 +13,60 @@ function stats(md) {
   return { words, chars, readMin }
 }
 
-export default function StatusBar({ tab, theme, onToggleTheme, sourceMode, onToggleSource }) {
+function BlockSwitcher({ activeBlock, onPickBlock }) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef(null)
+
+  useEffect(() => {
+    if (!open) return
+    const onDown = (e) => {
+      if (ref.current && !ref.current.contains(e.target)) setOpen(false)
+    }
+    window.addEventListener('mousedown', onDown)
+    return () => window.removeEventListener('mousedown', onDown)
+  }, [open])
+
+  return (
+    <div className="block-switch" ref={ref}>
+      <button
+        className="status-btn"
+        onClick={() => setOpen((v) => !v)}
+        title="Change block type"
+      >
+        <Icon name="heading" size={14} /> {labelForBlockId(activeBlock)}
+        <span className="block-switch-caret">▾</span>
+      </button>
+      {open && (
+        <div className="block-switch-menu">
+          {BLOCK_TYPES.map((b) => (
+            <button
+              key={b.id}
+              className={`block-menu-item${b.id === activeBlock ? ' active' : ''}`}
+              onClick={() => {
+                onPickBlock(b.id)
+                setOpen(false)
+              }}
+            >
+              <span className="block-menu-short">{b.short}</span>
+              <span className="block-menu-name">{b.label}</span>
+              <span className="block-menu-sc">{b.shortcut}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+export default function StatusBar({
+  tab,
+  theme,
+  onToggleTheme,
+  sourceMode,
+  onToggleSource,
+  activeBlock,
+  onPickBlock
+}) {
   const s = useMemo(() => stats(tab?.content), [tab?.content])
   const dirty = tab && tab.content !== tab.savedContent
   return (
@@ -36,6 +90,9 @@ export default function StatusBar({ tab, theme, onToggleTheme, sourceMode, onTog
             <span>{s.chars} chars</span>
             <span>{s.readMin} min read</span>
           </>
+        )}
+        {tab && !sourceMode && (
+          <BlockSwitcher activeBlock={activeBlock} onPickBlock={onPickBlock} />
         )}
         <button className="status-btn" onClick={onToggleSource} title="Toggle source mode (Ctrl+/)">
           <Icon name="code" size={14} /> {sourceMode ? 'Source' : 'Rich'}

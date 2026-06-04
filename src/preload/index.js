@@ -20,6 +20,8 @@ const api = {
   // watch
   watchStart: (dir) => ipcRenderer.invoke('watch:start', dir),
   watchStop: (dir) => ipcRenderer.invoke('watch:stop', dir),
+  watchFile: (path) => ipcRenderer.invoke('watch:file', path),
+  unwatchFile: (path) => ipcRenderer.invoke('watch:unfile', path),
 
   // shell
   openExternal: (url) => ipcRenderer.invoke('shell:openExternal', url),
@@ -40,6 +42,11 @@ const api = {
     const fn = (_e, dir) => cb(dir)
     ipcRenderer.on('watch:changed', fn)
     return () => ipcRenderer.removeListener('watch:changed', fn)
+  },
+  onFileChanged: (cb) => {
+    const fn = (_e, payload) => cb(payload)
+    ipcRenderer.on('file:changed', fn)
+    return () => ipcRenderer.removeListener('file:changed', fn)
   },
 
   platform: process.platform

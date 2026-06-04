@@ -589,15 +589,171 @@ input, textarea { font-family: inherit; }
 .editor-scroll {
   flex: 1;
   overflow-y: auto;
-  scroll-behavior: smooth;
+  /* No smooth scroll on the edit surface: it turns every implicit
+     scroll-into-view (on click/select) into a visible upward slide.
+     Outline/find jumps pass `behavior: 'smooth'` explicitly when wanted. */
+  overflow-anchor: none;
 }
 .editor-host {
   max-width: 800px;
   margin: 0 auto;
-  padding: 40px 60px 60vh;
+  padding: 16px 60px 60vh;
 }
 .milkdown { background: transparent !important; }
 .milkdown .ProseMirror { padding: 0 !important; }
+
+/* =====================================================
+   Block-type controls (selection bar / context menu / status switcher)
+   ===================================================== */
+
+/* Heading button injected into Crepe's selection toolbar (bold/italic/strike).
+   Hover the "H" item to reveal a H1 / H2 / H3 / ¶ submenu. */
+.milkdown .milkdown-toolbar {
+  /* Crepe clips the toolbar (overflow:hidden); allow our submenu to escape. */
+  overflow: visible !important;
+}
+.milkdown .milkdown-toolbar .hm-heading-divider {
+  height: 24px;
+}
+.milkdown .milkdown-toolbar .toolbar-item.hm-heading-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 800;
+}
+.hm-heading-pop {
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  padding-top: 8px; /* transparent bridge so hover doesn't drop between gap */
+  display: none;
+  z-index: 20;
+}
+.hm-heading-item:hover .hm-heading-pop,
+.hm-heading-pop:hover {
+  display: block;
+}
+.hm-heading-pop-inner {
+  display: flex;
+  gap: 2px;
+  padding: 4px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+  animation: fadeIn 0.1s var(--ease-out);
+}
+.hm-heading-pop-inner button {
+  min-width: 32px;
+  height: 28px;
+  padding: 0 8px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+.hm-heading-pop-inner button:hover {
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+}
+
+/* Right-click context menu + status-bar dropdown share the item styling */
+.menu-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 190;
+}
+.block-ctxmenu {
+  position: fixed;
+  z-index: 200;
+  min-width: 184px;
+  padding: 6px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  animation: fadeIn 0.1s var(--ease-out);
+}
+.block-menu-label {
+  padding: 4px 8px 6px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+.block-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 6px 8px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+.block-menu-item:hover {
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+}
+.block-menu-item.active {
+  color: var(--accent);
+  font-weight: 600;
+}
+.block-menu-short {
+  flex: 0 0 22px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--faint);
+  text-align: center;
+}
+.block-menu-item:hover .block-menu-short,
+.block-menu-item.active .block-menu-short {
+  color: inherit;
+}
+.block-menu-name {
+  flex: 1;
+}
+.block-menu-sc {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--faint);
+}
+
+/* Status-bar block switcher */
+.block-switch {
+  position: relative;
+  display: inline-flex;
+}
+.block-switch-caret {
+  margin-left: 2px;
+  font-size: 9px;
+  opacity: 0.7;
+}
+.block-switch-menu {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  right: 0;
+  z-index: 200;
+  min-width: 184px;
+  padding: 6px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  animation: fadeIn 0.1s var(--ease-out);
+}
 
 .source-editor {
   flex: 1;
@@ -937,8 +1093,27 @@ body.dark .milkdown {
   font-size: 16px;
   line-height: 1.8;
   user-select: text;
+  /* High-contrast caret so the cursor is easy to find while writing */
+  caret-color: var(--accent);
 }
 .milkdown .ProseMirror:focus { outline: none; }
+
+/* Keep the caret visible everywhere, including inside table cells where the
+   default thin caret tends to disappear against the cell background. */
+.milkdown .ProseMirror,
+.milkdown .ProseMirror p,
+.milkdown .ProseMirror h1,
+.milkdown .ProseMirror h2,
+.milkdown .ProseMirror h3,
+.milkdown .ProseMirror h4,
+.milkdown .ProseMirror h5,
+.milkdown .ProseMirror h6,
+.milkdown .ProseMirror li,
+.milkdown .ProseMirror blockquote,
+.milkdown .ProseMirror th,
+.milkdown .ProseMirror td {
+  caret-color: var(--accent);
+}
 
 /* Headings — Typora-inspired hierarchy */
 .milkdown .ProseMirror h1,
@@ -980,10 +1155,8 @@ body.dark .milkdown {
   text-transform: uppercase;
   letter-spacing: 0.05em;
 }
-/* First heading has less top margin */
-.milkdown .ProseMirror > h1:first-child,
-.milkdown .ProseMirror > h2:first-child,
-.milkdown .ProseMirror > h3:first-child {
+/* First block sits flush with the top — no leading whitespace */
+.milkdown .ProseMirror > *:first-child {
   margin-top: 0;
 }
 

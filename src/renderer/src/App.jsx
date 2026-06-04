@@ -36,9 +36,16 @@ export default function App() {
 
   const editorHostRef = useRef(null)
   const findInputRef = useRef(null)
+  const editorApiRef = useRef(null)
+  const [activeBlock, setActiveBlock] = useState('paragraph')
 
   const activeTab = useMemo(() => tabs.find((t) => t.id === activeId) || null, [tabs, activeId])
   const activePath = activeTab?.path || null
+
+  // Always-current snapshot of tabs for use inside async callbacks / event
+  // handlers that must not capture a stale `tabs` closure.
+  const tabsRef = useRef(tabs)
+  tabsRef.current = tabs
 
   // ----------------------------- theme -----------------------------
   useEffect(() => {
@@ -50,33 +57,38 @@ export default function App() {
   const openPaths = useCallback(async (paths) => {
     if (!paths || !paths.length) return
     let lastId = null
+    const seen = new Set()
     for (const path of paths) {
       const norm = path.replace(/\\/g, '/')
-      let existing = null
-      setTabs((prev) => {
-        existing = prev.find((t) => (t.path || '').replace(/\\/g, '/') === norm)
-        return prev
-      })
+      if (seen.has(norm)) continue // dedupe within this call
+      seen.add(norm)
+      // Synchronous check against the live tab list (no setState race).
+      const existing = tabsRef.current.find((t) => (t.path || '').replace(/\\/g, '/') === norm)
       if (existing) {
         lastId = existing.id
         continue
       }
       try {
         const { content, mtimeMs } = await window.api.readFile(path)
+        // Re-check after the await in case a concurrent open added this path.
+        const concurrent = tabsRef.current.find((t) => (t.path || '').replace(/\\/g, '/') === norm)
+        if (concurrent) {
+          lastId = concurrent.id
+          continue
+        }
         const id = genId()
         lastId = id
-        setTabs((prev) => [
-          ...prev,
-          {
-            id,
-            path,
-            title: baseName(path),
-            content,
-            savedContent: content,
-            mtimeMs,
-            reloadNonce: 0
-          }
-        ])
+        const newTab = {
+          id,
+          path,
+          title: baseName(path),
+          content,
+          savedContent: content,
+          mtimeMs,
+          reloadNonce: 0
+        }
+        tabsRef.current = [...tabsRef.current, newTab] // keep snapshot current for the next iteration
+        setTabs((prev) => [...prev, newTab])
       } catch (e) {
         window.alert('Could not open file: ' + e.message)
       }
@@ -180,6 +192,55 @@ export default function App() {
     })
     return off
   }, [workspace])
+
+  // --------- auto-reload open files edited by external programs ----------
+  const watchedRef = useRef(new Set())
+
+  // Keep a per-file watcher in sync with the set of open file paths.
+  useEffect(() => {
+    const want = new Set(tabs.map((t) => t.path).filter(Boolean))
+    for (const p of want) if (!watchedRef.current.has(p)) window.api.watchFile(p)
+    for (const p of watchedRef.current) if (!want.has(p)) window.api.unwatchFile(p)
+    watchedRef.current = want
+  }, [tabs])
+
+  const reloadTabFromDisk = useCallback(async (id, path) => {
+    try {
+      const { content, mtimeMs } = await window.api.readFile(path)
+      setTabs((prev) =>
+        prev.map((t) => {
+          if (t.id !== id) return t
+          // Bail if the user has started editing since the change fired —
+          // never clobber unsaved work.
+          if (t.content !== t.savedContent) return t
+          if (t.content === content) return { ...t, mtimeMs }
+          return {
+            ...t,
+            content,
+            savedContent: content,
+            mtimeMs,
+            reloadNonce: t.reloadNonce + 1
+          }
+        })
+      )
+    } catch {
+      /* file vanished mid-reload; leave the tab as-is */
+    }
+  }, [])
+
+  useEffect(() => {
+    const off = window.api.onFileChanged(({ path, mtimeMs }) => {
+      const norm = (path || '').replace(/\\/g, '/')
+      const tab = tabsRef.current.find((t) => (t.path || '').replace(/\\/g, '/') === norm)
+      if (!tab) return
+      // Ignore the echo from our own save (same or older mtime).
+      if (tab.mtimeMs && mtimeMs && mtimeMs <= tab.mtimeMs) return
+      // Don't overwrite unsaved local edits.
+      if (tab.content !== tab.savedContent) return
+      reloadTabFromDisk(tab.id, tab.path)
+    })
+    return off
+  }, [reloadTabFromDisk])
 
   // --------------------------- outline jump ------------------------
   const jumpToHeading = useCallback((index) => {
@@ -383,8 +444,12 @@ export default function App() {
                 <Editor
                   key={`${activeTab.id}:${activeTab.reloadNonce}`}
                   initialContent={activeTab.content}
+                  docPath={activeTab.path}
                   onChange={(md, isInitial) => updateContent(activeTab.id, md, isInitial)}
-                  onReady={() => {}}
+                  onReady={(api) => {
+                    editorApiRef.current = api
+                  }}
+                  onActiveBlock={setActiveBlock}
                 />
               </div>
             )
@@ -400,6 +465,8 @@ export default function App() {
         onToggleTheme={() => setTheme((t) => (t === 'dark' ? 'light' : 'dark'))}
         sourceMode={sourceMode}
         onToggleSource={() => setSourceMode((v) => !v)}
+        activeBlock={activeBlock}
+        onPickBlock={(id) => editorApiRef.current?.setBlock(id)}
       />
 
       <CommandPalette
@@ -417,7 +484,7 @@ function Welcome({ onNew, onOpen, onOpenFolder }) {
   return (
     <div className="welcome">
       <div className="welcome-card">
-        <h1>horse</h1>
+        <h1>HorseMD</h1>
         <p>A calmer place to write Markdown — many files, one window.</p>
         <div className="welcome-actions">
           <button className="btn-primary" onClick={onNew}>
