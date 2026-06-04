@@ -335,6 +335,22 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKey)
   }, [activeId])
 
+  // Ctrl/Cmd+B toggles the sidebar. Handled here in the CAPTURE phase so it
+  // fires before the editor's "bold" keybinding (which would otherwise eat it
+  // and made the shortcut feel unreliable). No menu accelerator, so it can't
+  // double-fire either.
+  useEffect(() => {
+    const onKey = (e) => {
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.code === 'KeyB') {
+        e.preventDefault()
+        e.stopPropagation()
+        handlers.current.toggleSidebar()
+      }
+    }
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
+  }, [])
+
   useEffect(() => {
     const paths = (session.openPaths || []).filter(Boolean)
     if (paths.length) openPaths(paths).then(() => {

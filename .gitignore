@@ -6,3 +6,7 @@ dist/
 
 # local test fixtures (generated)
 test-articles/
+
+# scratch/preview images and design references
+build/_*.png
+*参考*.html

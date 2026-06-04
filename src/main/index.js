@@ -334,7 +334,9 @@ function buildMenu() {
       label: 'View',
       submenu: [
         { label: 'Command Palette', accelerator: 'CmdOrCtrl+P', click: menuCmd('palette') },
-        { label: 'Toggle Sidebar', accelerator: 'CmdOrCtrl+B', click: menuCmd('toggleSidebar') },
+        // Sidebar toggle is handled in the renderer (capture phase) so it wins
+        // over the editor's Ctrl/Cmd+B "bold" binding instead of conflicting.
+        { label: 'Toggle Sidebar', click: menuCmd('toggleSidebar') },
         { label: 'Toggle Outline', accelerator: 'CmdOrCtrl+Shift+L', click: menuCmd('toggleOutline') },
         { label: 'Toggle Source Mode', accelerator: 'CmdOrCtrl+/', click: menuCmd('toggleSource') },
         { type: 'separator' },
