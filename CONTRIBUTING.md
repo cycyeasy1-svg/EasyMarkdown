@@ -5,8 +5,8 @@ Thanks for taking the time to contribute! 🎉
 ## Development setup
 
 ```bash
-git clone https://github.com/BND-1/horse.git
-cd horse
+git clone https://github.com/BND-1/horseMD.git
+cd horseMD
 npm install        # if Electron's binary download is blocked (e.g. in China):
                    #   ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/ npm install
 npm run dev        # hot-reload dev mode

@@ -1,7 +1,7 @@
 # horse
 
-[![CI](https://github.com/BND-1/horse/actions/workflows/ci.yml/badge.svg)](https://github.com/BND-1/horse/actions/workflows/ci.yml)
-[![Release](https://img.shields.io/github/v/release/BND-1/horse?include_prereleases)](https://github.com/BND-1/horse/releases)
+[![CI](https://github.com/BND-1/horseMD/actions/workflows/ci.yml/badge.svg)](https://github.com/BND-1/horseMD/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/BND-1/horseMD?include_prereleases)](https://github.com/BND-1/horseMD/releases)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
 
 A beautiful, modern **Markdown editor** — a Typora alternative built around one idea Typora gets wrong: **every file opens as a tab in the same window**, not a new app instance. Browse a whole folder in the sidebar, flip between files in tabs, and write in a clean WYSIWYG editor.
@@ -61,7 +61,7 @@ A beautiful, modern **Markdown editor** — a Typora alternative built around on
 
 ## Install
 
-Download the latest installer from [**Releases**](https://github.com/BND-1/horse/releases):
+Download the latest installer from [**Releases**](https://github.com/BND-1/horseMD/releases):
 
 - **Windows**: `HorseMD Setup x.x.x.exe` — builds are currently **unsigned**, so
   SmartScreen may warn on first run. Click **More info → Run anyway**.

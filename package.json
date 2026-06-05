@@ -6,11 +6,11 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/BND-1/horse.git"
+    "url": "https://github.com/BND-1/horseMD.git"
   },
-  "homepage": "https://github.com/BND-1/horse#readme",
+  "homepage": "https://github.com/BND-1/horseMD#readme",
   "bugs": {
-    "url": "https://github.com/BND-1/horse/issues"
+    "url": "https://github.com/BND-1/horseMD/issues"
   },
   "main": "out/main/index.js",
   "type": "module",
@@ -44,7 +44,7 @@
       {
         "provider": "github",
         "owner": "BND-1",
-        "repo": "horse"
+        "repo": "horseMD"
       }
     ],
     "mac": {

@@ -20,5 +20,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Dark/light themes, session restore, single-instance file association.
 - Windows NSIS installer and macOS dmg/zip packaging.
 
-[Unreleased]: https://github.com/BND-1/horse/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/BND-1/horse/releases/tag/v0.1.0
+[Unreleased]: https://github.com/BND-1/horseMD/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/BND-1/horseMD/releases/tag/v0.1.0
