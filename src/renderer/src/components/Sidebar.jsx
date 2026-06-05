@@ -152,20 +152,21 @@ export default function Sidebar({ workspace, activePath, onOpenFile, refreshNonc
 
   // Render the inline creation input
   const renderCreatingInput = (depth) => (
-    <div className="tree-row" style={{ paddingLeft: 8 + depth * 14 }}>
+    <div className="tree-row creating-row" style={{ paddingLeft: 8 + depth * 14 }}>
       <span className="tree-chevron" />
       <Icon name={creating.type === 'file' ? 'file' : 'folder'} size={15} className="tree-icon" />
       <input
         ref={createInputRef}
         className="tree-rename"
+        autoFocus
         value={creating.value}
         onClick={(e) => e.stopPropagation()}
         onChange={(e) => setCreating({ ...creating, value: e.target.value })}
         onKeyDown={(e) => {
-          if (e.key === 'Enter') commitCreate()
+          e.stopPropagation()
+          if (e.key === 'Enter') { e.preventDefault(); commitCreate() }
           if (e.key === 'Escape') setCreating(null)
         }}
-        onBlur={commitCreate}
       />
     </div>
   )
