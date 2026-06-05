@@ -114,4 +114,4 @@ Electron + Vite + React 外壳，编辑器引擎用 **Milkdown Crepe**（基于 
 
 ## 许可证
 
-[MIT](./LICENSE) © 杨庭毅 (BND-1)
+[MIT](./LICENSE) © 杨庭毅 ([yangsir.net](https://yangsir.net))

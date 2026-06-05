@@ -119,4 +119,4 @@ security problem? Please report it privately via [SECURITY.md](./SECURITY.md).
 
 ## License
 
-[MIT](./LICENSE) © 杨庭毅 (BND-1)
+[MIT](./LICENSE) © 杨庭毅 ([yangsir.net](https://yangsir.net))
