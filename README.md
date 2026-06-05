@@ -1,5 +1,9 @@
 # horse
 
+[![CI](https://github.com/BND-1/horse/actions/workflows/ci.yml/badge.svg)](https://github.com/BND-1/horse/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/BND-1/horse?include_prereleases)](https://github.com/BND-1/horse/releases)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
+
 A beautiful, modern **Markdown editor** — a Typora alternative built around one idea Typora gets wrong: **every file opens as a tab in the same window**, not a new app instance. Browse a whole folder in the sidebar, flip between files in tabs, and write in a clean WYSIWYG editor.
 
 > 一个更好看、交互更舒服的 Typora 替代品。打开新的 `.md` 文件时不会再新开一个窗口 —— 它会作为标签页在同一个编辑器里打开，方便你查找、阅读和编辑多个 Markdown 文件。
@@ -55,6 +59,23 @@ A beautiful, modern **Markdown editor** — a Typora alternative built around on
 | Toggle theme       | `Ctrl+Shift+T`                |
 | Cycle tabs         | `Ctrl+Tab` / `Ctrl+Shift+Tab` |
 
+## Install
+
+Download the latest installer from [**Releases**](https://github.com/BND-1/horse/releases):
+
+- **Windows**: `HorseMD Setup x.x.x.exe` — builds are currently **unsigned**, so
+  SmartScreen may warn on first run. Click **More info → Run anyway**.
+- **macOS**: `HorseMD-x.x.x.dmg` — builds are **unsigned and not notarized** yet,
+  so Gatekeeper may report the app as damaged. After dragging it to
+  Applications, run once in Terminal:
+
+  ```bash
+  xattr -cr /Applications/HorseMD.app
+  ```
+
+  then open it normally. (Proper signing/notarization is planned — see
+  [CHANGELOG](./CHANGELOG.md).)
+
 ## Develop
 
 ```bash
@@ -82,3 +103,12 @@ Electron + Vite + React shell, with **Milkdown Crepe** as the editor engine. The
 - [docs/features.md](./docs/features.md) — 每个功能的用法与实现
 - [docs/implementation-notes.md](./docs/implementation-notes.md) — 关键 bug 的根因与修法、设计决策
 - [docs/development.md](./docs/development.md) — 开发、构建、Windows/macOS 打包、CDP 自动化测试
+
+## Contributing
+
+Issues and PRs are welcome — see [CONTRIBUTING.md](./CONTRIBUTING.md).
+Found a security problem? Please report it privately via [SECURITY.md](./SECURITY.md).
+
+## License
+
+[MIT](./LICENSE) © 杨庭毅 (BND-1)

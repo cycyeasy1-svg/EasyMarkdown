@@ -66,6 +66,12 @@ function createWindow() {
         : false,
     webPreferences: {
       preload: join(__dirname, '../preload/index.mjs'),
+      // Security: keep the renderer isolated from Node. These are Electron's
+      // defaults, but we set them explicitly so the posture is obvious and
+      // robust against future default changes. sandbox stays off because the
+      // preload is an ES module (the sandbox requires a CommonJS preload).
+      contextIsolation: true,
+      nodeIntegration: false,
       sandbox: false,
       spellcheck: true
     }
@@ -80,6 +86,16 @@ function createWindow() {
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     if (url.startsWith('http')) shell.openExternal(url)
     return { action: 'deny' }
+  })
+
+  // Security: never let the window navigate away from our own app content
+  // (e.g. a malicious link in a Markdown file). Open external URLs in the
+  // user's browser instead.
+  mainWindow.webContents.on('will-navigate', (event, url) => {
+    const devUrl = process.env.ELECTRON_RENDERER_URL
+    if (devUrl && url.startsWith(devUrl)) return
+    event.preventDefault()
+    if (url.startsWith('http')) shell.openExternal(url)
   })
 
   if (process.env.ELECTRON_RENDERER_URL) {

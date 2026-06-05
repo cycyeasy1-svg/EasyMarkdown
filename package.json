@@ -4,6 +4,14 @@
   "description": "A beautiful Typora-style Markdown editor with tabs and a file-tree workspace",
   "author": "mini_md",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/BND-1/horse.git"
+  },
+  "homepage": "https://github.com/BND-1/horse#readme",
+  "bugs": {
+    "url": "https://github.com/BND-1/horse/issues"
+  },
   "main": "out/main/index.js",
   "type": "module",
   "scripts": {
@@ -32,6 +40,13 @@
     "productName": "HorseMD",
     "files": ["out/**/*"],
     "icon": "build/icon.ico",
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "BND-1",
+        "repo": "horse"
+      }
+    ],
     "mac": {
       "target": ["dmg", "zip"],
       "icon": "build/icon.icns",
