@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Icon } from './icons.jsx'
 import { useI18n } from '../i18n.jsx'
 
@@ -14,7 +14,6 @@ export default function Sidebar({ workspace, activePath, onOpenFile, refreshNonc
   const [rename, setRename] = useState(null) // { path, value }
   // Inline creation: { dir, type: 'file'|'folder', value }
   const [creating, setCreating] = useState(null)
-  const createInputRef = useRef(null)
 
   const loadDir = useCallback(async (dir) => {
     const nodes = await window.api.readDir(dir)
@@ -30,24 +29,6 @@ export default function Sidebar({ workspace, activePath, onOpenFile, refreshNonc
     setCreating(null)
     loadDir(workspace.rootPath)
   }, [workspace, loadDir])
-
-  // Focus the inline input and select the name (without extension) when creating
-  useEffect(() => {
-    if (creating) {
-      setTimeout(() => {
-        const input = createInputRef.current
-        if (!input) return
-        input.focus()
-        // Select just the filename part before the extension
-        const dotIndex = creating.value.lastIndexOf('.')
-        if (dotIndex > 0) {
-          input.setSelectionRange(0, dotIndex)
-        } else {
-          input.select()
-        }
-      }, 30)
-    }
-  }, [creating])
 
   // Refresh all currently-loaded dirs when the watcher fires
   useEffect(() => {
@@ -167,10 +148,17 @@ export default function Sidebar({ workspace, activePath, onOpenFile, refreshNonc
       <span className="tree-chevron" />
       <Icon name={creating.type === 'file' ? 'file' : 'folder'} size={15} className="tree-icon" />
       <input
-        ref={createInputRef}
         className="tree-rename"
         autoFocus
         value={creating.value}
+        onFocus={(e) => {
+          // Preselect the name without its extension — once, on mount. (Doing
+          // this in an effect keyed on `creating` reselected on every keystroke,
+          // so each new character overwrote the last.)
+          const dot = creating.value.lastIndexOf('.')
+          if (dot > 0) e.target.setSelectionRange(0, dot)
+          else e.target.select()
+        }}
         onClick={(e) => e.stopPropagation()}
         onChange={(e) => setCreating({ ...creating, value: e.target.value })}
         onKeyDown={(e) => {
