@@ -190,25 +190,53 @@ button {
 }
 input, textarea { font-family: inherit; }
 
+/* Focus-visible rings for keyboard navigation */
+button:focus-visible,
+.tree-row:focus-visible,
+.tab:focus-visible,
+.outline-item:focus-visible,
+.palette-item:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+  border-radius: 3px;
+}
+
 ::selection {
   background: var(--accent-soft);
   color: var(--text-strong);
 }
 
-/* Scrollbars — sleek & functional */
+/* Scrollbars — auto-hide, show on hover */
 *::-webkit-scrollbar { width: 10px; height: 10px; }
 *::-webkit-scrollbar-track { background: transparent; }
 *::-webkit-scrollbar-thumb {
-  background: color-mix(in srgb, var(--muted) 30%, transparent);
+  background: transparent;
   border-radius: 5px;
   border: 2px solid transparent;
   background-clip: padding-box;
-  transition: background 0.2s var(--ease-out);
+  transition: background 0.3s var(--ease-out);
 }
-*::-webkit-scrollbar-thumb:hover {
+*:hover::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--muted) 30%, transparent);
+  background-clip: padding-box;
+}
+*:hover::-webkit-scrollbar-thumb:hover {
   background: color-mix(in srgb, var(--muted) 50%, transparent);
   background-clip: padding-box;
 }
+
+/* ===== :active pressed states ===== */
+.tab:active { background: var(--active); transform: scale(0.97); }
+.activity-item:active { background: var(--active); transform: scale(0.93); }
+.icon-btn:active { background: var(--active); transform: scale(0.92); }
+.tree-row:active { background: var(--active); opacity: 0.85; }
+.outline-item:active { background: var(--active); opacity: 0.85; }
+.palette-item:active { background: var(--active); transform: scale(0.98); }
+.status-btn:active { background: var(--active); }
+.recent-item:active { background: var(--active); opacity: 0.85; }
+.sidebar-head-actions button:active { background: var(--active); transform: scale(0.9); }
+.context-menu button:active { background: var(--active); opacity: 0.85; }
+.findbar button:active { background: var(--active); opacity: 0.8; }
 
 /* =====================================================
    Layout — VSCode Style
@@ -333,13 +361,25 @@ input, textarea { font-family: inherit; }
 
 .pane-left {
   width: 260px;
-  min-width: 200px;
+  min-width: 0;
   max-width: 400px;
   background: var(--bg-sidebar);
   border-right: 1px solid var(--border-soft);
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  transition: width 0.25s var(--ease-out),
+              min-width 0.25s var(--ease-out),
+              max-width 0.25s var(--ease-out),
+              opacity 0.2s var(--ease-out);
+}
+.pane-left.collapsed {
+  width: 0;
+  max-width: 0;
+  opacity: 0;
+  pointer-events: none;
+  border-right: none;
+}
 }
 .pane-center {
   flex: 1;
@@ -423,8 +463,11 @@ input, textarea { font-family: inherit; }
   border-radius: 4px;
   color: var(--faint);
   flex-shrink: 0;
-  transition: all 0.15s var(--ease-out);
+  opacity: 0;
+  transition: opacity 0.15s var(--ease-out), background 0.15s var(--ease-out), color 0.15s var(--ease-out);
 }
+.tab:hover .tab-close { opacity: 1; }
+.tab-close.dirty { opacity: 1; }
 .tab-close:hover {
   background: var(--active);
   color: var(--text);
@@ -528,6 +571,7 @@ input, textarea { font-family: inherit; }
   color: var(--faint);
   transition: transform 0.2s var(--ease-spring);
 }
+.tree-chevron.chevron-expanded { transform: rotate(90deg); }
 .tree-icon {
   flex-shrink: 0;
   color: var(--muted);
@@ -740,7 +784,7 @@ input, textarea { font-family: inherit; }
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-lg);
-  animation: fadeIn 0.1s var(--ease-out);
+  animation: menuFadeIn 0.12s var(--ease-out);
 }
 .block-menu-label {
   padding: 4px 8px 6px;
@@ -867,6 +911,10 @@ input, textarea { font-family: inherit; }
   color: var(--muted);
   padding: 4px 8px;
   border-radius: var(--radius-sm);
+  min-width: 28px;
+  min-height: 28px;
+  display: grid;
+  place-items: center;
 }
 .findbar button:hover {
   background: var(--hover);

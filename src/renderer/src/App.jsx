@@ -460,9 +460,9 @@ export default function App() {
       </div>
 
       <div className="body">
-        {sidebarOpen && (
-          <aside className="pane-left">
-            {sidebarMode === 'files' ? (
+        <aside className={`pane-left${sidebarOpen ? '' : ' collapsed'}`}>
+          {sidebarOpen && (
+            sidebarMode === 'files' ? (
               <Sidebar
                 workspace={workspace}
                 activePath={activePath}
@@ -471,9 +471,9 @@ export default function App() {
               />
             ) : (
               <Outline content={activeTab?.content || ''} onJump={jumpToHeading} />
-            )}
-          </aside>
-        )}
+            )
+          )}
+        </aside>
 
         <main className="pane-center">
           {find.open && (

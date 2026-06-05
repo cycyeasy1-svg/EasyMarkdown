@@ -342,7 +342,10 @@ export default function Editor({ initialContent, docPath, onChange, onReady, onA
       {ctxMenu && (
         <>
           <div className="menu-backdrop" onMouseDown={() => setCtxMenu(null)} onContextMenu={(e) => { e.preventDefault(); setCtxMenu(null) }} />
-          <div className="block-ctxmenu" style={{ left: ctxMenu.x, top: ctxMenu.y }}>
+          <div className="block-ctxmenu" style={{
+            left: Math.min(ctxMenu.x, window.innerWidth - 210),
+            top: Math.min(ctxMenu.y, window.innerHeight - 320)
+          }}>
             <div className="block-menu-label">{t('block.turnInto')}</div>
             {BLOCK_TYPES.map((b) => (
               <button key={b.id} className="block-menu-item" onMouseDown={(e) => e.preventDefault()} onClick={() => pickBlock(b.id)}>

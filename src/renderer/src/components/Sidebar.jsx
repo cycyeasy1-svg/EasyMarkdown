@@ -189,7 +189,7 @@ export default function Sidebar({ workspace, activePath, onOpenFile, refreshNonc
           title={node.path}
         >
           {isDir ? (
-            <Icon name={isOpen ? 'chevron-down' : 'chevron-right'} size={14} className="tree-chevron" />
+            <Icon name="chevron-right" size={14} className={`tree-chevron${isOpen ? ' chevron-expanded' : ''}`} />
           ) : (
             <span className="tree-chevron" />
           )}
@@ -247,7 +247,10 @@ export default function Sidebar({ workspace, activePath, onOpenFile, refreshNonc
       </div>
 
       {menu && (
-        <div className="context-menu" style={{ left: menu.x, top: menu.y }} onClick={(e) => e.stopPropagation()}>
+        <div className="context-menu" style={{
+          left: Math.min(menu.x, window.innerWidth - 210),
+          top: Math.min(menu.y, window.innerHeight - 260)
+        }} onClick={(e) => e.stopPropagation()}>
           <button onClick={() => { startNewFile(menu.node?.type === 'dir' ? menu.node : null); setMenu(null) }}>{t('side.ctxNewFile')}</button>
           <button onClick={() => { startNewFolder(menu.node?.type === 'dir' ? menu.node : null); setMenu(null) }}>{t('side.ctxNewFolder')}</button>
           {menu.node && <div className="menu-sep" />}
