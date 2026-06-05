@@ -1,5 +1,12 @@
 import { contextBridge, ipcRenderer } from 'electron'
 
+// Subscribe to a main→renderer channel; returns an unsubscribe function.
+const on = (channel) => (cb) => {
+  const fn = (_e, payload) => cb(payload)
+  ipcRenderer.on(channel, fn)
+  return () => ipcRenderer.removeListener(channel, fn)
+}
+
 const api = {
   // dialogs
   openFiles: () => ipcRenderer.invoke('dialog:openFiles'),
@@ -28,26 +35,10 @@ const api = {
   showInFolder: (path) => ipcRenderer.invoke('shell:showInFolder', path),
 
   // events from main
-  onOpenPaths: (cb) => {
-    const fn = (_e, paths) => cb(paths)
-    ipcRenderer.on('open-paths', fn)
-    return () => ipcRenderer.removeListener('open-paths', fn)
-  },
-  onMenu: (cb) => {
-    const fn = (_e, cmd) => cb(cmd)
-    ipcRenderer.on('menu', fn)
-    return () => ipcRenderer.removeListener('menu', fn)
-  },
-  onWatchChanged: (cb) => {
-    const fn = (_e, dir) => cb(dir)
-    ipcRenderer.on('watch:changed', fn)
-    return () => ipcRenderer.removeListener('watch:changed', fn)
-  },
-  onFileChanged: (cb) => {
-    const fn = (_e, payload) => cb(payload)
-    ipcRenderer.on('file:changed', fn)
-    return () => ipcRenderer.removeListener('file:changed', fn)
-  },
+  onOpenPaths: on('open-paths'),
+  onMenu: on('menu'),
+  onWatchChanged: on('watch:changed'),
+  onFileChanged: on('file:changed'),
 
   platform: process.platform
 }

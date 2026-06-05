@@ -7,6 +7,11 @@ import chokidar from 'chokidar'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
+// Supported Markdown file types — single source for the open-dialog filter and
+// the extension test used while scanning folders / launch args.
+const MD_EXTS = ['md', 'markdown', 'mdx', 'txt']
+const MD_RE = new RegExp(`\\.(${MD_EXTS.join('|')})$`, 'i')
+
 let mainWindow = null
 const watchers = new Map() // folder path -> watcher
 const fileWatchers = new Map() // file path -> { watcher, timer }
@@ -26,7 +31,7 @@ if (!gotLock) {
 function extractMarkdownArgs(argv) {
   return argv
     .slice(1)
-    .filter((a) => !a.startsWith('-') && /\.(md|markdown|mdx|txt)$/i.test(a) && existsSync(a))
+    .filter((a) => !a.startsWith('-') && MD_RE.test(a) && existsSync(a))
 }
 
 function focusMainWindow() {
@@ -117,7 +122,7 @@ ipcMain.handle('dialog:openFiles', async () => {
   const res = await dialog.showOpenDialog(mainWindow, {
     properties: ['openFile', 'multiSelections'],
     filters: [
-      { name: 'Markdown', extensions: ['md', 'markdown', 'mdx', 'txt'] },
+      { name: 'Markdown', extensions: MD_EXTS },
       { name: 'All Files', extensions: ['*'] }
     ]
   })
@@ -185,7 +190,7 @@ async function readTree(dir, depth = 0) {
     const full = join(dir, e.name)
     if (e.isDirectory()) {
       nodes.push({ name: e.name, path: full, type: 'dir', children: null })
-    } else if (/\.(md|markdown|mdx|txt)$/i.test(e.name)) {
+    } else if (MD_RE.test(e.name)) {
       nodes.push({ name: e.name, path: full, type: 'file' })
     }
   }
@@ -212,7 +217,7 @@ async function listFilesFlat(root, dir, acc, depth) {
     if (e.isDirectory()) {
       if (IGNORED_DIRS.has(e.name)) continue
       await listFilesFlat(root, full, acc, depth + 1)
-    } else if (/\.(md|markdown|mdx|txt)$/i.test(e.name)) {
+    } else if (MD_RE.test(e.name)) {
       acc.push({ name: e.name, path: full, rel: full.slice(root.length + 1).replace(/\\/g, '/') })
     }
   }

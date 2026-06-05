@@ -420,12 +420,11 @@ export default function App() {
     window.find(find.query, false, backwards, true, false, true, false)
   }
 
-  const winClass =
-    window.api.platform === 'win32' ? ' is-win' : window.api.platform === 'darwin' ? ' is-mac' : ''
+  const platformClass = { win32: ' is-win', darwin: ' is-mac' }[window.api.platform] || ''
 
   return (
     <I18nProvider lang={lang} setLang={setLang}>
-    <div className={`app${winClass}`}>
+    <div className={`app${platformClass}`}>
       <div className="activity-bar">
         <button
           className={`activity-item${sidebarMode === 'files' ? ' active' : ''}`}
