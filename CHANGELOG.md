@@ -6,6 +6,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-06-07
+
 ### Fixed
 - Open files now reliably auto-refresh when changed by another program: the
   single-file watcher polls (surviving "atomic replace" saves used by many
@@ -60,7 +62,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Dark/light themes, session restore, single-instance file association.
 - Windows NSIS installer and macOS dmg/zip packaging.
 
-[Unreleased]: https://github.com/BND-1/horseMD/compare/v0.1.2...HEAD
+[Unreleased]: https://github.com/BND-1/horseMD/compare/v0.1.3...HEAD
+[0.1.3]: https://github.com/BND-1/horseMD/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/BND-1/horseMD/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/BND-1/horseMD/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/BND-1/horseMD/releases/tag/v0.1.0
