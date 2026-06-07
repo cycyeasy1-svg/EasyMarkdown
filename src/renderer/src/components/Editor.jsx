@@ -336,7 +336,16 @@ export default function Editor({ initialContent, docPath, onChange, onReady, onA
             pre.appendChild(code)
             cm.replaceWith(pre)
           })
-          inlineRichStyles(clone)
+          // Strip editor-only attributes but keep semantic tags + src/href/alt,
+          // so the print stylesheet (in the main process) fully controls the look.
+          clone.querySelectorAll('*').forEach((el) => {
+            el.removeAttribute('class')
+            el.removeAttribute('style')
+            el.removeAttribute('contenteditable')
+            ;[...el.attributes].forEach((a) => {
+              if (a.name.startsWith('data-') || a.name.startsWith('aria-')) el.removeAttribute(a.name)
+            })
+          })
           return clone.innerHTML
         }
         apiRef.current = { setBlock, getDocHTML }

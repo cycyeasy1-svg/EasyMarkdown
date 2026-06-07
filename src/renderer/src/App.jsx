@@ -50,16 +50,30 @@ export default function App() {
 
   const editorHostRef = useRef(null)
   const findInputRef = useRef(null)
-  const editorApiRef = useRef(null)
+  // Registry of each tab's editor API (by tab id). All markdown tabs stay
+  // mounted, so a single ref would get stuck on whichever editor mounted last;
+  // keying by tab id lets commands act on the *currently active* document.
+  const editorApis = useRef({})
   const [activeBlock, setActiveBlock] = useState('paragraph')
 
   const activeTab = useMemo(() => tabs.find((t) => t.id === activeId) || null, [tabs, activeId])
   const activePath = activeTab?.path || null
+  // Always-current activeId for callbacks that fire after a tab switch.
+  const activeIdRef = useRef(activeId)
+  activeIdRef.current = activeId
 
   // Always-current snapshot of tabs for use inside async callbacks / event
   // handlers that must not capture a stale `tabs` closure.
   const tabsRef = useRef(tabs)
   tabsRef.current = tabs
+
+  // Drop editor APIs for tabs that have closed.
+  useEffect(() => {
+    const live = new Set(tabs.map((t) => t.id))
+    for (const id of Object.keys(editorApis.current)) {
+      if (!live.has(id)) delete editorApis.current[id]
+    }
+  }, [tabs])
 
   // ----------------------------- theme / i18n -----------------------------
   useEffect(() => {
@@ -307,7 +321,7 @@ export default function App() {
     save: () => activeId && saveTab(activeId),
     saveAs: () => activeId && saveTab(activeId, true),
     exportPdf: async () => {
-      const html = editorApiRef.current?.getDocHTML?.()
+      const html = editorApis.current[activeId]?.getDocHTML?.()
       if (!html) {
         window.alert(tRef.current('error.exportPdfUnavailable'))
         return
@@ -560,10 +574,10 @@ export default function App() {
                     docPath={tab.path}
                     onChange={(md, isInitial) => updateContent(tab.id, md, isInitial)}
                     onReady={(api) => {
-                      if (isActive) editorApiRef.current = api
+                      editorApis.current[tab.id] = api
                     }}
                     onActiveBlock={(id) => {
-                      if (isActive) setActiveBlock(id)
+                      if (tab.id === activeIdRef.current) setActiveBlock(id)
                     }}
                   />
                 </div>
@@ -593,7 +607,7 @@ export default function App() {
         sourceMode={sourceMode}
         onToggleSource={() => setSourceMode((v) => !v)}
         activeBlock={activeBlock}
-        onPickBlock={(id) => editorApiRef.current?.setBlock(id)}
+        onPickBlock={(id) => editorApis.current[activeId]?.setBlock(id)}
       />
 
       <CommandPalette
