@@ -101,7 +101,9 @@ function PageWidthControl({ pageWidth, onSetPageWidth }) {
   }
 
   return (
-    <div className="block-switch" ref={ref}>
+    // hm-pagewidth lets mobile hide this control via CSS — page width is forced
+    // full on phones, so the preset/slider is meaningless there.
+    <div className="block-switch hm-pagewidth" ref={ref}>
       <button className="status-btn" onClick={() => setOpen((v) => !v)} title={t('settings.pageWidth')}>
         <Icon name="width" size={14} /> {isFull ? t('settings.width.full') : pageWidth + 'px'}
       </button>

@@ -2740,3 +2740,8 @@ body.dark .milkdown {
   max-width: 0;
   box-shadow: none;
 }
+
+/* Hide controls that don't apply on a phone: the page-width preset (the editor
+   is always full width here) and the desktop keyboard-shortcut hints. */
+.app.is-mobile .hm-pagewidth { display: none; }
+.app.is-mobile .welcome-hints { display: none; }
