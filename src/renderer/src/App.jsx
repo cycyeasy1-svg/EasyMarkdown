@@ -29,10 +29,15 @@ const UPDATE_DISMISS_KEY = 'horsemd.update.dismissed'
 
 export default function App() {
   const session = useRef(loadSession()).current
+  // Mobile (Capacitor) builds run the same renderer; a few affordances differ
+  // (drawer sidebar, no split/image-host buttons). Desktop is unaffected.
+  const isMobile = window.api.platform === 'ios' || window.api.platform === 'android'
   const [tabs, setTabs] = useState([])
   const [activeId, setActiveId] = useState(null)
   const [workspace, setWorkspace] = useState(sanitizeWorkspace(session.workspace))
-  const [sidebarOpen, setSidebarOpen] = useState(session.sidebarOpen ?? true)
+  // On phones the sidebar overlays the editor, so it starts closed to keep the
+  // writing surface front-and-center (desktop keeps its previous default).
+  const [sidebarOpen, setSidebarOpen] = useState(session.sidebarOpen ?? !isMobile)
   const [sidebarMode, setSidebarMode] = useState(session.sidebarMode || 'files') // 'files' or 'outline'
   const [theme, setTheme] = useState(session.theme || DEFAULT_THEME)
   // Active custom CSS theme (filename in userData/themes), or null. Overlays the
@@ -1045,7 +1050,10 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeId])
 
-  const platformClass = { win32: ' is-win', darwin: ' is-mac' }[window.api.platform] || ''
+  const platformClass =
+    ({ win32: ' is-win', darwin: ' is-mac', ios: ' is-ios is-mobile', android: ' is-android is-mobile' }[
+      window.api.platform
+    ] || '')
 
   return (
     <I18nProvider lang={lang} setLang={setLang}>
@@ -1110,18 +1118,22 @@ export default function App() {
         <button className="icon-btn drag-no" title={`${t('welcome.newFile')} (Ctrl+N)`} onClick={newTab}>
           <Icon name="plus" size={18} />
         </button>
-        <button
-          className={`icon-btn drag-no${split ? ' active' : ''}`}
-          title={split ? t('split.close') : t('split.toggle')}
-          onClick={toggleSplit}
-        >
-          <Icon name="columns" size={16} />
-        </button>
-        <ImageHostButton
-          t={t}
-          command={settings.imageUploadCommand}
-          onChange={(cmd) => updateSettings({ imageUploadCommand: cmd })}
-        />
+        {!isMobile && (
+          <button
+            className={`icon-btn drag-no${split ? ' active' : ''}`}
+            title={split ? t('split.close') : t('split.toggle')}
+            onClick={toggleSplit}
+          >
+            <Icon name="columns" size={16} />
+          </button>
+        )}
+        {!isMobile && (
+          <ImageHostButton
+            t={t}
+            command={settings.imageUploadCommand}
+            onChange={(cmd) => updateSettings({ imageUploadCommand: cmd })}
+          />
+        )}
         <button className="icon-btn drag-no" title="Command palette (Ctrl+P)" onClick={() => setPaletteOpen(true)}>
           <Icon name="command" size={16} />
         </button>

@@ -4,6 +4,19 @@ dist/
 *.log
 .DS_Store
 
+# mobile (Capacitor) build output + native build artifacts
+dist-mobile/
+ios/App/Pods/
+ios/App/App/public/
+ios/App/build/
+ios/DerivedData/
+android/.gradle/
+android/app/build/
+android/build/
+android/local.properties
+android/app/src/main/assets/public/
+.capacitor/
+
 # local test fixtures (generated)
 test-articles/
 

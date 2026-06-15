@@ -2682,3 +2682,61 @@ body.dark .milkdown {
   text-decoration: line-through;
   color: var(--muted);
 }
+
+/* =====================================================
+   Mobile (Capacitor: iOS / Android)
+   Every rule here is scoped under .app.is-mobile, so the desktop layout is
+   completely untouched. Goals: fit a phone screen (full-width editor, no 800px
+   page cap), respect the notch / home indicator (safe-area insets), turn the
+   sidebar into an overlay drawer instead of squashing the editor, and give
+   touch-sized hit targets.
+   ===================================================== */
+
+/* Push the whole app inside the safe area (notch, home indicator, landscape
+   ears). box-sizing:border-box (global) keeps the grid at height:100%. */
+.app.is-mobile {
+  padding-top: env(safe-area-inset-top);
+  padding-bottom: env(safe-area-inset-bottom);
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
+}
+
+/* Touch-friendly hit targets in the bars. */
+.app.is-mobile .activity-item { width: 46px; height: 46px; }
+.app.is-mobile .icon-btn { width: 40px; height: 40px; }
+
+/* Editor fills the screen — ignore the desktop 800px page-width preset and the
+   wide horizontal gutters. !important overrides the inline --editor-max-width
+   and the hm-full-width body class alike. */
+.app.is-mobile .editor-host,
+.app.is-mobile .editor-skeleton {
+  max-width: none !important;
+  padding-left: 18px !important;
+  padding-right: 18px !important;
+}
+.app.is-mobile .editor-skeleton { padding-top: 18px; }
+.app.is-mobile .source-editor {
+  padding-left: 18px !important;
+  padding-right: 18px !important;
+}
+
+/* Sidebar becomes an overlay drawer that floats above the editor (which stays
+   full-width underneath) instead of a flex sibling that squashes it. The big
+   spread box-shadow doubles as a dimming backdrop with zero extra markup. */
+.app.is-mobile .body { position: relative; }
+.app.is-mobile .pane-left {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: min(80vw, 320px);
+  max-width: min(80vw, 320px);
+  z-index: 30;
+  box-shadow: 0 0 0 100vw rgba(0, 0, 0, 0.3), 2px 0 18px rgba(0, 0, 0, 0.2);
+}
+/* Closed: slide fully out and drop the backdrop. */
+.app.is-mobile .pane-left.collapsed {
+  width: 0;
+  max-width: 0;
+  box-shadow: none;
+}

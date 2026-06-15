@@ -1,0 +1,11 @@
+{
+  "appId": "com.horsemd.app",
+  "appName": "HorseMD",
+  "webDir": "dist-mobile",
+  "ios": {
+    "contentInset": "always"
+  },
+  "android": {
+    "allowMixedContent": false
+  }
+}
