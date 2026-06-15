@@ -264,8 +264,106 @@ function LangSwitch({ lang, setLang }) {
   )
 }
 
+// Mobile: a single "•••" popover that folds together the controls that crowd
+// the bottom bar on a phone — word counts, source toggle, theme, language,
+// GitHub — so the bar itself stays to just the block type + this one button.
+function MobileMore({
+  s,
+  sourceMode,
+  onToggleSource,
+  theme,
+  setTheme,
+  lang,
+  setLang,
+  customThemes = [],
+  customTheme,
+  onPickCustom,
+  onRefreshThemes
+}) {
+  const { t } = useI18n()
+  const { open, setOpen, ref } = usePopover()
+  const toggle = () => {
+    if (!open) onRefreshThemes?.()
+    setOpen((v) => !v)
+  }
+  return (
+    <div className="block-switch" ref={ref}>
+      <button className="status-btn" onClick={toggle} title={t('status.more')}>
+        <Icon name="more" size={16} />
+      </button>
+      {open && (
+        <div className="block-switch-menu hm-status-sheet">
+          <div className="hm-sheet-counts">
+            {t('status.words', { n: s.words })} · {t('status.chars', { n: s.chars })} ·{' '}
+            {t('status.read', { n: s.readMin })}
+          </div>
+          <button
+            className="block-menu-item"
+            onClick={() => {
+              onToggleSource()
+              setOpen(false)
+            }}
+          >
+            <Icon name="code" size={14} />
+            <span className="block-menu-name">
+              {sourceMode ? t('status.source') : t('status.rich')}
+            </span>
+          </button>
+
+          <div className="theme-menu-label">{t('tip.toggleTheme')}</div>
+          <div className="hm-sheet-themes">
+            {THEMES.map((th) => (
+              <button
+                key={th.id}
+                className={`hm-sheet-swatch${!customTheme && th.id === theme ? ' active' : ''}`}
+                style={{ background: th.swatch }}
+                title={lang === 'zh' ? th.zh : th.en}
+                onClick={() => setTheme(th.id)}
+              />
+            ))}
+            {customThemes.map((c) => (
+              <button
+                key={c.file}
+                className={`hm-sheet-swatch hm-sheet-swatch-custom${customTheme === c.file ? ' active' : ''}`}
+                title={c.name}
+                onClick={() => onPickCustom?.(c.file)}
+              />
+            ))}
+          </div>
+
+          <div className="theme-menu-label">{t('tip.language')}</div>
+          <div className="hm-sheet-langs">
+            {LANGS.map((l) => (
+              <button
+                key={l.id}
+                className={`block-menu-item${l.id === lang ? ' active' : ''}`}
+                onClick={() => setLang(l.id)}
+              >
+                <span className="block-menu-name">{l.label}</span>
+              </button>
+            ))}
+          </div>
+
+          <div className="theme-menu-sep" />
+          <button
+            className="block-menu-item theme-menu-action"
+            onClick={() => {
+              window.api.openExternal('https://github.com/BND-1/horseMD')
+              setOpen(false)
+            }}
+          >
+            <Icon name="github" size={13} />
+            <span className="block-menu-name">GitHub</span>
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function StatusBar({
   tab,
+  isMobile,
   theme,
   setTheme,
   lang,
@@ -290,49 +388,75 @@ export default function StatusBar({
     <div className="statusbar">
       <div className="status-left">
         {tab ? (
-          <>
-            <span className="status-path" title={tab.path || t('status.unsaved')}>
-              {tab.path || t('status.unsaved')}
-            </span>
+          isMobile ? (
             <span className={`status-dot ${dirty ? 'mod' : 'ok'}`}>
               {dirty ? '● ' + t('status.modified') : '✓ ' + t('status.saved')}
             </span>
-          </>
+          ) : (
+            <>
+              <span className="status-path" title={tab.path || t('status.unsaved')}>
+                {tab.path || t('status.unsaved')}
+              </span>
+              <span className={`status-dot ${dirty ? 'mod' : 'ok'}`}>
+                {dirty ? '● ' + t('status.modified') : '✓ ' + t('status.saved')}
+              </span>
+            </>
+          )
         ) : (
           <span className="status-path">{t('status.ready')}</span>
         )}
       </div>
       <div className="status-right">
-        {tab && (
+        {tab && !sourceMode && <BlockSwitcher activeBlock={activeBlock} onPickBlock={onPickBlock} />}
+        {isMobile ? (
+          tab && (
+            <MobileMore
+              s={s}
+              sourceMode={sourceMode}
+              onToggleSource={onToggleSource}
+              theme={theme}
+              setTheme={setTheme}
+              lang={lang}
+              setLang={setLang}
+              customThemes={customThemes}
+              customTheme={customTheme}
+              onPickCustom={onPickCustom}
+              onRefreshThemes={onRefreshThemes}
+            />
+          )
+        ) : (
           <>
-            <span>{t('status.words', { n: s.words })}</span>
-            <span>{t('status.chars', { n: s.chars })}</span>
-            <span>{t('status.read', { n: s.readMin })}</span>
+            {tab && (
+              <>
+                <span>{t('status.words', { n: s.words })}</span>
+                <span>{t('status.chars', { n: s.chars })}</span>
+                <span>{t('status.read', { n: s.readMin })}</span>
+              </>
+            )}
+            <button className="status-btn" onClick={onToggleSource} title={t('tip.toggleSource')}>
+              <Icon name="code" size={14} /> {sourceMode ? t('status.source') : t('status.rich')}
+            </button>
+            <PageWidthControl pageWidth={pageWidth} onSetPageWidth={onSetPageWidth} />
+            <ThemePicker
+              theme={theme}
+              setTheme={setTheme}
+              customThemes={customThemes}
+              customTheme={customTheme}
+              onPickCustom={onPickCustom}
+              onRefreshThemes={onRefreshThemes}
+              onOpenThemesFolder={onOpenThemesFolder}
+              onGetMoreThemes={onGetMoreThemes}
+            />
+            <LangSwitch lang={lang} setLang={setLang} />
+            <button
+              className="status-btn"
+              onClick={() => window.api.openExternal('https://github.com/BND-1/horseMD')}
+              title="GitHub — github.com/BND-1/horseMD"
+            >
+              <Icon name="github" size={14} />
+            </button>
           </>
         )}
-        {tab && !sourceMode && <BlockSwitcher activeBlock={activeBlock} onPickBlock={onPickBlock} />}
-        <button className="status-btn" onClick={onToggleSource} title={t('tip.toggleSource')}>
-          <Icon name="code" size={14} /> {sourceMode ? t('status.source') : t('status.rich')}
-        </button>
-        <PageWidthControl pageWidth={pageWidth} onSetPageWidth={onSetPageWidth} />
-        <ThemePicker
-          theme={theme}
-          setTheme={setTheme}
-          customThemes={customThemes}
-          customTheme={customTheme}
-          onPickCustom={onPickCustom}
-          onRefreshThemes={onRefreshThemes}
-          onOpenThemesFolder={onOpenThemesFolder}
-          onGetMoreThemes={onGetMoreThemes}
-        />
-        <LangSwitch lang={lang} setLang={setLang} />
-        <button
-          className="status-btn"
-          onClick={() => window.api.openExternal('https://github.com/BND-1/horseMD')}
-          title="GitHub — github.com/BND-1/horseMD"
-        >
-          <Icon name="github" size={14} />
-        </button>
       </div>
     </div>
   )

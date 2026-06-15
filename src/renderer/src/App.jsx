@@ -1334,6 +1334,7 @@ export default function App() {
 
       <StatusBar
         tab={home ? null : activeTab}
+        isMobile={isMobile}
         theme={theme}
         setTheme={pickBuiltinTheme}
         cycleTheme={cycleTheme}
