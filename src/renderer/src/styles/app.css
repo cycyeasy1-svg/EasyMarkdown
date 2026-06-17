@@ -10,7 +10,13 @@ html, body, #root { height: 100%; margin: 0; }
 /* App-like behavior on touch devices: kill double-tap-to-zoom (which otherwise
    magnifies a blank tap and overflows the layout) and iOS text auto-inflation.
    No effect on desktop (mouse input ignores touch-action). */
-html { touch-action: manipulation; -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+html {
+  touch-action: manipulation;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  /* No gray flash box on tap (we provide our own press feedback). */
+  -webkit-tap-highlight-color: transparent;
+}
 
 :root {
   /* Dimensions */
@@ -2890,6 +2896,41 @@ body.dark .milkdown {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* Tab close ✕: always visible on touch (no hover to reveal it) + bigger target. */
+.app.is-mobile .tab-close {
+  opacity: 1;
+  width: 22px;
+  height: 22px;
+}
+
+/* ------- Touch ergonomics (applies on touch devices; desktop unaffected) -------
+   On touch, :hover sticks after a tap so a button stays highlighted as if still
+   pressed/selected. Neutralize the lingering hover background and give a real
+   press (:active) response instead, so a tap reads as a tap. */
+@media (hover: none) {
+  .icon-btn:hover,
+  .activity-item:hover,
+  .status-btn:hover,
+  .tab:hover,
+  .tab-close:hover,
+  .block-menu-item:hover,
+  .hm-more-btn:hover {
+    background: transparent;
+  }
+  .icon-btn:active,
+  .activity-item:active,
+  .status-btn:active,
+  .block-menu-item:active,
+  .hm-more-btn:active,
+  .tab-menu-item:active {
+    background: var(--hover);
+  }
+  .tab-close:active {
+    background: var(--active);
+    color: var(--text);
+  }
 }
 .app.is-mobile .hm-sheet-save { font-weight: 600; }
 .app.is-mobile .hm-sheet-save-dot {
