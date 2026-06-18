@@ -1388,6 +1388,14 @@ export default function App() {
         tab={home ? null : activeTab}
         isMobile={isMobile}
         onSave={() => handlers.current.save()}
+        onShare={() => {
+          if (!activeTab) return
+          if (!activeTab.path) {
+            fireToast(tRef.current('save.shareNeedsSave'), { sticky: true })
+            return
+          }
+          window.api.shareFile?.(activeTab.path)
+        }}
         theme={theme}
         setTheme={pickBuiltinTheme}
         cycleTheme={cycleTheme}

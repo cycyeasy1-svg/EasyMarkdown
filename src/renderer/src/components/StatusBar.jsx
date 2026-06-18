@@ -270,6 +270,7 @@ function LangSwitch({ lang, setLang }) {
 function MobileMore({
   dirty,
   onSave,
+  onShare,
   sourceMode,
   onToggleSource,
   theme,
@@ -306,6 +307,18 @@ function MobileMore({
             <span className="block-menu-name">{t('status.save')}</span>
             {dirty && <span className="hm-sheet-save-dot" />}
           </button>
+          {window.api.capabilities?.canShare && (
+            <button
+              className="block-menu-item"
+              onClick={() => {
+                onShare?.()
+                setOpen(false)
+              }}
+            >
+              <Icon name="share" size={15} />
+              <span className="block-menu-name">{t('status.share')}</span>
+            </button>
+          )}
           <div className="theme-menu-sep" />
           <button
             className="block-menu-item"
@@ -375,6 +388,7 @@ export default function StatusBar({
   tab,
   isMobile,
   onSave,
+  onShare,
   theme,
   setTheme,
   lang,
@@ -428,6 +442,7 @@ export default function StatusBar({
             <MobileMore
               dirty={dirty}
               onSave={onSave}
+              onShare={onShare}
               sourceMode={sourceMode}
               onToggleSource={onToggleSource}
               theme={theme}

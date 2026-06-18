@@ -15,6 +15,7 @@ import { Filesystem, Directory, Encoding } from '@capacitor/filesystem'
 import { App as CapApp } from '@capacitor/app'
 import { Browser } from '@capacitor/browser'
 import { StatusBar, Style } from '@capacitor/status-bar'
+import { Share } from '@capacitor/share'
 import { FilePicker } from '@capawesome/capacitor-file-picker'
 
 // Where the library lives. iOS Documents is user-visible (Files app) AND writable.
@@ -269,7 +270,8 @@ const capabilities = {
   nativeMenus: false,
   externalShell: true,
   revealInFolder: false, // no Finder/Explorer on mobile
-  splitView: false // not enough width on a phone
+  splitView: false, // not enough width on a phone
+  canShare: true // system share sheet (export a file out)
 }
 
 export function makeCapacitorApi() {
@@ -303,6 +305,17 @@ export function makeCapacitorApi() {
     // shell
     openExternal: (url) => Browser.open({ url }).catch(() => {}),
     showInFolder: async () => false,
+    // Export/share a saved file via the system share sheet ("Save to Files",
+    // Drive, send, …) — the way to get a copy out where the user can find it.
+    shareFile: async (path) => {
+      try {
+        const { uri } = await Filesystem.getUri({ path, directory: DIR })
+        await Share.share({ files: [uri], dialogTitle: 'HorseMD' })
+        return { ok: true }
+      } catch (e) {
+        return { ok: false, error: e?.message || String(e) }
+      }
+    },
 
     // image host (no Node subprocess on mobile)
     uploadImage: async () => ({ ok: false, error: 'unsupported' }),
