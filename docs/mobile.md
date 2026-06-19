@@ -187,3 +187,42 @@ npx cap open ios|android   # 出包 / 真机调试
 4. Archive 完成 → **Distribute App** → **TestFlight & App Store** → 上传。之后在 App Store Connect 里发 TestFlight 测试或提交审核上架。
 
 > iOS 无法像安卓那样发文件随便装;分发只能走 TestFlight / App Store /(Ad Hoc 限指定 UDID)。免费账号仅能装自己设备、7 天过期。
+
+## 11. 桌面 / 移动端协作(加功能时怎么办)
+
+桌面与移动端**共享同一套渲染层**(`App.jsx` / 组件 / 编辑器)。分开的只是**外壳**
+(Electron preload vs Capacitor shim)和**构建链**(electron-vite vs
+`vite.mobile.config.mjs` + Capacitor)。所以加桌面功能时,按类型处理:
+
+| 功能类型 | 移动端表现 | 要做的事 |
+|---|---|---|
+| 纯前端 / 编辑器 / UI(新命令、编辑增强、面板、样式) | **自动也出现在移动端**(同一渲染层) | 一般不用重写;确认触摸下好用/不挤,不适合就用 `isMobile` / `window.api.capabilities` / `.is-mobile` CSS 隐藏(参考分屏/PDF/图床的做法) |
+| 需要**新的原生能力**(调用新的 `window.api.*`) | 桌面 preload 有;移动 shim 没有 → 在手机上是 `undefined` | 在 `src/renderer/src/platform/capacitor-api.js` 里给移动端也实现,或加一个 `capabilities` 开关在移动端门控关掉。用**已有的** `window.api` 方法则两端都行 |
+| 纯桌面 / Electron 专属(原生菜单、窗口控制、OS 集成) | 移动端用不上 | 用 `capabilities` 在移动端隐藏 |
+
+**经验法则**
+- 桌面新功能 = 改渲染层 → 默认移动端也带上;顺手判断"手机要不要/能不能用",不合适就 `isMobile`/`.is-mobile` 藏掉。
+- 涉及**新原生能力**的,记得在 shim 里补一份或门控。
+- 改完**跑一次 `npm run build:mobile`**(必要时装到设备点一下)——桌面 CI 只构建桌面,渲染层改动可能悄悄影响移动端,跑一下确认不崩。
+- 门控用的能力开关定义在 `platform/index.js`(桌面)与 `platform/capacitor-api.js`(移动):
+  `pdfExport / revealInFolder / splitView / imageHostExec / windowControls / nativeMenus / watch / folderWorkspace / canShare`。
+
+## 12. CI / 发布(现状)
+
+- **`.github/workflows/ci.yml`**:push/PR 到 `main` → 只跑桌面 `npm run build` 校验。
+  不打 tag、不打包、**完全不碰安卓**。
+- **`.github/workflows/release.yml`**:**仅当推 `v*` 标签时**触发,只打 **Windows +
+  macOS** 安装包并发到**草稿** Release。**不构建安卓**,CI 里也没有 keystore(密钥被
+  gitignore,未入库)。
+
+→ **合并到 main 不会自动发版**;只有手动推 `vX.Y.Z` 标签才触发桌面打包。
+
+**要随版本发安卓 APK,两条路:**
+1. **手动(简单)**:本地 `npm run dist:android` 出签名包,手动传到那次 GitHub Release
+   的附件(密钥只在本地)。
+2. **CI 自动**:给 `release.yml` 加安卓 job——把 keystore(base64)+ 密码存成
+   GitHub Actions **Secrets**,CI 里解码 + `assembleRelease` + 上传。一次性配置。
+
+**移动端当前状态(截至合并)**:`feature/mobile` 已以合并提交并入 `main`(未发版、未打
+tag)。Android 在真机(华为 Android 10)+ 平板(MatePad Android 12)验证通过;iOS 暂不
+提供下载(未上架),代码在但真机未逐项复验。发版建议升到 **0.3.0**。
