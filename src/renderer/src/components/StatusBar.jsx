@@ -1,10 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Icon } from './icons.jsx'
-import { BLOCK_TYPES, blockById, labelForBlockId } from '../blocks.js'
 import { useI18n } from '../i18n.jsx'
 import { THEMES, themeById } from '../themes.js'
 import { LANGS } from '../i18n.jsx'
-import { PAGE_WIDTH_PRESETS, PAGE_WIDTH_MIN, PAGE_WIDTH_MAX } from '../settings.js'
+import {
+  PAGE_WIDTH_PRESETS,
+  PAGE_WIDTH_MIN,
+  PAGE_WIDTH_MAX,
+  FONT_SIZE_PRESETS,
+  FONT_SIZE_MIN,
+  FONT_SIZE_MAX
+} from '../settings.js'
 
 function stats(md) {
   const text = (md || '')
@@ -13,8 +19,9 @@ function stats(md) {
     .replace(/[#>*_~\-\[\]()!]/g, ' ')
   const words = (text.match(/[\p{L}\p{N}]+/gu) || []).length
   const chars = (md || '').length
+  const charsNoSpace = (md || '').replace(/\s/g, '').length
   const readMin = Math.max(1, Math.round(words / 220))
-  return { words, chars, readMin }
+  return { words, chars, charsNoSpace, readMin }
 }
 
 // Small popover that closes on outside click.
@@ -32,65 +39,17 @@ function usePopover() {
   return { open, setOpen, ref }
 }
 
-function BlockSwitcher({ activeBlock, onPickBlock }) {
+// One small reusable "presets + fine-tune slider" block, used for both font size
+// and editor width inside the combined Layout popover.
+function AdjustGroup({ title, valueLabel, presets, activeIndex, onPick, pct, fromX, onSet }) {
   const { t } = useI18n()
-  const { open, setOpen, ref } = usePopover()
-  const known = blockById(activeBlock)
-  const label = known ? t('block.' + activeBlock) : labelForBlockId(activeBlock)
-  return (
-    <div className="block-switch" ref={ref}>
-      <button className="status-btn" onClick={() => setOpen((v) => !v)} title={t('tip.changeBlock')}>
-        <Icon name="heading" size={14} /> {label}
-        <span className="block-switch-caret">▾</span>
-      </button>
-      {open && (
-        <div className="block-switch-menu">
-          {BLOCK_TYPES.map((b) => (
-            <button
-              key={b.id}
-              className={`block-menu-item${b.id === activeBlock ? ' active' : ''}`}
-              onClick={() => {
-                onPickBlock(b.id)
-                setOpen(false)
-              }}
-            >
-              <span className="block-menu-short">{b.short}</span>
-              <span className="block-menu-name">{t('block.' + b.id)}</span>
-              <span className="block-menu-sc">{b.shortcut}</span>
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  )
-}
-
-// Page-width control: a status-bar button → small popover with a segmented
-// button group (the obvious, clickable presets, with a sliding highlight pill)
-// plus a separate minimal "fine-tune" slider for exact pixels. Two clear roles.
-function PageWidthControl({ pageWidth, onSetPageWidth }) {
-  const { t } = useI18n()
-  const { open, setOpen, ref } = usePopover()
   const trackRef = useRef(null)
   const [dragging, setDragging] = useState(false)
-  const isFull = pageWidth === 'full'
-  // Fine-tune slider fraction (0..1); 'full' pins the thumb to the far right.
-  const pct = isFull ? 1 : (pageWidth - PAGE_WIDTH_MIN) / (PAGE_WIDTH_MAX - PAGE_WIDTH_MIN)
-  const activeIndex = PAGE_WIDTH_PRESETS.findIndex((p) =>
-    p.width === 'full' ? isFull : !isFull && pageWidth === p.width
-  )
-
-  const valueFromX = (clientX) => {
-    const r = trackRef.current.getBoundingClientRect()
-    let p = (clientX - r.left) / r.width
-    p = Math.min(1, Math.max(0, p))
-    return Math.round((PAGE_WIDTH_MIN + p * (PAGE_WIDTH_MAX - PAGE_WIDTH_MIN)) / 10) * 10
-  }
   const startDrag = (e) => {
     e.preventDefault()
     setDragging(true)
-    onSetPageWidth(valueFromX(e.clientX))
-    const onMove = (ev) => onSetPageWidth(valueFromX(ev.clientX))
+    onSet(fromX(trackRef.current, e.clientX))
+    const onMove = (ev) => onSet(fromX(trackRef.current, ev.clientX))
     const onUp = () => {
       setDragging(false)
       window.removeEventListener('pointermove', onMove)
@@ -99,43 +58,121 @@ function PageWidthControl({ pageWidth, onSetPageWidth }) {
     window.addEventListener('pointermove', onMove)
     window.addEventListener('pointerup', onUp)
   }
+  return (
+    <div className="hm-adjust-group">
+      <div className="hm-pop-head">
+        <span className="hm-pop-title">{title}</span>
+        <span className="hm-pop-value">{valueLabel}</span>
+      </div>
+      <div className="hm-seg" style={{ '--seg-count': presets.length, '--seg-index': activeIndex }}>
+        {activeIndex >= 0 && <span className="hm-seg-pill" aria-hidden="true" />}
+        {presets.map((p, i) => (
+          <button
+            key={p.id}
+            className={`hm-seg-item${i === activeIndex ? ' active' : ''}`}
+            onClick={() => onPick(p)}
+          >
+            {p.label}
+          </button>
+        ))}
+      </div>
+      <div className={`hm-fine${dragging ? ' dragging' : ''}`}>
+        <span className="hm-fine-label">{t('settings.fineTune')}</span>
+        <div className="hm-ftrack" ref={trackRef} onPointerDown={startDrag}>
+          <div className="hm-ffill" style={{ width: pct * 100 + '%' }} />
+          <div className="hm-fthumb" style={{ left: pct * 100 + '%' }} />
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// Combined "layout" control: ONE secondary status-bar button → a popover that
+// holds both the font-size and editor-width adjusters. Replaces the two separate
+// status-bar buttons so the bar stays uncluttered. `hm-pagewidth` lets mobile
+// hide it via CSS (mobile sets size in the "more" sheet and forces full width).
+function LayoutControl({ fontSize, onSetFontSize, pageWidth, onSetPageWidth }) {
+  const { t } = useI18n()
+  const { open, setOpen, ref } = usePopover()
+
+  const fontPct = (fontSize - FONT_SIZE_MIN) / (FONT_SIZE_MAX - FONT_SIZE_MIN)
+  const fontIdx = FONT_SIZE_PRESETS.findIndex((p) => p.size === fontSize)
+  const fontFromX = (track, clientX) => {
+    const r = track.getBoundingClientRect()
+    const p = Math.min(1, Math.max(0, (clientX - r.left) / r.width))
+    return Math.round(FONT_SIZE_MIN + p * (FONT_SIZE_MAX - FONT_SIZE_MIN))
+  }
+
+  const isFull = pageWidth === 'full'
+  const widthPct = isFull ? 1 : (pageWidth - PAGE_WIDTH_MIN) / (PAGE_WIDTH_MAX - PAGE_WIDTH_MIN)
+  const widthIdx = PAGE_WIDTH_PRESETS.findIndex((p) =>
+    p.width === 'full' ? isFull : !isFull && pageWidth === p.width
+  )
+  const widthFromX = (track, clientX) => {
+    const r = track.getBoundingClientRect()
+    const p = Math.min(1, Math.max(0, (clientX - r.left) / r.width))
+    return Math.round((PAGE_WIDTH_MIN + p * (PAGE_WIDTH_MAX - PAGE_WIDTH_MIN)) / 10) * 10
+  }
 
   return (
-    // hm-pagewidth lets mobile hide this control via CSS — page width is forced
-    // full on phones, so the preset/slider is meaningless there.
-    <div className="block-switch hm-pagewidth" ref={ref}>
-      <button className="status-btn" onClick={() => setOpen((v) => !v)} title={t('settings.pageWidth')}>
-        <Icon name="width" size={14} /> {isFull ? t('settings.width.full') : pageWidth + 'px'}
+    <div className="block-switch hm-pagewidth hm-layout" ref={ref}>
+      <button className="status-btn" onClick={() => setOpen((v) => !v)} title={t('settings.layout')}>
+        <Icon name="settings" size={14} /> {t('settings.layoutLabel')}
       </button>
       {open && (
-        <div className="hm-pop hm-width-pop">
-          <div className="hm-pop-head">
-            <span className="hm-pop-title">{t('settings.pageWidth')}</span>
-            <span className="hm-pop-value">
-              {isFull ? t('settings.width.full') : pageWidth + ' px'}
-            </span>
-          </div>
-          {/* Preset buttons — segmented control with a sliding highlight pill. */}
-          <div className="hm-seg" style={{ '--seg-count': PAGE_WIDTH_PRESETS.length, '--seg-index': activeIndex }}>
-            {activeIndex >= 0 && <span className="hm-seg-pill" aria-hidden="true" />}
-            {PAGE_WIDTH_PRESETS.map((p, i) => (
-              <button
-                key={p.id}
-                className={`hm-seg-item${i === activeIndex ? ' active' : ''}`}
-                onClick={() => onSetPageWidth(p.width)}
-              >
-                {t('settings.width.' + p.id)}
-              </button>
-            ))}
-          </div>
-          {/* Fine-tune slider for exact pixels. */}
-          <div className={`hm-fine${dragging ? ' dragging' : ''}`}>
-            <span className="hm-fine-label">{t('settings.fineTune')}</span>
-            <div className="hm-ftrack" ref={trackRef} onPointerDown={startDrag}>
-              <div className="hm-ffill" style={{ width: pct * 100 + '%' }} />
-              <div className="hm-fthumb" style={{ left: pct * 100 + '%' }} />
+        <div className="hm-pop hm-width-pop hm-layout-pop">
+          <AdjustGroup
+            title={t('settings.fontSize')}
+            valueLabel={fontSize + ' px'}
+            presets={FONT_SIZE_PRESETS.map((p) => ({ ...p, label: t('settings.font.' + p.id) }))}
+            activeIndex={fontIdx}
+            onPick={(p) => onSetFontSize(p.size)}
+            pct={fontPct}
+            fromX={fontFromX}
+            onSet={onSetFontSize}
+          />
+          <div className="hm-pop-sep" />
+          <AdjustGroup
+            title={t('settings.pageWidth')}
+            valueLabel={isFull ? t('settings.width.full') : pageWidth + ' px'}
+            presets={PAGE_WIDTH_PRESETS.map((p) => ({ ...p, label: t('settings.width.' + p.id) }))}
+            activeIndex={widthIdx}
+            onPick={(p) => onSetPageWidth(p.width)}
+            pct={widthPct}
+            fromX={widthFromX}
+            onSet={onSetPageWidth}
+          />
+        </div>
+      )}
+    </div>
+  )
+}
+
+// Document stats: one status-bar button showing the character count → popover
+// with the full breakdown (words, characters, characters w/o spaces, read time).
+function StatsControl({ stats }) {
+  const { t } = useI18n()
+  const { open, setOpen, ref } = usePopover()
+  const n = (x) => x.toLocaleString()
+  const rows = [
+    [t('status.statWords'), n(stats.words)],
+    [t('status.statChars'), n(stats.chars)],
+    [t('status.statCharsNoSpace'), n(stats.charsNoSpace)],
+    [t('status.statRead'), t('status.readValue', { n: stats.readMin })]
+  ]
+  return (
+    <div className="block-switch hm-stats" ref={ref}>
+      <button className="status-btn" onClick={() => setOpen((v) => !v)} title={t('status.stats')}>
+        <Icon name="stats" size={14} /> {t('status.chars', { n: n(stats.chars) })}
+      </button>
+      {open && (
+        <div className="hm-pop hm-stats-pop">
+          {rows.map(([label, value]) => (
+            <div className="hm-stat-row" key={label}>
+              <span className="hm-stat-label">{label}</span>
+              <span className="hm-stat-value">{value}</span>
             </div>
-          </div>
+          ))}
         </div>
       )}
     </div>
@@ -279,10 +316,14 @@ function MobileMore({
   customThemes = [],
   customTheme,
   onPickCustom,
-  onRefreshThemes
+  onRefreshThemes,
+  fontSize,
+  onSetFontSize
 }) {
   const { t } = useI18n()
   const { open, setOpen, ref } = usePopover()
+  const stepFont = (delta) =>
+    onSetFontSize(Math.min(FONT_SIZE_MAX, Math.max(FONT_SIZE_MIN, fontSize + delta)))
   const toggle = () => {
     if (!open) onRefreshThemes?.()
     setOpen((v) => !v)
@@ -319,6 +360,27 @@ function MobileMore({
               {sourceMode ? t('status.source') : t('status.rich')}
             </span>
           </button>
+
+          <div className="theme-menu-label">{t('settings.fontSize')}</div>
+          <div className="hm-sheet-fontsize">
+            <button
+              className="hm-fontstep"
+              onClick={() => stepFont(-1)}
+              disabled={fontSize <= FONT_SIZE_MIN}
+              aria-label="−"
+            >
+              −
+            </button>
+            <span className="hm-fontstep-value">{fontSize}px</span>
+            <button
+              className="hm-fontstep"
+              onClick={() => stepFont(1)}
+              disabled={fontSize >= FONT_SIZE_MAX}
+              aria-label="+"
+            >
+              +
+            </button>
+          </div>
 
           <div className="theme-menu-label">{t('tip.toggleTheme')}</div>
           <div className="hm-sheet-themes">
@@ -382,10 +444,10 @@ export default function StatusBar({
   setLang,
   sourceMode,
   onToggleSource,
-  activeBlock,
-  onPickBlock,
   pageWidth,
   onSetPageWidth,
+  fontSize,
+  onSetFontSize,
   customThemes,
   customTheme,
   onPickCustom,
@@ -423,7 +485,6 @@ export default function StatusBar({
         )}
       </div>
       <div className="status-right">
-        {!isMobile && tab && !sourceMode && <BlockSwitcher activeBlock={activeBlock} onPickBlock={onPickBlock} />}
         {isMobile ? (
           tab && (
             <>
@@ -446,22 +507,23 @@ export default function StatusBar({
                 customTheme={customTheme}
                 onPickCustom={onPickCustom}
                 onRefreshThemes={onRefreshThemes}
+                fontSize={fontSize}
+                onSetFontSize={onSetFontSize}
               />
             </>
           )
         ) : (
           <>
-            {tab && (
-              <>
-                <span>{t('status.words', { n: s.words })}</span>
-                <span>{t('status.chars', { n: s.chars })}</span>
-                <span>{t('status.read', { n: s.readMin })}</span>
-              </>
-            )}
+            {tab && <StatsControl stats={s} />}
             <button className="status-btn" onClick={onToggleSource} title={t('tip.toggleSource')}>
               <Icon name="code" size={14} /> {sourceMode ? t('status.source') : t('status.rich')}
             </button>
-            <PageWidthControl pageWidth={pageWidth} onSetPageWidth={onSetPageWidth} />
+            <LayoutControl
+              fontSize={fontSize}
+              onSetFontSize={onSetFontSize}
+              pageWidth={pageWidth}
+              onSetPageWidth={onSetPageWidth}
+            />
             <ThemePicker
               theme={theme}
               setTheme={setTheme}

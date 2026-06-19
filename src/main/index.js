@@ -2,7 +2,7 @@ import { app, BrowserWindow, ipcMain, dialog, Menu, shell, net } from 'electron'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { dirname, join, basename, extname, resolve, sep } from 'node:path'
 import fs from 'node:fs/promises'
-import { existsSync, statSync, constants as fsConstants } from 'node:fs'
+import { existsSync, statSync, realpathSync, constants as fsConstants } from 'node:fs'
 import { exec } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import chokidar from 'chokidar'
@@ -642,6 +642,126 @@ ipcMain.handle('image:upload', async (_e, command, name, bytes) => {
     return { ok: false, error: e?.message || String(e) }
   } finally {
     if (dir) fs.rm(dir, { recursive: true, force: true }).catch(() => {})
+  }
+})
+
+// Pick a non-clobbering filename for `name` inside `dir`.
+const uniqueImageFile = (dir, name) => {
+  const safe = (name || 'image.png').replace(/[\\/:*?"<>|]/g, '_') || 'image.png'
+  const ext = extname(safe) || '.png'
+  const stem = basename(safe, ext) || 'image'
+  let file = join(dir, `${stem}${ext}`)
+  let n = 1
+  while (existsSync(file)) file = join(dir, `${stem}-${n++}${ext}`)
+  return file
+}
+
+// The app-global folder where images pasted into an UNSAVED doc are parked (we
+// don't know a document folder yet). Mirrors Typora's global image folder; on
+// the doc's first save they're moved into its ./assets (see image:inlineForSave).
+const pasteImagesDir = () => join(app.getPath('userData'), 'paste-images')
+
+// Save a pasted/dropped image next to the document, in an `assets/` subfolder,
+// and return the relative path to insert into the Markdown (Typora-style). This
+// is the no-image-host path for a SAVED doc; without it, pasted images become
+// in-memory blob: URLs that vanish on reload.
+ipcMain.handle('image:save', async (_e, docPath, name, bytes) => {
+  try {
+    if (!docPath) return { ok: false, error: 'No document path.' }
+    const dir = join(dirname(docPath), 'assets')
+    await fs.mkdir(dir, { recursive: true })
+    const file = uniqueImageFile(dir, name)
+    await fs.writeFile(file, Buffer.from(bytes))
+    // POSIX-relative link so it round-trips in Markdown on every OS.
+    return { ok: true, path: 'assets/' + basename(file) }
+  } catch (e) {
+    return { ok: false, error: e?.message || String(e) }
+  }
+})
+
+// Save an image pasted into an UNSAVED doc to the global paste folder and return
+// a file:// URL — so it shows immediately as a real path (not a base64 blob),
+// like Typora. It's relocated into ./assets when the doc is first saved.
+ipcMain.handle('image:savePaste', async (_e, name, bytes) => {
+  try {
+    const dir = pasteImagesDir()
+    await fs.mkdir(dir, { recursive: true })
+    const file = uniqueImageFile(dir, name)
+    await fs.writeFile(file, Buffer.from(bytes))
+    return { ok: true, url: pathToFileURL(file).href }
+  } catch (e) {
+    return { ok: false, error: e?.message || String(e) }
+  }
+})
+
+// At save time, rewrite a doc's Markdown so no image link is a giant base64 blob
+// or an absolute paste-folder path: base64 data URLs and file:// links in the
+// global paste folder are written/moved into the doc's ./assets and rewritten to
+// short relative paths (the Typora end-state). Other links are left untouched.
+ipcMain.handle('image:inlineForSave', async (_e, content, targetPath) => {
+  try {
+    if (!content || !targetPath) return { content, changed: false }
+    const matches = [...content.matchAll(/(!\[[^\]]*\]\()([^)\s]+)(\))/g)]
+    if (!matches.length) return { content, changed: false }
+    const assetsDir = join(dirname(targetPath), 'assets')
+    // Real path so the startsWith test below survives symlinks (e.g. macOS
+    // /tmp → /private/tmp), since the link's path and userData may differ.
+    let pdir = pasteImagesDir()
+    try {
+      pdir = realpathSync(pdir)
+    } catch {
+      /* folder not created yet — nothing to relocate from it */
+    }
+    let ensured = false
+    const ensure = async () => {
+      if (!ensured) {
+        await fs.mkdir(assetsDir, { recursive: true })
+        ensured = true
+      }
+    }
+    let out = ''
+    let cursor = 0
+    let changed = false
+    for (const m of matches) {
+      const [full, pre, url] = m
+      out += content.slice(cursor, m.index)
+      cursor = m.index + full.length
+      let replacement = full
+      try {
+        const dataM = url.match(/^data:image\/([a-zA-Z0-9.+-]+);base64,(.*)$/i)
+        if (dataM) {
+          await ensure()
+          const ext = dataM[1].toLowerCase() === 'jpeg' ? 'jpg' : dataM[1].toLowerCase().replace(/[^a-z0-9]/g, '') || 'png'
+          const file = uniqueImageFile(assetsDir, `image.${ext}`)
+          await fs.writeFile(file, Buffer.from(dataM[2], 'base64'))
+          replacement = pre + 'assets/' + basename(file) + ')'
+          changed = true
+        } else if (/^file:\/\//i.test(url)) {
+          const fsPath = fileURLToPath(url)
+          let realFsPath = fsPath
+          try {
+            realFsPath = realpathSync(fsPath)
+          } catch {
+            /* missing file — leave the link as-is */
+          }
+          if (realFsPath.startsWith(pdir) && existsSync(fsPath)) {
+            await ensure()
+            const file = uniqueImageFile(assetsDir, basename(fsPath))
+            await fs.copyFile(fsPath, file)
+            fs.rm(fsPath, { force: true }).catch(() => {})
+            replacement = pre + 'assets/' + basename(file) + ')'
+            changed = true
+          }
+        }
+      } catch {
+        /* keep the original link so the image is never lost */
+      }
+      out += replacement
+    }
+    out += content.slice(cursor)
+    return { content: out, changed }
+  } catch {
+    return { content, changed: false }
   }
 })
 

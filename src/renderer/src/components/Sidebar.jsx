@@ -20,6 +20,15 @@ export default function Sidebar({ workspace, activePath, onOpenFile, onOpenRight
   // drop target (for highlighting).
   const dragPathRef = useRef(null)
   const [dragOver, setDragOver] = useState(null)
+  // Live mirror of childrenMap so the "follow active file" effect can check what's
+  // already loaded without re-running every time the map changes.
+  const childrenRef = useRef(childrenMap)
+  childrenRef.current = childrenMap
+  // The DOM row of the currently-open file, used to scroll it into view.
+  const activeRowRef = useRef(null)
+  // Last path we scrolled to — so we reveal a file once when it's opened, not on
+  // every later manual expand/collapse of unrelated folders.
+  const lastScrolledRef = useRef(null)
 
   const loadDir = useCallback(async (dir) => {
     const nodes = await window.api.readDir(dir)
@@ -42,6 +51,56 @@ export default function Sidebar({ workspace, activePath, onOpenFile, onOpenRight
     Object.keys(childrenMap).forEach((dir) => loadDir(dir))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refreshNonce])
+
+  // Issue #11: follow the active file — when a file is opened/switched (via the
+  // tree, search, recents, internal links… all of which update activePath),
+  // auto-expand its ancestor folders so it's revealed in the tree. Only touches
+  // the ancestor chain (additive — never collapses what the user expanded), and
+  // only for files inside this workspace.
+  useEffect(() => {
+    if (!workspace || !activePath) return
+    const norm = (p) => p.replace(/\\/g, '/')
+    const root = norm(workspace.rootPath)
+    if (!norm(activePath).startsWith(root + '/')) return // not in this workspace
+    let cancelled = false
+    ;(async () => {
+      const ancestors = []
+      let d = parentDir(activePath)
+      let guard = 0
+      while (d && guard++ < 50) {
+        ancestors.unshift(d)
+        if (norm(d) === root) break
+        const up = parentDir(d)
+        if (!up || up === d) break
+        d = up
+      }
+      // Load each ancestor (so its children render) — skip ones already loaded.
+      for (const dir of ancestors) {
+        if (cancelled) return
+        if (!childrenRef.current[dir]) await loadDir(dir)
+      }
+      if (cancelled) return
+      setExpanded((s) => {
+        const n = new Set(s)
+        ancestors.forEach((a) => n.add(a))
+        return n
+      })
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [activePath, workspace, loadDir])
+
+  // Scroll the active file's row into view once it (and its ancestors) are
+  // rendered. Guarded by lastScrolledRef so we only reveal on open, not on every
+  // unrelated expand/collapse.
+  useEffect(() => {
+    if (!activePath) return
+    if (activeRowRef.current && lastScrolledRef.current !== activePath) {
+      activeRowRef.current.scrollIntoView({ block: 'nearest' })
+      lastScrolledRef.current = activePath
+    }
+  }, [activePath, expanded, childrenMap])
 
   const toggle = async (node) => {
     const next = new Set(expanded)
@@ -316,6 +375,7 @@ export default function Sidebar({ workspace, activePath, onOpenFile, onOpenRight
     return (
       <div key={node.path}>
         <div
+          ref={isActive ? activeRowRef : undefined}
           className={`tree-row${isActive ? ' active' : ''}${isDropTarget ? ' drag-over' : ''}`}
           style={{ paddingLeft: 8 + depth * 14 }}
           draggable={!renaming}

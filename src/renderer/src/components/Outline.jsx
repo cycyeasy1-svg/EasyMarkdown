@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
 import { useI18n } from '../i18n.jsx'
 
 export function parseHeadings(md) {
@@ -25,9 +25,19 @@ export function parseHeadings(md) {
   return out
 }
 
-export default function Outline({ content, onJump }) {
+export default function Outline({ content, activeIndex = -1, onJump }) {
   const { t } = useI18n()
   const headings = useMemo(() => parseHeadings(content), [content])
+  // The currently-viewed heading's row, kept scrolled into view (like the file
+  // tree reveals the open file). Guarded so we only scroll on a real change.
+  const activeRef = useRef(null)
+  const lastScrolledRef = useRef(-1)
+  useEffect(() => {
+    if (activeIndex >= 0 && activeRef.current && lastScrolledRef.current !== activeIndex) {
+      activeRef.current.scrollIntoView({ block: 'nearest' })
+      lastScrolledRef.current = activeIndex
+    }
+  }, [activeIndex])
   return (
     <div className="outline">
       <div className="panel-head">{t('outline.title')}</div>
@@ -38,7 +48,8 @@ export default function Outline({ content, onJump }) {
           headings.map((h, i) => (
             <div
               key={i}
-              className={`outline-item lvl-${h.level}`}
+              ref={i === activeIndex ? activeRef : undefined}
+              className={`outline-item lvl-${h.level}${i === activeIndex ? ' active' : ''}`}
               style={{ paddingLeft: 12 + (h.level - 1) * 12 }}
               onClick={() => onJump(i)}
               title={h.text}

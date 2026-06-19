@@ -14,7 +14,7 @@ import WindowControls from './components/WindowControls.jsx'
 import UpdateToast from './components/UpdateToast.jsx'
 import RenameModal from './components/RenameModal.jsx'
 import ImageHostButton from './components/ImageHostButton.jsx'
-import { loadSettings, saveSettings, applyPageWidth } from './settings.js'
+import { loadSettings, saveSettings, applyPageWidth, applyFontSize } from './settings.js'
 import { applyCustomTheme } from './customThemes.js'
 import { fireToast, HM_TOAST_EVENT } from './ui.js'
 import logoUrl from './assets/logo.png'
@@ -204,6 +204,9 @@ export default function App() {
   useEffect(() => {
     applyPageWidth(settings.pageWidth)
   }, [settings.pageWidth])
+  useEffect(() => {
+    applyFontSize(settings.fontSize)
+  }, [settings.fontSize])
   useEffect(() => {
     saveSettings(settings)
   }, [settings])
@@ -556,11 +559,29 @@ export default function App() {
 
   const writeTab = useCallback(async (tab, targetPath) => {
     try {
-      const { mtimeMs } = await window.api.writeFile(targetPath, tab.content)
+      // Move pasted images (base64 blobs / global paste-folder files) into the
+      // doc's ./assets and rewrite links to relative paths, so the saved file is
+      // clean and portable (Typora-style). No-op when there are none / on mobile.
+      const { content: written, changed } = window.api.inlineForSave
+        ? await window.api.inlineForSave(tab.content, targetPath)
+        : { content: tab.content, changed: false }
+      const { mtimeMs } = await window.api.writeFile(targetPath, written)
       setTabs((prev) =>
         prev.map((t) =>
           t.id === tab.id
-            ? { ...t, path: targetPath, title: baseName(targetPath), savedContent: t.content, mtimeMs }
+            ? changed
+              ? // Images were moved to assets/: adopt the rewritten content and
+                // remount the editor so it shows the relative-path images.
+                {
+                  ...t,
+                  path: targetPath,
+                  title: baseName(targetPath),
+                  content: written,
+                  savedContent: written,
+                  mtimeMs,
+                  reloadNonce: t.reloadNonce + 1
+                }
+              : { ...t, path: targetPath, title: baseName(targetPath), savedContent: t.content, mtimeMs }
             : t
         )
       )
@@ -750,6 +771,56 @@ export default function App() {
       if (!doJump()) requestAnimationFrame(doJump)
     })
   }, [])
+
+  // Outline scrollspy: highlight the heading you're currently viewing (the last
+  // one scrolled past the top), mirroring how the file tree marks the open file.
+  // Rich editor only — editorHostRef is the active pane's .editor-scroll; in
+  // source mode it isn't attached, so the outline shows no active item there.
+  const [activeHeading, setActiveHeading] = useState(-1)
+  useEffect(() => {
+    if (home || !sidebarOpen || sidebarMode !== 'outline' || sourceMode) {
+      setActiveHeading(-1)
+      return
+    }
+    const scroller = editorHostRef.current
+    if (!scroller) return
+    let scrollRaf = 0
+    let retryRaf = 0
+    let tries = 0
+    const compute = () => {
+      const hs = scroller.querySelectorAll(
+        '.ProseMirror h1, .ProseMirror h2, .ProseMirror h3, .ProseMirror h4, .ProseMirror h5, .ProseMirror h6'
+      )
+      if (!hs.length) {
+        // Editor may still be parsing — retry for a few frames before giving up.
+        if (tries++ < 30) retryRaf = requestAnimationFrame(compute)
+        return
+      }
+      // The active heading is the last one whose top sits at/above a line a bit
+      // below the viewport top (so the section you're reading stays highlighted).
+      const threshold = scroller.getBoundingClientRect().top + 90
+      let idx = 0
+      for (let i = 0; i < hs.length; i++) {
+        if (hs[i].getBoundingClientRect().top <= threshold) idx = i
+        else break
+      }
+      setActiveHeading(idx)
+    }
+    const onScroll = () => {
+      if (scrollRaf) return
+      scrollRaf = requestAnimationFrame(() => {
+        scrollRaf = 0
+        compute()
+      })
+    }
+    compute()
+    scroller.addEventListener('scroll', onScroll, { passive: true })
+    return () => {
+      if (scrollRaf) cancelAnimationFrame(scrollRaf)
+      if (retryRaf) cancelAnimationFrame(retryRaf)
+      scroller.removeEventListener('scroll', onScroll)
+    }
+  }, [home, sidebarOpen, sidebarMode, sourceMode, activeId])
 
   // ------------------------- menu / shortcuts ----------------------
   // In split view, target the pane you're actually editing (last focused), as
@@ -1226,7 +1297,7 @@ export default function App() {
                 refreshNonce={refreshNonce}
               />
             ) : (
-              <Outline content={activeTab?.content || ''} onJump={jumpToHeading} />
+              <Outline content={activeTab?.content || ''} activeIndex={activeHeading} onJump={jumpToHeading} />
             )
           )}
         </aside>
@@ -1421,6 +1492,8 @@ export default function App() {
         onPickBlock={(id) => editorApis.current[activeId]?.setBlock(id)}
         pageWidth={settings.pageWidth}
         onSetPageWidth={(w) => updateSettings({ pageWidth: w })}
+        fontSize={settings.fontSize}
+        onSetFontSize={(s) => updateSettings({ fontSize: s })}
       />
 
       <CommandPalette

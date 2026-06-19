@@ -41,6 +41,18 @@ const api = {
   uploadImage: (command, name, bytes) =>
     ipcRenderer.invoke('image:upload', command, name, bytes),
 
+  // save a pasted/dropped image into the document's assets/ folder (no image
+  // host); returns { ok, path } with a relative path to insert into Markdown.
+  saveImage: (docPath, name, bytes) =>
+    ipcRenderer.invoke('image:save', docPath, name, bytes),
+  // save an image pasted into an UNSAVED doc to the global paste folder; returns
+  // { ok, url } (a file:// URL) so it shows as a real path, not a base64 blob.
+  savePaste: (name, bytes) => ipcRenderer.invoke('image:savePaste', name, bytes),
+  // at save time, move base64 / paste-folder images into the doc's assets/ and
+  // rewrite the Markdown to relative paths; returns { content, changed }.
+  inlineForSave: (content, targetPath) =>
+    ipcRenderer.invoke('image:inlineForSave', content, targetPath),
+
   // custom themes (user CSS files in userData/themes)
   themesList: () => ipcRenderer.invoke('themes:list'),
   themeRead: (file) => ipcRenderer.invoke('themes:read', file),
@@ -69,7 +81,24 @@ const api = {
   onWindowMaximized: on('window:maximized'),
   onAppCloseRequest: on('app-close-request'),
 
-  platform: process.platform
+  platform: process.platform,
+
+  // Feature capabilities for the renderer to gate UI uniformly across desktop /
+  // mobile (mobile provides its own set via the Capacitor shim). Exposed HERE,
+  // not added later in the renderer: contextBridge freezes this object, so
+  // assigning `window.api.capabilities` from the renderer throws ("object is not
+  // extensible") and white-screens the app. Desktop supports everything.
+  capabilities: {
+    folderWorkspace: true,
+    watch: true,
+    windowControls: true,
+    pdfExport: true,
+    imageHostExec: true,
+    nativeMenus: true,
+    externalShell: true,
+    revealInFolder: true,
+    splitView: true
+  }
 }
 
 contextBridge.exposeInMainWorld('api', api)

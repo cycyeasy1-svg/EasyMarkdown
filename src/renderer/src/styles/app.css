@@ -763,6 +763,38 @@ button:focus-visible,
   justify-content: space-between;
   margin-bottom: 13px;
 }
+/* Combined Layout popover: font-size group + width group, split by a hairline. */
+.hm-pop-sep {
+  height: 1px;
+  background: var(--border);
+  opacity: 0.7;
+  margin: 14px 0;
+}
+/* Document-stats popover: label/value rows. */
+.hm-stats-pop {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  right: 0;
+  z-index: 200;
+  min-width: 210px;
+  padding: 8px 14px;
+  animation: menuFadeIn 0.12s var(--ease-out);
+}
+.hm-stat-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 6px 0;
+  font-size: 13px;
+}
+.hm-stat-row + .hm-stat-row { border-top: 1px solid var(--border-soft); }
+.hm-stat-label { color: var(--muted); }
+.hm-stat-value {
+  color: var(--text-strong);
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
 .hm-pop-title {
   font-size: 13px;
   font-weight: 600;
@@ -1483,6 +1515,12 @@ button:focus-visible,
   font-weight: 600;
 }
 .outline-item.lvl-2 { font-weight: 500; }
+/* Currently-viewed heading (scrollspy) — a soft rounded pill, identical to the
+   file tree's active row (soft accent fill + accent text), no bar. */
+.outline-item.active {
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+}
 
 /* =====================================================
    Editor
@@ -1917,7 +1955,8 @@ body.hm-full-width .editor-skeleton {
   background: var(--bg-editor);
   color: var(--text);
   font-family: var(--font-mono);
-  font-size: 14px;
+  /* Track the editor font size, kept ~2px smaller (mono reads larger). */
+  font-size: calc(var(--editor-font-size, 16px) - 2px);
   line-height: 1.75;
   padding: 40px max(60px, calc((100% - var(--editor-max-width, 800px)) / 2)) 60vh;
   user-select: text;
@@ -2387,7 +2426,9 @@ body.dark .milkdown {
   --crepe-font-code: var(--font-mono);
 }
 .milkdown .ProseMirror {
-  font-size: 16px;
+  /* Body font size is user-adjustable (status bar). Headings/code use em, so the
+     whole document scales from this one value. Falls back to 16px. */
+  font-size: var(--editor-font-size, 16px);
   line-height: 1.8;
   user-select: text;
   /* High-contrast caret so the cursor is easy to find while writing */
@@ -2888,6 +2929,36 @@ body.dark .milkdown {
 .app.is-mobile .hm-sheet-swatch-custom { background: var(--accent); }
 .app.is-mobile .hm-sheet-langs { display: flex; gap: 4px; }
 .app.is-mobile .hm-sheet-langs .block-menu-item { flex: 1; justify-content: center; }
+
+/* Font-size stepper in the mobile "more" sheet: −  16px  + */
+.app.is-mobile .hm-sheet-fontsize {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 2px 10px 8px;
+}
+.app.is-mobile .hm-fontstep {
+  width: 40px;
+  height: 32px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-elevated);
+  color: var(--text);
+  font-size: 19px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.app.is-mobile .hm-fontstep:disabled { opacity: 0.4; }
+.app.is-mobile .hm-fontstep:active { background: var(--bg-hover); }
+.app.is-mobile .hm-fontstep-value {
+  flex: 1;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
 
 /* The "•••" is the only control on the right of the mobile status bar and the
    gateway to settings, so give it an obvious pill affordance + bigger target. */

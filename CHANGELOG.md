@@ -6,6 +6,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [2.1.0] - 2026-06-19
+
+HorseMD goes mobile, plus a batch of editor & UI improvements and an important
+desktop crash fix.
+
+### Added
+- **Mobile apps — iOS & Android.** HorseMD now runs on phones and tablets
+  (Capacitor): open / edit / save local Markdown, share & export files out, with
+  themes, i18n, outline, and the command palette all working. Android ships as an
+  APK on the release page; iOS is built from source (free Apple ID signing).
+- **Adjustable font size.** A status-bar control sets the editor body font size
+  (presets + fine-tune slider) — combined with the page-width control into one
+  **Layout** button.
+- **Document stats popover.** The word / character / reading-time counts now live
+  in one status-bar button; open it for the full breakdown (words, characters,
+  characters without spaces, reading time).
+- **Outline follows the cursor.** The outline highlights — and scrolls to — the
+  heading you're currently viewing (scrollspy), the way the file tree marks the
+  open file.
+- **File tree follows the open file** (#11). Opening or switching to a file
+  auto-expands its parent folders and highlights / scrolls to it.
+
+### Changed
+- **Pasted images become real files, never lost** — pasting or dropping a
+  screenshot into a saved document writes it into a sibling `./assets/` folder and
+  inserts a short relative link; in an unsaved draft it's parked as a real file
+  and moved into `./assets/` on first save (Typora-style). No more giant base64
+  blobs in the Markdown, and no more screenshots vanishing after save & reopen.
+- **Tidier status bar** — font-size + width merged into one **Layout** button;
+  the counts merged into a **stats** button; the block-type switcher was removed
+  (block type is still changeable via the floating badge, the selection toolbar,
+  right-click, the slash menu, and Ctrl/Cmd+1–6 / Ctrl/Cmd+0).
+- **Mobile:** the command palette no longer auto-opens the on-screen keyboard.
+
+### Fixed
+- **Inline code "wouldn't stop"** (#10) — text typed after a closing backtick kept
+  inheriting the inline-code style; the mark is now non-inclusive, so the caret
+  leaves code on the next character (matching Typora).
+- **Desktop white-screen crash** — a frozen `window.api` (contextBridge) made the
+  desktop build crash on launch; feature capabilities are now exposed from the
+  preload instead of assigned at runtime.
+
 ## [0.2.0] - 2026-06-14
 
 A big feature release: image hosting, custom themes, diagrams & math, adjustable

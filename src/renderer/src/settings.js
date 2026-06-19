@@ -19,8 +19,23 @@ export const PAGE_WIDTH_PRESETS = [
   { id: 'full', width: 'full' }
 ]
 
+// Editor body font size (px). Applies only to the document content, not the app
+// chrome (tabs / sidebar / status bar).
+export const FONT_SIZE_MIN = 12
+export const FONT_SIZE_MAX = 24
+export const DEFAULT_FONT_SIZE = 16
+
+// Quick presets shown as a segmented control above the fine-tune slider.
+export const FONT_SIZE_PRESETS = [
+  { id: 'small', size: 14 },
+  { id: 'medium', size: 16 },
+  { id: 'large', size: 18 },
+  { id: 'xlarge', size: 20 }
+]
+
 export const DEFAULT_SETTINGS = {
   pageWidth: DEFAULT_PAGE_WIDTH,
+  fontSize: DEFAULT_FONT_SIZE,
   // Empty = no image host: pasted/uploaded images keep the default behavior
   // (a local object URL). When set, it's run like Typora's "custom command":
   // the image file path is appended as an argument and the command prints the
@@ -35,11 +50,18 @@ function normalizeWidth(w) {
   return Math.min(PAGE_WIDTH_MAX, Math.max(PAGE_WIDTH_MIN, Math.round(n)))
 }
 
+function normalizeFontSize(s) {
+  const n = Number(s)
+  if (!Number.isFinite(n)) return DEFAULT_FONT_SIZE
+  return Math.min(FONT_SIZE_MAX, Math.max(FONT_SIZE_MIN, Math.round(n)))
+}
+
 export function loadSettings() {
   try {
     const raw = JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}')
     return {
       pageWidth: normalizeWidth(raw.pageWidth ?? DEFAULT_PAGE_WIDTH),
+      fontSize: normalizeFontSize(raw.fontSize ?? DEFAULT_FONT_SIZE),
       imageUploadCommand:
         typeof raw.imageUploadCommand === 'string' ? raw.imageUploadCommand : ''
     }
@@ -68,4 +90,14 @@ export function applyPageWidth(width) {
     document.body.classList.remove('hm-full-width')
     root.style.setProperty('--editor-max-width', (width || DEFAULT_PAGE_WIDTH) + 'px')
   }
+}
+
+// Apply the editor body font size as a CSS variable the content column reads.
+// Headings, code, etc. scale relative to this via `em`, so the whole document
+// grows/shrinks together; the app chrome keeps its own fixed sizes.
+export function applyFontSize(size) {
+  document.documentElement.style.setProperty(
+    '--editor-font-size',
+    normalizeFontSize(size) + 'px'
+  )
 }

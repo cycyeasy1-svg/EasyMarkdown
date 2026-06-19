@@ -10,6 +10,7 @@ import {
 } from '@milkdown/kit/core'
 import { imageBlockConfig } from '@milkdown/kit/component/image-block'
 import { inlineImageConfig } from '@milkdown/kit/component/image-inline'
+import { inlineCodeSchema } from '@milkdown/kit/preset/commonmark'
 import { TextSelection } from '@milkdown/prose/state'
 import '@milkdown/crepe/theme/common/style.css'
 import '@milkdown/crepe/theme/frame.css'
@@ -114,33 +115,66 @@ export default function Editor({
     liveEditors.add(self)
     cleanups.push(() => liveEditors.delete(self))
 
-    // --- Image host: upload a file via the configured custom command ---
-    // Typora-style: the command receives the image file path as an argument and
-    // prints the resulting URL to stdout (e.g. PicGo-Core `picgo upload`). With no
-    // command configured, fall back to a local object URL so the image isn't lost.
-    const uploadViaCommand = async (file) => {
+    // Read an image file as a base64 data: URL — the last-resort persistent src
+    // (survives save & reload, unlike a blob: URL) for untitled docs / mobile.
+    const fileToDataUrl = (file) =>
+      new Promise((resolve) => {
+        const r = new FileReader()
+        r.onload = () => resolve(r.result)
+        r.onerror = () => resolve(URL.createObjectURL(file))
+        r.readAsDataURL(file)
+      })
+
+    // Turn a pasted / dropped / picked image file into a *persistable* src so it
+    // never dies on reload (the "screenshots lost after save & reopen" bug):
+    //   1. image-host command configured → upload, use the returned URL
+    //   2. saved document → write into ./assets and use a relative path (Typora)
+    //   3. untitled doc / mobile / any failure → inline base64 data: URL
+    const persistImage = async (file) => {
       const cmd = (uploadCmdRef.current || '').trim()
-      if (!cmd) return URL.createObjectURL(file)
-      fireToast(tRef.current('imghost.uploading'))
-      try {
-        const buf = await file.arrayBuffer()
-        const res = await window.api.uploadImage(cmd, file.name || 'image.png', new Uint8Array(buf))
-        if (res?.ok && res.url) {
-          fireToast(tRef.current('imghost.uploaded'))
-          return res.url
+      if (cmd) {
+        fireToast(tRef.current('imghost.uploading'))
+        try {
+          const buf = await file.arrayBuffer()
+          const res = await window.api.uploadImage(cmd, file.name || 'image.png', new Uint8Array(buf))
+          if (res?.ok && res.url) {
+            fireToast(tRef.current('imghost.uploaded'))
+            return res.url
+          }
+          fireToast(tRef.current('imghost.failed'))
+        } catch {
+          fireToast(tRef.current('imghost.failed'))
         }
-        fireToast(tRef.current('imghost.failed'))
-      } catch {
-        fireToast(tRef.current('imghost.failed'))
+        // Upload failed — fall through to local persistence so it isn't lost.
       }
-      // Upload failed — keep a local preview so the paste/drop isn't silently dropped.
-      return URL.createObjectURL(file)
+      if (window.api.saveImage && docPath) {
+        // Saved doc → write straight into ./assets, use a relative path.
+        try {
+          const buf = await file.arrayBuffer()
+          const res = await window.api.saveImage(docPath, file.name || 'image.png', new Uint8Array(buf))
+          if (res?.ok && res.path) return res.path
+        } catch {
+          /* fall through */
+        }
+      } else if (window.api.savePaste) {
+        // Unsaved doc → park in the global paste folder and use a file:// path,
+        // so it shows as a real path (not a base64 blob); it's relocated into
+        // ./assets on first save (Typora-style).
+        try {
+          const buf = await file.arrayBuffer()
+          const res = await window.api.savePaste(file.name || 'image.png', new Uint8Array(buf))
+          if (res?.ok && res.url) return res.url
+        } catch {
+          /* fall through */
+        }
+      }
+      return fileToDataUrl(file)
     }
 
-    // Insert an image at the caret (used by paste / drop of image files). Uploads
-    // first (via the command if set), then drops an inline image node with the URL.
+    // Insert an image at the caret (used by paste / drop of image files). Persists
+    // the file first, then drops an inline image node with the resulting src.
     const insertUploadedImage = async (file) => {
-      const url = await uploadViaCommand(file)
+      const url = await persistImage(file)
       const v = viewRef.current
       if (!v || !url) return
       const imgType = v.state.schema.nodes.image
@@ -196,8 +230,8 @@ export default function Editor({
       // Route the image-block / inline-image "Upload" button through the image
       // host. applyImageText spreads the existing config, so re-applying it on a
       // language switch preserves this onUpload.
-      ctx.update(imageBlockConfig.key, (v) => ({ ...v, onUpload: uploadViaCommand }))
-      ctx.update(inlineImageConfig.key, (v) => ({ ...v, onUpload: uploadViaCommand }))
+      ctx.update(imageBlockConfig.key, (v) => ({ ...v, onUpload: persistImage }))
+      ctx.update(inlineImageConfig.key, (v) => ({ ...v, onUpload: persistImage }))
       // Live-render ```mermaid code blocks as diagrams (widget decoration after
       // the editable source — see editor-mermaid.js).
       ctx.update(prosePluginsCtx, (plugins) => [
@@ -217,6 +251,18 @@ export default function Editor({
         { plugin: brToBreakRemarkPlugin, options: undefined }
       ])
     })
+
+    // Issue #10: inline code "won't stop". Milkdown's inlineCode mark has no
+    // `inclusive` flag, so ProseMirror defaults it to inclusive=true — typing at
+    // the RIGHT boundary of `code` keeps inheriting the mark, so text after a
+    // closing backtick stays code until you hard-break. Override the mark schema
+    // to inclusive:false (the standard code-mark behavior, same as Typora) so the
+    // caret exits the code span on the next character. Registered after Crepe's
+    // commonmark preset (same id → last registration wins); nothing else about
+    // the mark changes, so Markdown round-trips identically.
+    crepe.editor.use(
+      inlineCodeSchema.extendSchema((prev) => (ctx) => ({ ...prev(ctx), inclusive: false }))
+    )
     crepeRef.current = crepe
 
     // Convert the block the cursor sits in to a given block id (paragraph/h1…h6).
@@ -354,6 +400,18 @@ export default function Editor({
         }
         viewRef.current = view
 
+        // Issue #10 (belt-and-suspenders): guarantee the inline-code mark is
+        // non-inclusive on the live schema, in case Crepe's plugin order left the
+        // extendSchema override (above) ineffective. ResolvedPos.marks() reads
+        // `mark.type.spec.inclusive === false` to drop the mark at a span's end,
+        // so the caret exits `code` on the next character either way.
+        try {
+          const icMark = view?.state.schema.marks.inlineCode
+          if (icMark && icMark.spec.inclusive !== false) icMark.spec.inclusive = false
+        } catch {
+          /* schema shape changed — extendSchema override still applies */
+        }
+
         // Typora-theme hooks: most Typora themes target `#write` (the content
         // container) and `.markdown-body`. Tagging the ProseMirror element with
         // both lets a migrated Typora CSS style our editor. (Several editors can
@@ -472,18 +530,16 @@ export default function Editor({
           }
         }
 
-        // --- Paste / drop an image file → upload it via the image host ---
+        // --- Paste / drop an image file → persist it, then insert ---
         // ProseMirror/Crepe doesn't ingest pasted or dropped image *files* by
-        // default. We intercept them, run the upload (custom command if set), and
-        // insert the returned URL — the Typora-style "paste image → it's hosted"
-        // flow. Pasted/dropped text and HTML are left to the editor's own paste.
-        // Only intercept image files when an image host is configured: without
-        // one we'd insert a blob: URL that dies on reload (there's no local-save
-        // path). With no host, leave paste/drop to the editor's default. Also
-        // never hijack a paste/drop inside a code block (CodeMirror) or input —
-        // replacing the ProseMirror node selection there would clobber the block.
+        // default (and its own handling would yield a blob: URL that dies on
+        // reload). We intercept image files and route them through persistImage:
+        // image host if configured, else a local ./assets file (saved docs), else
+        // an inline data: URL — so a pasted screenshot survives save & reopen.
+        // Pasted/dropped text and HTML are left to the editor's own paste. Never
+        // hijack a paste/drop inside a code block (CodeMirror) or input — replacing
+        // the ProseMirror node selection there would clobber the block.
         const imageHandlingActive = (e) =>
-          (uploadCmdRef.current || '').trim() &&
           !e.target.closest?.('.cm-editor, input, textarea, .caption-input')
         const onPasteImage = (e) => {
           if (!imageHandlingActive(e)) return

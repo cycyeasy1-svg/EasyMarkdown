@@ -27,7 +27,14 @@ if (typeof window !== 'undefined') {
     // Mobile / web: no Electron preload — back the contract with Capacitor.
     window.api = makeCapacitorApi()
   } else if (!window.api.capabilities) {
-    // Desktop: preload provides the methods; advertise full capabilities.
-    window.api.capabilities = DESKTOP_CAPABILITIES
+    // Desktop: the preload normally exposes capabilities directly (its object is
+    // frozen by contextBridge, so it must). This branch is a defensive fallback
+    // for an older preload — guarded because assigning to the frozen api object
+    // throws ("object is not extensible") and would white-screen the app.
+    try {
+      window.api.capabilities = DESKTOP_CAPABILITIES
+    } catch {
+      /* frozen api without capabilities — features fail open (treated as available) */
+    }
   }
 }
