@@ -246,12 +246,22 @@ const platform = Capacitor.getPlatform() // 'ios' | 'android' | 'web'
 // and flip the clock/icons dark↔light to stay readable as the theme changes.
 const setupStatusBar = () => {
   if (platform !== 'android' && platform !== 'ios') return
-  StatusBar.setOverlaysWebView({ overlay: true }).catch(() => {}) // Android: draw behind it
+  // Android: do NOT overlay the web view. env(safe-area-inset-top) on Android
+  // only reflects a display cutout, not the status bar height — so on a tablet
+  // with no notch the top bar would collide with the clock/battery. Instead let
+  // the system reserve the status bar and tint it to match the top bar, which
+  // blends seamlessly on every device. iOS keeps its native overlay (env works).
+  if (platform === 'android') StatusBar.setOverlaysWebView({ overlay: false }).catch(() => {})
   const apply = () => {
     const dark =
       document.body.classList.contains('dark') ||
       document.body.classList.contains('theme-morandi-dark')
     StatusBar.setStyle({ style: dark ? Style.Dark : Style.Light }).catch(() => {})
+    if (platform === 'android') {
+      // Match the status bar to the top bar's background (theme-aware, incl. custom).
+      const bg = getComputedStyle(document.body).getPropertyValue('--bg-elevated').trim()
+      if (bg) StatusBar.setBackgroundColor({ color: bg }).catch(() => {})
+    }
   }
   apply()
   // Re-apply when App swaps the theme classes on <body>.
