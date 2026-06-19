@@ -23,6 +23,9 @@ export default function Tabs({
   const activeRef = useRef(null)
   // Right-click context menu: { x, y, tab } in viewport coords, or null.
   const [menu, setMenu] = useState(null)
+  // On touch there's no hover to reveal the close ✕, so show it always and use a
+  // clear ✕ (the unsaved state is shown in the bottom bar, not as a tab dot).
+  const isMobile = window.api.platform === 'ios' || window.api.platform === 'android'
 
   // When the active tab changes (opened a new file, switched, or restored a
   // session), the tab strip may have scrolled it out of view once the tabs
@@ -88,7 +91,7 @@ export default function Tabs({
                   onClose(tab.id)
                 }}
               >
-                {dirty ? <span className="dot" /> : <Icon name="close" size={13} />}
+                {dirty && !isMobile ? <span className="dot" /> : <Icon name="close" size={13} />}
               </span>
             </div>
           )
@@ -122,7 +125,7 @@ export default function Tabs({
               const run = (fn) => () => { fn(); setMenu(null) }
               return (
                 <>
-                  {onOpenRight && tabs.length > 1 && (
+                  {window.api.capabilities?.splitView !== false && onOpenRight && tabs.length > 1 && (
                     <>
                       <button className="tab-menu-item" onClick={run(() => onOpenRight(tab.id))}>
                         {t('tab.openRight')}
@@ -136,9 +139,11 @@ export default function Tabs({
                   <button className="tab-menu-item" onClick={run(() => copyName(tab))}>
                     {t('tab.copyName')}
                   </button>
-                  <button className="tab-menu-item" disabled={!hasPath} title={noPathTip} onClick={run(() => reveal(tab))}>
-                    {t('tab.reveal')}
-                  </button>
+                  {window.api.capabilities?.revealInFolder !== false && (
+                    <button className="tab-menu-item" disabled={!hasPath} title={noPathTip} onClick={run(() => reveal(tab))}>
+                      {t('tab.reveal')}
+                    </button>
+                  )}
                   <div className="tab-menu-sep" />
                   <button className="tab-menu-item" disabled={!hasPath} title={noPathTip} onClick={run(() => onRename?.(tab.id))}>
                     {t('side.rename')}
@@ -146,7 +151,7 @@ export default function Tabs({
                   <button className="tab-menu-item" disabled={!hasPath} title={noPathTip} onClick={run(() => onDuplicate?.(tab.id))}>
                     {t('side.duplicate')}
                   </button>
-                  {hasPath && isMarkdownName(tab.title) && (
+                  {window.api.capabilities?.pdfExport !== false && hasPath && isMarkdownName(tab.title) && (
                     <button className="tab-menu-item" onClick={run(() => onExportPdf?.(tab.path))}>
                       {t('side.exportPdf')}
                     </button>

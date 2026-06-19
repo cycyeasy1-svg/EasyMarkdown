@@ -7,6 +7,16 @@
 
 * { box-sizing: border-box; }
 html, body, #root { height: 100%; margin: 0; }
+/* App-like behavior on touch devices: kill double-tap-to-zoom (which otherwise
+   magnifies a blank tap and overflows the layout) and iOS text auto-inflation.
+   No effect on desktop (mouse input ignores touch-action). */
+html {
+  touch-action: manipulation;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  /* No gray flash box on tap (we provide our own press feedback). */
+  -webkit-tap-highlight-color: transparent;
+}
 
 :root {
   /* Dimensions */
@@ -980,6 +990,42 @@ button:focus-visible,
   pointer-events: none;
   animation: hm-toast-in 0.22s var(--ease-out);
 }
+/* Sticky toast (e.g. "saved to …"): stays until tapped, so it's interactive and
+   carries a ✕. Lets the message wrap instead of staying a one-line pill. */
+.hm-toast.sticky {
+  pointer-events: auto;
+  /* Center it on screen (works the same on iOS & Android WebViews). */
+  top: 50%;
+  bottom: auto;
+  transform: translate(-50%, -50%);
+  animation: hm-toast-center-in 0.18s var(--ease-out);
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 14px 12px 14px 18px;
+  max-width: min(86vw, 460px);
+  border-radius: 16px;
+}
+.hm-toast.sticky .hm-toast-msg {
+  line-height: 1.45;
+  text-align: left;
+  white-space: pre-line; /* render the \n separators as real line breaks */
+}
+@keyframes hm-toast-center-in {
+  from { opacity: 0; transform: translate(-50%, -46%); }
+  to { opacity: 1; transform: translate(-50%, -50%); }
+}
+.hm-toast-close {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  color: var(--bg-editor);
+  background: rgba(255, 255, 255, 0.16);
+}
+.hm-toast-close:active { background: rgba(255, 255, 255, 0.3); }
 @keyframes hm-toast-in {
   from { opacity: 0; transform: translateX(-50%) translateY(10px); }
   to { opacity: 1; transform: translateX(-50%) translateY(0); }
@@ -2681,4 +2727,233 @@ body.dark .milkdown {
 .milkdown .ProseMirror .task-list-item.checked label {
   text-decoration: line-through;
   color: var(--muted);
+}
+
+/* =====================================================
+   Mobile (Capacitor: iOS / Android)
+   Every rule here is scoped under .app.is-mobile, so the desktop layout is
+   completely untouched. On a phone there is NO permanent left rail (it would
+   steal width and feel cramped next to text): the editor is edge-to-edge, and
+   the activity rail + file/outline sidebar slide in together as one drawer,
+   opened by the top-bar ☰ button and closed by the scrim or the rail's button.
+   ===================================================== */
+
+.app.is-mobile {
+  position: relative; /* anchor the slide-in drawer + scrim overlays */
+  --activity-bar-w: 0; /* collapse the grid's left column so content is full width */
+  /* Grow the top/bottom bars into the safe area (notch / home indicator) rather
+     than padding the whole app, which would offset the absolute drawer. */
+  grid-template-rows:
+    calc(var(--topbar-h) + env(safe-area-inset-top))
+    1fr
+    calc(var(--status-h) + env(safe-area-inset-bottom));
+}
+.app.is-mobile .topbar { padding-top: env(safe-area-inset-top); }
+.app.is-mobile .statusbar { padding-bottom: env(safe-area-inset-bottom); }
+
+/* Touch-friendly hit targets. */
+.app.is-mobile .activity-item { width: 48px; height: 48px; }
+.app.is-mobile .icon-btn { width: 40px; height: 40px; }
+.app.is-mobile .hm-menu-btn { margin-right: 2px; }
+
+/* Editor fills the screen — ignore the desktop 800px page-width preset and the
+   wide horizontal gutters. !important overrides the inline --editor-max-width
+   and the hm-full-width body class alike. */
+.app.is-mobile .editor-host,
+.app.is-mobile .editor-skeleton {
+  /* A reading width, centered: on a phone the column is narrower than this so it
+     stays effectively full-width; on a tablet/large screen it caps the line
+     length for comfortable reading instead of bleeding edge-to-edge. */
+  max-width: 760px !important;
+  margin-left: auto;
+  margin-right: auto;
+  padding-left: 18px !important;
+  padding-right: 18px !important;
+}
+.app.is-mobile .editor-skeleton { padding-top: 18px; }
+.app.is-mobile .source-editor {
+  padding-left: 18px !important;
+  padding-right: 18px !important;
+}
+
+/* Typography tuned for a phone: the desktop heading scale (h1 = 2.25em ≈ 36px)
+   is oversized on a narrow column, so step the headings down and tighten the
+   space above them; keep body at 16px for comfortable reading. */
+.app.is-mobile .milkdown .ProseMirror { line-height: 1.7; }
+.app.is-mobile .milkdown .ProseMirror h1 { font-size: 1.75em; }
+.app.is-mobile .milkdown .ProseMirror h2 { font-size: 1.42em; }
+.app.is-mobile .milkdown .ProseMirror h3 { font-size: 1.2em; }
+.app.is-mobile .milkdown .ProseMirror h4 { font-size: 1.1em; }
+.app.is-mobile .milkdown .ProseMirror h1,
+.app.is-mobile .milkdown .ProseMirror h2,
+.app.is-mobile .milkdown .ProseMirror h3,
+.app.is-mobile .milkdown .ProseMirror h4,
+.app.is-mobile .milkdown .ProseMirror h5,
+.app.is-mobile .milkdown .ProseMirror h6 {
+  margin-top: 1.3em;
+  margin-bottom: 0.5em;
+}
+
+/* ---- Slide-in drawer: activity rail + sidebar panel ---- */
+/* Both are positioned against .app and hidden off-screen by default. */
+.app.is-mobile .activity-bar {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 56px;
+  padding-top: calc(env(safe-area-inset-top) + 10px);
+  padding-bottom: calc(env(safe-area-inset-bottom) + 10px);
+  transform: translateX(-100%);
+  transition: transform 0.25s var(--ease-out);
+  z-index: 42;
+}
+.app.is-mobile .pane-left {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 56px;
+  width: min(76vw, 300px);
+  max-width: min(76vw, 300px);
+  padding-top: env(safe-area-inset-top);
+  padding-bottom: env(safe-area-inset-bottom);
+  transform: translateX(calc(-100% - 56px));
+  transition: transform 0.25s var(--ease-out);
+  z-index: 41;
+  box-shadow: 2px 0 20px rgba(0, 0, 0, 0.2);
+}
+/* Keep the panel a real drawer even when the desktop .collapsed class is on it
+   (visibility is driven by the transform below, not width/opacity). */
+.app.is-mobile .pane-left.collapsed {
+  width: min(76vw, 300px);
+  max-width: min(76vw, 300px);
+  opacity: 1;
+  pointer-events: auto;
+  border-right: 1px solid var(--border-soft);
+}
+.app.is-mobile.drawer-open .activity-bar { transform: translateX(0); }
+.app.is-mobile.drawer-open .pane-left { transform: translateX(0); }
+
+/* Dim scrim behind the drawer; tap anywhere outside to close. */
+.app.is-mobile .hm-scrim {
+  position: absolute;
+  inset: 0;
+  z-index: 40;
+  background: rgba(0, 0, 0, 0.38);
+  animation: hmScrimFade 0.2s var(--ease-out);
+}
+@keyframes hmScrimFade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* Hide controls that don't apply on a phone: the page-width preset (the editor
+   is always full width here) and the desktop keyboard-shortcut hints. */
+.app.is-mobile .hm-pagewidth { display: none; }
+.app.is-mobile .welcome-hints { display: none; }
+/* The floating "Text / H1" caret badge is desktop affordance; drop it on phones. */
+.app.is-mobile .hm-level-badge { display: none !important; }
+/* Vertical scroll only: editor-scroll has overflow-y:auto but no overflow-x, so
+   per CSS it computes to auto and the whole article pans sideways when anything
+   is too wide. Clip it horizontally (wide code blocks still scroll internally)
+   and wrap long words/URLs so they don't force the page wider. */
+.app.is-mobile .editor-scroll { overflow-x: hidden; }
+.app.is-mobile .milkdown .ProseMirror { overflow-wrap: break-word; }
+/* No window-drag handle needed on touch — let tabs use the full width. */
+.app.is-mobile .topbar-spacer { min-width: 0; }
+
+/* "•••" sheet that folds the crowded status-bar controls into one menu. */
+.app.is-mobile .hm-status-sheet { min-width: 232px; max-width: 80vw; }
+.app.is-mobile .hm-sheet-counts {
+  padding: 4px 10px 8px;
+  font-size: 12px;
+  color: var(--muted);
+  border-bottom: 1px solid var(--border-soft);
+  margin-bottom: 4px;
+}
+.app.is-mobile .hm-sheet-themes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 9px;
+  padding: 4px 10px 8px;
+}
+.app.is-mobile .hm-sheet-swatch {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  box-shadow: 0 0 0 1px var(--border) inset;
+}
+.app.is-mobile .hm-sheet-swatch.active { border-color: var(--accent); }
+.app.is-mobile .hm-sheet-swatch-custom { background: var(--accent); }
+.app.is-mobile .hm-sheet-langs { display: flex; gap: 4px; }
+.app.is-mobile .hm-sheet-langs .block-menu-item { flex: 1; justify-content: center; }
+
+/* The "•••" is the only control on the right of the mobile status bar and the
+   gateway to settings, so give it an obvious pill affordance + bigger target. */
+/* Borderless icon+text buttons in the bottom bar ("Export", "⋯ More"). */
+.app.is-mobile .hm-more-btn,
+.app.is-mobile .hm-share-btn {
+  height: 28px;
+  padding: 0 6px;
+  gap: 4px;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 500;
+}
+.app.is-mobile .hm-more-btn:active,
+.app.is-mobile .hm-share-btn:active { color: var(--text); }
+
+/* Word / char / read counts shown inline at the bottom (moved out of the menu). */
+.app.is-mobile .status-left { gap: 8px; }
+.app.is-mobile .status-counts {
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Tab close ✕: always visible on touch (no hover to reveal it) + bigger target. */
+.app.is-mobile .tab-close {
+  opacity: 1;
+  width: 22px;
+  height: 22px;
+}
+
+/* ------- Touch ergonomics (applies on touch devices; desktop unaffected) -------
+   On touch, :hover sticks after a tap so a button stays highlighted as if still
+   pressed/selected. Neutralize the lingering hover background and give a real
+   press (:active) response instead, so a tap reads as a tap. */
+@media (hover: none) {
+  .icon-btn:hover,
+  .activity-item:hover,
+  .status-btn:hover,
+  .tab:hover,
+  .tab-close:hover,
+  .block-menu-item:hover,
+  .hm-more-btn:hover {
+    background: transparent;
+  }
+  .icon-btn:active,
+  .activity-item:active,
+  .status-btn:active,
+  .block-menu-item:active,
+  .hm-more-btn:active,
+  .tab-menu-item:active {
+    background: var(--hover);
+  }
+  .tab-close:active {
+    background: var(--active);
+    color: var(--text);
+  }
+}
+.app.is-mobile .hm-sheet-save { font-weight: 600; }
+.app.is-mobile .hm-sheet-save-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+  margin-left: auto;
 }

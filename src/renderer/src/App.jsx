@@ -29,10 +29,15 @@ const UPDATE_DISMISS_KEY = 'horsemd.update.dismissed'
 
 export default function App() {
   const session = useRef(loadSession()).current
+  // Mobile (Capacitor) builds run the same renderer; a few affordances differ
+  // (drawer sidebar, no split/image-host buttons). Desktop is unaffected.
+  const isMobile = window.api.platform === 'ios' || window.api.platform === 'android'
   const [tabs, setTabs] = useState([])
   const [activeId, setActiveId] = useState(null)
   const [workspace, setWorkspace] = useState(sanitizeWorkspace(session.workspace))
-  const [sidebarOpen, setSidebarOpen] = useState(session.sidebarOpen ?? true)
+  // On phones the sidebar overlays the editor, so it starts closed to keep the
+  // writing surface front-and-center (desktop keeps its previous default).
+  const [sidebarOpen, setSidebarOpen] = useState(session.sidebarOpen ?? !isMobile)
   const [sidebarMode, setSidebarMode] = useState(session.sidebarMode || 'files') // 'files' or 'outline'
   const [theme, setTheme] = useState(session.theme || DEFAULT_THEME)
   // Active custom CSS theme (filename in userData/themes), or null. Overlays the
@@ -75,6 +80,9 @@ export default function App() {
   // Rename-from-tab-menu modal: { id, value } or null. (Electron has no
   // window.prompt, so renaming a tab's file uses this small inline dialog.)
   const [renameState, setRenameState] = useState(null)
+  // Mobile "save as": prompt for a filename before writing an untitled doc into
+  // the local library (desktop uses the native save dialog instead).
+  const [saveNameState, setSaveNameState] = useState(null)
   // User preferences (page width, image-host command). Persisted separately from
   // the session; see settings.js.
   const [settings, setSettings] = useState(loadSettings)
@@ -547,16 +555,31 @@ export default function App() {
   }, [])
 
   const writeTab = useCallback(async (tab, targetPath) => {
-    const { mtimeMs } = await window.api.writeFile(targetPath, tab.content)
-    setTabs((prev) =>
-      prev.map((t) =>
-        t.id === tab.id
-          ? { ...t, path: targetPath, title: baseName(targetPath), savedContent: t.content, mtimeMs }
-          : t
+    try {
+      const { mtimeMs } = await window.api.writeFile(targetPath, tab.content)
+      setTabs((prev) =>
+        prev.map((t) =>
+          t.id === tab.id
+            ? { ...t, path: targetPath, title: baseName(targetPath), savedContent: t.content, mtimeMs }
+            : t
+        )
       )
-    )
-    setRefreshNonce((n) => n + 1)
-  }, [])
+      setRefreshNonce((n) => n + 1)
+      // On mobile, where files land in a system folder, confirm what + where —
+      // sticky so the user can read the location before dismissing it.
+      if (isMobile) {
+        const loc =
+          window.api.platform === 'ios' ? tRef.current('save.locIos') : tRef.current('save.locAndroid')
+        fireToast(tRef.current('save.savedTo', { name: baseName(targetPath), loc }), {
+          sticky: true,
+          duration: 5000
+        })
+      }
+    } catch (e) {
+      // Never fail silently — surface the real error so saving is debuggable.
+      fireToast(tRef.current('save.failed', { msg: e?.message || String(e) }), { sticky: true })
+    }
+  }, [isMobile])
 
   const saveTab = useCallback(
     async (id, forceDialog = false) => {
@@ -564,12 +587,39 @@ export default function App() {
       if (!tab) return
       let target = tab.path
       if (!target || forceDialog) {
+        // Mobile has no native save dialog: ask for a filename, then write into
+        // the local library (see commitMobileSave). Desktop keeps the dialog.
+        if (isMobile) {
+          const base = (tab.title || 'Untitled').replace(/\.(md|markdown|mdx)$/i, '')
+          setSaveNameState({ id, value: base + '.md' })
+          return
+        }
         target = await window.api.saveAs(tab.title.endsWith('.md') ? tab.title : tab.title + '.md')
         if (!target) return
       }
       await writeTab(tab, target)
     },
-    [tabs, writeTab]
+    [tabs, writeTab, isMobile]
+  )
+
+  // Commit a mobile "save as": let the platform layer place the named file in
+  // the local library (it returns a de-duplicated path), then write it.
+  const commitMobileSave = useCallback(
+    async (id, rawName) => {
+      setSaveNameState(null)
+      const tab = tabsRef.current.find((t) => t.id === id)
+      let name = (rawName || '').trim()
+      if (!tab || !name) return
+      if (/[\\/:*?"<>|]/.test(name) || name === '.' || name === '..') {
+        window.alert(tRef.current('err.invalidName') + name)
+        return
+      }
+      if (!/\.(md|markdown|mdx)$/i.test(name)) name += '.md'
+      const target = await window.api.saveAs(name)
+      if (!target) return
+      await writeTab(tab, target)
+    },
+    [writeTab]
   )
 
   // Export a file (by path) to PDF: open/focus it, wait for its editor to mount,
@@ -679,6 +729,9 @@ export default function App() {
     // active editor is hidden and editorHostRef isn't attached, so the jump
     // would silently do nothing. setHome(false) is a no-op when already not home.
     setHome(false)
+    // On mobile the outline lives in the drawer; close it so the jumped-to
+    // content is actually visible instead of hidden behind the drawer.
+    if (isMobile) setSidebarOpen(false)
     const doJump = () => {
       const host = editorHostRef.current
       if (!host) return false
@@ -709,7 +762,10 @@ export default function App() {
 
   const handlers = useRef({})
   handlers.current = {
-    home: () => setHome(true),
+    home: () => {
+      setHome(true)
+      if (isMobile) setSidebarOpen(false) // jump straight to Home, don't leave the drawer over it
+    },
     new: newTab,
     open: async () => openPaths(await window.api.openFiles()),
     openFolder,
@@ -923,11 +979,16 @@ export default function App() {
   useEffect(() => {
     let timer = null
     const onToast = (e) => {
-      const msg = e?.detail
+      const d = e?.detail
+      const msg = typeof d === 'string' ? d : d?.msg
+      const sticky = typeof d === 'object' && !!d?.sticky
+      const duration = typeof d === 'object' ? d?.duration : undefined
       if (!msg) return
-      setToast({ msg, key: Date.now() + Math.random() })
+      setToast({ msg, key: Date.now() + Math.random(), sticky })
       clearTimeout(timer)
-      timer = setTimeout(() => setToast(null), 1600)
+      // duration wins; otherwise sticky stays until ✕, plain toasts hide quickly.
+      const ms = duration || (sticky ? 0 : 1600)
+      if (ms) timer = setTimeout(() => setToast(null), ms)
     }
     window.addEventListener(HM_TOAST_EVENT, onToast)
     return () => {
@@ -962,20 +1023,24 @@ export default function App() {
 
   // --------------------------- commands ----------------------------
   const commands = useMemo(
-    () => [
-      { id: 'cmd.new', title: t('cmd.new'), icon: 'file-plus', run: () => handlers.current.new() },
-      { id: 'cmd.open', title: t('cmd.open'), icon: 'file', run: () => handlers.current.open() },
-      { id: 'cmd.openFolder', title: t('cmd.openFolder'), icon: 'folder', run: () => handlers.current.openFolder() },
-      { id: 'cmd.save', title: t('cmd.save'), icon: 'save', run: () => handlers.current.save() },
-      { id: 'cmd.saveAs', title: t('cmd.saveAs'), icon: 'save', run: () => handlers.current.saveAs() },
-      { id: 'cmd.exportPdf', title: t('cmd.exportPdf'), icon: 'file', run: () => handlers.current.exportPdf() },
-      { id: 'cmd.sidebar', title: t('cmd.sidebar'), icon: 'sidebar', run: () => handlers.current.toggleSidebar() },
-      { id: 'cmd.files', title: t('cmd.files'), icon: 'folder', run: () => handlers.current.toggleFiles() },
-      { id: 'cmd.outline', title: t('cmd.outline'), icon: 'outline', run: () => handlers.current.toggleOutline() },
-      { id: 'cmd.source', title: t('cmd.source'), icon: 'code', run: () => handlers.current.toggleSource() },
-      { id: 'cmd.theme', title: t('cmd.theme'), icon: 'moon', run: () => handlers.current.toggleTheme() },
-      { id: 'cmd.find', title: t('cmd.find'), icon: 'search', run: () => handlers.current.find() }
-    ],
+    () => {
+      const caps = window.api.capabilities || {}
+      return [
+        { id: 'cmd.new', title: t('cmd.new'), icon: 'file-plus', run: () => handlers.current.new() },
+        { id: 'cmd.open', title: t('cmd.open'), icon: 'file', run: () => handlers.current.open() },
+        { id: 'cmd.openFolder', title: t('cmd.openFolder'), icon: 'folder', run: () => handlers.current.openFolder() },
+        { id: 'cmd.save', title: t('cmd.save'), icon: 'save', run: () => handlers.current.save() },
+        { id: 'cmd.saveAs', title: t('cmd.saveAs'), icon: 'save', run: () => handlers.current.saveAs() },
+        // Export-to-PDF needs a save dialog / print pipeline that doesn't exist on mobile.
+        caps.pdfExport && { id: 'cmd.exportPdf', title: t('cmd.exportPdf'), icon: 'file', run: () => handlers.current.exportPdf() },
+        { id: 'cmd.sidebar', title: t('cmd.sidebar'), icon: 'sidebar', run: () => handlers.current.toggleSidebar() },
+        { id: 'cmd.files', title: t('cmd.files'), icon: 'folder', run: () => handlers.current.toggleFiles() },
+        { id: 'cmd.outline', title: t('cmd.outline'), icon: 'outline', run: () => handlers.current.toggleOutline() },
+        { id: 'cmd.source', title: t('cmd.source'), icon: 'code', run: () => handlers.current.toggleSource() },
+        { id: 'cmd.theme', title: t('cmd.theme'), icon: 'moon', run: () => handlers.current.toggleTheme() },
+        { id: 'cmd.find', title: t('cmd.find'), icon: 'search', run: () => handlers.current.find() }
+      ].filter(Boolean)
+    },
     [t]
   )
 
@@ -1045,11 +1110,14 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeId])
 
-  const platformClass = { win32: ' is-win', darwin: ' is-mac' }[window.api.platform] || ''
+  const platformClass =
+    ({ win32: ' is-win', darwin: ' is-mac', ios: ' is-ios is-mobile', android: ' is-android is-mobile' }[
+      window.api.platform
+    ] || '')
 
   return (
     <I18nProvider lang={lang} setLang={setLang}>
-    <div className={`app${platformClass}`}>
+    <div className={`app${platformClass}${isMobile && sidebarOpen ? ' drawer-open' : ''}`}>
       <div className="activity-bar">
         <button
           className={`activity-item activity-home${home ? ' active' : ''}`}
@@ -1083,6 +1151,15 @@ export default function App() {
       </div>
 
       <div className="topbar">
+        {isMobile && (
+          <button
+            className="icon-btn drag-no hm-menu-btn"
+            title={t('cmd.files')}
+            onClick={() => setSidebarOpen((v) => !v)}
+          >
+            <Icon name="menu" size={20} />
+          </button>
+        )}
         <Tabs
           tabs={tabs}
           activeId={home ? null : activeId}
@@ -1110,23 +1187,31 @@ export default function App() {
         <button className="icon-btn drag-no" title={`${t('welcome.newFile')} (Ctrl+N)`} onClick={newTab}>
           <Icon name="plus" size={18} />
         </button>
-        <button
-          className={`icon-btn drag-no${split ? ' active' : ''}`}
-          title={split ? t('split.close') : t('split.toggle')}
-          onClick={toggleSplit}
-        >
-          <Icon name="columns" size={16} />
-        </button>
-        <ImageHostButton
-          t={t}
-          command={settings.imageUploadCommand}
-          onChange={(cmd) => updateSettings({ imageUploadCommand: cmd })}
-        />
+        {!isMobile && (
+          <button
+            className={`icon-btn drag-no${split ? ' active' : ''}`}
+            title={split ? t('split.close') : t('split.toggle')}
+            onClick={toggleSplit}
+          >
+            <Icon name="columns" size={16} />
+          </button>
+        )}
+        {!isMobile && (
+          <ImageHostButton
+            t={t}
+            command={settings.imageUploadCommand}
+            onChange={(cmd) => updateSettings({ imageUploadCommand: cmd })}
+          />
+        )}
         <button className="icon-btn drag-no" title="Command palette (Ctrl+P)" onClick={() => setPaletteOpen(true)}>
           <Icon name="command" size={16} />
         </button>
         {window.api.platform === 'win32' && <WindowControls t={t} />}
       </div>
+
+      {isMobile && sidebarOpen && (
+        <div className="hm-scrim" onClick={() => setSidebarOpen(false)} />
+      )}
 
       <div className="body">
         <aside className={`pane-left${sidebarOpen ? '' : ' collapsed'}`}>
@@ -1135,7 +1220,7 @@ export default function App() {
               <Sidebar
                 workspace={workspace}
                 activePath={activePath}
-                onOpenFile={(p) => openPaths([p])}
+                onOpenFile={(p) => { openPaths([p]); if (isMobile) setSidebarOpen(false) }}
                 onOpenRight={openFileRight}
                 onExportPdf={exportPathToPdf}
                 refreshNonce={refreshNonce}
@@ -1309,6 +1394,16 @@ export default function App() {
 
       <StatusBar
         tab={home ? null : activeTab}
+        isMobile={isMobile}
+        onSave={() => handlers.current.save()}
+        onShare={() => {
+          if (!activeTab) return
+          if (!activeTab.path) {
+            fireToast(tRef.current('save.shareNeedsSave'), { sticky: true })
+            return
+          }
+          window.api.shareFile?.(activeTab.path)
+        }}
         theme={theme}
         setTheme={pickBuiltinTheme}
         cycleTheme={cycleTheme}
@@ -1333,12 +1428,17 @@ export default function App() {
         onClose={() => setPaletteOpen(false)}
         commands={commands}
         files={files}
-        onOpenFile={(p) => openPaths([p])}
+        onOpenFile={(p) => { openPaths([p]); if (isMobile) setSidebarOpen(false) }}
       />
 
       {toast && (
-        <div className="hm-toast" role="status" key={toast.key}>
-          {toast.msg}
+        <div className={`hm-toast${toast.sticky ? ' sticky' : ''}`} role="status" key={toast.key}>
+          <span className="hm-toast-msg">{toast.msg}</span>
+          {toast.sticky && (
+            <button className="hm-toast-close" onClick={() => setToast(null)} aria-label="Close">
+              <Icon name="close" size={15} />
+            </button>
+          )}
         </div>
       )}
 
@@ -1348,6 +1448,16 @@ export default function App() {
           initial={renameState.value}
           onConfirm={(name) => commitTabRename(renameState.id, name)}
           onCancel={() => setRenameState(null)}
+        />
+      )}
+
+      {saveNameState && (
+        <RenameModal
+          t={t}
+          title={t('save.nameTitle')}
+          initial={saveNameState.value}
+          onConfirm={(name) => commitMobileSave(saveNameState.id, name)}
+          onCancel={() => setSaveNameState(null)}
         />
       )}
 
