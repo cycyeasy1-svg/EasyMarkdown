@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Icon } from './icons.jsx'
+import logoUrl from '../assets/logo.png'
 import { useI18n } from '../i18n.jsx'
 import { THEMES, themeById } from '../themes.js'
 import { LANGS } from '../i18n.jsx'
@@ -11,6 +12,26 @@ import {
   FONT_SIZE_MIN,
   FONT_SIZE_MAX
 } from '../settings.js'
+
+// App version, injected at build time from package.json (see electron.vite.config).
+const APP_VERSION = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : ''
+const ORIGINAL_AUTHOR = 'Evan Yang'
+const FORK_AUTHOR = 'Easy Chen'
+
+// Render an i18n template like "Built by {author}…" with the {token} slots
+// swapped for emphasized names, so the names stay bold across both languages.
+function richLine(tpl, map) {
+  return tpl.split(/(\{\w+\})/g).map((part, i) => {
+    const m = part.match(/^\{(\w+)\}$/)
+    return m ? (
+      <strong className="hm-about-name" key={i}>
+        {map[m[1]]}
+      </strong>
+    ) : (
+      part
+    )
+  })
+}
 
 function stats(md) {
   const text = (md || '')
@@ -301,6 +322,42 @@ function LangSwitch({ lang, setLang }) {
   )
 }
 
+// About: replaces the bare GitHub link with a small credits popover. It keeps
+// the original author's attribution and a link to the upstream project, which
+// the MIT license requires us to preserve, alongside this fork's repo.
+function AboutControl() {
+  const { t } = useI18n()
+  const { open, setOpen, ref } = usePopover()
+  return (
+    <div className="block-switch hm-about" ref={ref}>
+      <button className="status-btn" onClick={() => setOpen((v) => !v)} title={t('about.title')}>
+        <Icon name="info" size={14} />
+      </button>
+      {open && (
+        <div className="hm-pop hm-about-pop">
+          <div className="hm-about-head">
+            <img className="hm-about-logo" src={logoUrl} alt="EasyMarkdown" />
+            <div className="hm-about-name-ver">
+              <span className="hm-about-brand">
+                <span className="brand-easy">Easy</span>
+                <span className="brand-md">Markdown</span>
+              </span>
+              {APP_VERSION && <span className="hm-about-ver">v{APP_VERSION}</span>}
+            </div>
+          </div>
+          <p className="hm-about-text">
+            {richLine(t('about.intro'), { author: FORK_AUTHOR, project: 'horseMD' })}
+          </p>
+          <p className="hm-about-text">
+            {richLine(t('about.thanks'), { author: ORIGINAL_AUTHOR })}
+          </p>
+          <div className="hm-about-license">{t('about.license')}</div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 // Mobile: a single "•••" popover that folds together the controls that crowd
 // the bottom bar on a phone — word counts, source toggle, theme, language,
 // GitHub — so the bar itself stays to just the block type + this one button.
@@ -417,16 +474,16 @@ function MobileMore({
           </div>
 
           <div className="theme-menu-sep" />
-          <button
-            className="block-menu-item theme-menu-action"
-            onClick={() => {
-              window.api.openExternal('https://github.com/BND-1/horseMD')
-              setOpen(false)
-            }}
-          >
-            <Icon name="github" size={13} />
-            <span className="block-menu-name">GitHub</span>
-          </button>
+          <div className="theme-menu-label">{t('about.title')}</div>
+          <div className="hm-about-sheet">
+            <p className="hm-about-text">
+              {richLine(t('about.intro'), { author: FORK_AUTHOR, project: 'horseMD' })}
+            </p>
+            <p className="hm-about-text">
+              {richLine(t('about.thanks'), { author: ORIGINAL_AUTHOR })}
+            </p>
+            <div className="hm-about-license">{t('about.license')}</div>
+          </div>
         </div>
       )}
     </div>
@@ -444,6 +501,9 @@ export default function StatusBar({
   setLang,
   sourceMode,
   onToggleSource,
+  keepEligible,
+  keepMode,
+  onToggleKeep,
   pageWidth,
   onSetPageWidth,
   fontSize,
@@ -453,7 +513,8 @@ export default function StatusBar({
   onPickCustom,
   onRefreshThemes,
   onOpenThemesFolder,
-  onGetMoreThemes
+  onGetMoreThemes,
+  filterInfo
 }) {
   const { t } = useI18n()
   const s = useMemo(() => stats(tab?.content), [tab?.content])
@@ -478,6 +539,12 @@ export default function StatusBar({
               <span className={`status-dot ${dirty ? 'mod' : 'ok'}`}>
                 {dirty ? '● ' + t('status.modified') : '✓ ' + t('status.saved')}
               </span>
+              {filterInfo && (
+                <span className="status-filter" title={t('status.filtered', filterInfo)}>
+                  <Icon name="filter" size={12} />{' '}
+                  {t('status.filtered', filterInfo)}
+                </span>
+              )}
             </>
           )
         ) : (
@@ -515,6 +582,15 @@ export default function StatusBar({
         ) : (
           <>
             {tab && <StatsControl stats={s} />}
+            {keepEligible && (
+              <button
+                className={`status-btn${keepMode ? ' active' : ''}`}
+                onClick={onToggleKeep}
+                title={t('tip.toggleKeep')}
+              >
+                <Icon name="shield" size={14} /> {keepMode ? t('mode.keep') : t('mode.rich')}
+              </button>
+            )}
             <button className="status-btn" onClick={onToggleSource} title={t('tip.toggleSource')}>
               <Icon name="code" size={14} /> {sourceMode ? t('status.source') : t('status.rich')}
             </button>
@@ -535,13 +611,7 @@ export default function StatusBar({
               onGetMoreThemes={onGetMoreThemes}
             />
             <LangSwitch lang={lang} setLang={setLang} />
-            <button
-              className="status-btn"
-              onClick={() => window.api.openExternal('https://github.com/BND-1/horseMD')}
-              title="GitHub — github.com/BND-1/horseMD"
-            >
-              <Icon name="github" size={14} />
-            </button>
+            <AboutControl />
           </>
         )}
       </div>

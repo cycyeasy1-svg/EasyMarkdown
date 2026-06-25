@@ -5,7 +5,7 @@ short; deep detail lives in [`docs/`](./docs/).
 
 ## What this is
 
-**HorseMD** — a warm, Typora-style Markdown editor. Electron shell + Vite +
+**EasyMarkdown** — a warm, Typora-style Markdown editor. Electron shell + Vite +
 React, with **Milkdown Crepe** (ProseMirror-based WYSIWYG) as the editor engine.
 Core idea: every file opens as a **tab in one window**, not a new process. The
 shell (tabs, file tree, command palette, outline, themes, i18n, welcome screen)
@@ -29,7 +29,7 @@ electron-builder binaries download slowly:
 
 Builds are **unsigned**: Windows shows SmartScreen ("更多信息 → 仍要运行");
 macOS Gatekeeper blocks first launch (right-click → Open, or
-`xattr -dr com.apple.quarantine /Applications/HorseMD.app`).
+`xattr -dr com.apple.quarantine /Applications/EasyMarkdown.app`).
 
 ## Layout
 
@@ -68,7 +68,7 @@ docs/                  architecture / features / implementation-notes / developm
   - shortcuts accept both `Ctrl` and `Cmd` (`metaKey`).
   - launch args: `extractArgs()` in `main/index.js` splits argv into markdown
     **files** (→ `open-paths`, tabs) and **folders** (→ `open-folder`, workspace
-    — from the Explorer "Open with HorseMD" folder entry). Keep both handled.
+    — from the Explorer "Open with EasyMarkdown" folder entry). Keep both handled.
 - **Markdown vs plain text.** Supported extensions are centralized:
   `MD_EXTS`/`MD_RE` in `main/index.js` (open dialog + folder scan), and
   `MD_DOC_RE` in `App.jsx`. `.md/.markdown/.mdx` open in the Crepe rich editor;
@@ -170,7 +170,7 @@ behavior (screenshots), plus the CDP e2e scripts in `scripts/` — see
 [`docs/development.md`](./docs/development.md). On macOS, when scripting the dev
 build, note that `osascript "tell application \"Electron\""` can launch the
 generic `node_modules` Electron bundle (a name collision); prefer testing the
-packaged **HorseMD.app**, which has a unique name and bundle id.
+packaged **EasyMarkdown.app**, which has a unique name and bundle id.
 
 ## When in doubt
 

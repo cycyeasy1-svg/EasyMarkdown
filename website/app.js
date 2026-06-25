@@ -1,5 +1,5 @@
 /* ───────────────────────────────────────────────────────────
-   HorseMD 官网（無印风）— i18n / 淡入 / 画廊 / 下载直链
+   EasyMarkdown 官网（無印风）— i18n / 淡入 / 画廊 / 下载直链
    ─────────────────────────────────────────────────────────── */
 
 /* ── i18n ─────────────────────────────────────────────────── */
@@ -21,8 +21,8 @@ const I18N = {
     'themes.title': '六套主题',
     'themes.light': '明亮', 'themes.dark': '暗夜', 'themes.mist': '雾',
     'themes.sage': '鼠尾草', 'themes.rose': '玫瑰', 'themes.dusk': '暮色',
-    '_title': 'HorseMD — 一个窗口，装下所有 .md 文件',
-    '_desc': 'HorseMD：免费开源的 Typora 平替。标签页 + 文件树 + 所见即所得，Windows、macOS 与 Android。',
+    '_title': 'EasyMarkdown — 一个窗口，装下所有 .md 文件',
+    '_desc': 'EasyMarkdown：免费开源的 Typora 平替。标签页 + 文件树 + 所见即所得，Windows、macOS 与 Android。',
   },
   en: {
     'nav.features': 'FEATURES', 'nav.themes': 'THEMES',
@@ -41,8 +41,8 @@ const I18N = {
     'themes.title': 'Six themes',
     'themes.light': 'Light', 'themes.dark': 'Dark', 'themes.mist': 'Mist',
     'themes.sage': 'Sage', 'themes.rose': 'Rose', 'themes.dusk': 'Dusk',
-    '_title': 'HorseMD — One window. Every .md file.',
-    '_desc': 'HorseMD: a free Typora alternative with tabs and a file-tree workspace. Open source, for Windows, macOS and Android.',
+    '_title': 'EasyMarkdown — One window. Every .md file.',
+    '_desc': 'EasyMarkdown: a free Typora alternative with tabs and a file-tree workspace. Open source, for Windows, macOS and Android.',
   },
 }
 

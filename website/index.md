@@ -1,5 +1,5 @@
 ---
-title: HorseMD — 一个窗口，装下所有 .md 文件
+title: EasyMarkdown — 一个窗口，装下所有 .md 文件
 description: 免费开源的 Typora 平替 Markdown 编辑器：所见即所得 + 标签页 + 文件树工作区，Windows / macOS，MIT 协议
 url: https://horsemd.yangsir.net/
 version: v0.1.2
@@ -7,7 +7,7 @@ license: MIT
 author: Evan Yang (杨庭毅, @BND-1)
 ---
 
-# HorseMD — 一个窗口，装下所有 .md 文件
+# EasyMarkdown — 一个窗口，装下所有 .md 文件
 
 > 免费 · 开源 · 不要账号
 

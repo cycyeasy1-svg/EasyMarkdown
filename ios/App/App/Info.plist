@@ -7,7 +7,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>en</string>
 	<key>CFBundleDisplayName</key>
-        <string>HorseMD</string>
+        <string>EasyMarkdown</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -51,7 +51,7 @@
 	</array>
 	<key>UIViewControllerBasedStatusBarAppearance</key>
 	<true/>
-	<!-- Declare that HorseMD opens Markdown / plain-text docs so it shows up in
+	<!-- Declare that EasyMarkdown opens Markdown / plain-text docs so it shows up in
 	     the system "Open in / Copy to" share list. -->
 	<key>CFBundleDocumentTypes</key>
 	<array>

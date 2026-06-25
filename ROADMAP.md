@@ -1,6 +1,6 @@
-# HorseMD 路线图 / Roadmap
+# EasyMarkdown 路线图 / Roadmap
 
-> 这里记录 HorseMD 的方向与优先级。顺序大致代表优先级,但会随实际情况调整;
+> 这里记录 EasyMarkdown 的方向与优先级。顺序大致代表优先级,但会随实际情况调整;
 > 欢迎在 [Issues](https://github.com/BND-1/horseMD/issues) 里提想法。
 >
 > *This is the project roadmap (Chinese-first). Items are roughly ordered by
@@ -47,7 +47,7 @@
 
 ## 📱 进行中:移动端适配(Android + iOS,Capacitor)
 
-把 HorseMD 的写作体验带到手机和平板上。技术选型已定为 **Capacitor**:用原生壳包裹
+把 EasyMarkdown 的写作体验带到手机和平板上。技术选型已定为 **Capacitor**:用原生壳包裹
 现有 React + Milkdown 渲染层,**复用整个编辑器内核**,桌面 Electron 代码零改动。
 详细方案见 [docs/mobile.md](./docs/mobile.md)。
 
@@ -63,9 +63,9 @@
 
 **接下来(MVP:看 + 改 + 本地文件):**
 
-- 真机验证编辑/打字手感、文件读写(`Documents/HorseMD/`)与文件选择器导入
+- 真机验证编辑/打字手感、文件读写(`Documents/EasyMarkdown/`)与文件选择器导入
 - 软键盘滚动、Milkdown 触摸交互(选区工具条、拖拽手柄)打磨
-- 文件关联("用 HorseMD 打开 .md")、移动端更新检查
+- 文件关联("用 EasyMarkdown 打开 .md")、移动端更新检查
 - 上架准备:iOS 签名/公证(Apple 开发者账号)、Android keystore
 
 ---

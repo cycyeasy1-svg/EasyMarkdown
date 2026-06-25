@@ -27,7 +27,7 @@ html {
   /* Typography */
   --font-ui: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   --font-read: 'Libre Baskerville', 'Georgia', 'Times New Roman', serif;
-  /* Writing font — matches the HorseMD website (website/styles.css). */
+  /* Writing font — matches the EasyMarkdown website (website/styles.css). */
   --font-write: 'Helvetica Neue', Helvetica, Arial, 'PingFang SC', 'Hiragino Sans GB',
     'Source Han Sans SC', 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
   --font-mono: 'Space Grotesk', 'JetBrains Mono', ui-monospace, 'SFMono-Regular', Consolas, monospace;
@@ -795,6 +795,64 @@ button:focus-visible,
   font-variant-numeric: tabular-nums;
   font-weight: 600;
 }
+/* About / credits popover: logo + wordmark, attribution lines, repo links. */
+.hm-about-pop {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  right: 0;
+  z-index: 200;
+  width: 300px;
+  padding: 16px 16px 14px;
+  animation: menuFadeIn 0.12s var(--ease-out);
+}
+.hm-about-head {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  margin-bottom: 12px;
+}
+.hm-about-logo {
+  width: 38px;
+  height: 38px;
+  border-radius: 9px;
+  flex-shrink: 0;
+}
+.hm-about-name-ver {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+.hm-about-brand {
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+.hm-about-brand .brand-easy { color: var(--text-strong); }
+.hm-about-brand .brand-md { color: #f07010; }
+.hm-about-ver {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.hm-about-text {
+  margin: 0 0 8px;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--muted);
+  overflow-wrap: break-word;
+  word-break: break-word;
+}
+.hm-about-name { color: var(--text-strong); font-weight: 600; }
+.hm-about-license {
+  margin-top: 10px;
+  font-size: 11px;
+  color: var(--faint);
+}
+/* Same credits block, embedded in the mobile "more" sheet. */
+.hm-about-sheet { padding: 4px 12px 8px; }
+
 .hm-pop-title {
   font-size: 13px;
   font-weight: 600;
@@ -1597,12 +1655,44 @@ button:focus-visible,
   width: 2px;
   background: var(--accent);
 }
-/* While dragging the divider, force the resize cursor and kill selection. */
+/* Sidebar resize handle — a thin strip on the sidebar's right edge. Sits in the
+   .body flex row between the aside and the editor; overlaps the border so it's
+   easy to grab without taking visible layout space. */
+.hm-sidebar-divider {
+  flex: 0 0 auto;
+  align-self: stretch;
+  position: relative;
+  z-index: 10;
+  width: 7px;
+  /* Negative margins cancel the 7px so the handle overlaps the sidebar border
+     instead of pushing the editor over. */
+  margin-left: -4px;
+  margin-right: -3px;
+  cursor: col-resize;
+}
+.hm-sidebar-divider::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 4px;
+  width: 1px;
+  background: transparent;
+  transition: background 0.15s var(--ease-out), width 0.15s var(--ease-out);
+}
+.hm-sidebar-divider:hover::before {
+  width: 2px;
+  background: var(--accent);
+}
+
+/* While dragging a divider, force the resize cursor, kill selection, and freeze
+   the sidebar's width transition so it tracks the pointer 1:1. */
 body.hm-col-resizing,
 body.hm-col-resizing * {
   cursor: col-resize !important;
   user-select: none !important;
 }
+body.hm-col-resizing .pane-left { transition: none !important; }
 /* Close-split: a bare ✕ at the right pane's top-right (no filename label). The
    native title gives a hover tooltip. Faint until hovered, so it stays unobtrusive. */
 .hm-split-close {
@@ -2071,6 +2161,16 @@ body.hm-full-width .source-editor {
 }
 .status-dot.mod { color: var(--accent); }
 .status-dot.ok { color: var(--faint); }
+/* Keep-mode table-filter badge: "筛选 N/M 条" — accent-tinted so it reads as an
+   active state, sits next to the saved/modified dot. */
+.status-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  color: var(--accent);
+  font-weight: 500;
+}
 .status-btn {
   display: flex;
   align-items: center;
@@ -2216,11 +2316,18 @@ body.hm-full-width .source-editor {
   font-size: 42px;
   margin: 0 0 10px;
   font-weight: 700;
-  background: linear-gradient(135deg, var(--accent-strong), var(--accent));
-  -webkit-background-clip: text;
-  background-clip: text;
-  -webkit-text-fill-color: transparent;
   letter-spacing: -0.02em;
+}
+/* Brand wordmark mirrors the logo: "Easy" in the strong text color (near-black
+   in light themes, near-white in dark so it stays legible), "Markdown" in the
+   logo's orange. */
+.welcome-card h1 .brand-easy {
+  color: var(--text-strong);
+  -webkit-text-fill-color: var(--text-strong);
+}
+.welcome-card h1 .brand-md {
+  color: #f07010;
+  -webkit-text-fill-color: #f07010;
 }
 /* Version tag next to the title — small and muted, with its own solid color
    (the h1 uses a transparent gradient text fill, which we override here). */
@@ -3027,4 +3134,334 @@ body.dark .milkdown {
   border-radius: 50%;
   background: var(--accent);
   margin-left: auto;
+}
+
+/* ============================================================================
+   Keep mode (source-backed editing) — the default `.md` editor. Plain rendered
+   HTML (no ProseMirror); editing is location-scoped (table cells / block source)
+   so saving stays byte-for-byte diff-clean. Theme-variable driven; `km-` prefix
+   avoids any collision with the Crepe editor styles above.
+   ============================================================================ */
+.km-scroll {
+  /* shares .editor-scroll (flex/overflow) — only content layout differs */
+}
+.km-doc {
+  max-width: var(--editor-max-width, 800px);
+  margin: 0 auto;
+  padding: 16px 60px 60vh;
+  font-size: var(--editor-font-size, 16px);
+  line-height: 1.8;
+  color: var(--text);
+  font-family: var(--font-write);
+}
+body.hm-full-width .km-doc {
+  max-width: none;
+}
+.km-empty {
+  color: var(--faint);
+  padding: 40px 0;
+  text-align: center;
+}
+
+/* Each block wraps its rendered content + a hover-revealed "edit source" button. */
+.km-block {
+  position: relative;
+}
+.km-block > *:first-child {
+  margin-top: 0;
+}
+.km-doc > .km-block:first-child > :nth-child(2) {
+  margin-top: 0;
+}
+.km-src-edit {
+  position: absolute;
+  left: -10px;
+  top: 2px;
+  transform: translateX(-100%);
+  opacity: 0;
+  transition: opacity 0.15s var(--ease-out);
+  font-size: 11px;
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  background: var(--bg-elevated);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  white-space: nowrap;
+  color: var(--muted);
+  z-index: 2;
+}
+.km-block:hover > .km-src-edit {
+  opacity: 1;
+}
+.km-src-edit:hover {
+  color: var(--text);
+  background: var(--hover);
+}
+.km-src-editor {
+  width: 100%;
+  font-family: var(--font-mono);
+  font-size: 13.5px;
+  border: 2px solid var(--accent);
+  border-radius: var(--radius-md);
+  padding: 10px 12px;
+  resize: vertical;
+  line-height: 1.6;
+  background: var(--bg-editor);
+  color: var(--text);
+}
+.km-src-actions {
+  margin: 6px 0;
+  display: flex;
+  gap: 8px;
+}
+.km-src-actions button {
+  font: inherit;
+  font-size: 12px;
+  padding: 4px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  background: var(--bg-elevated);
+  color: var(--text);
+}
+.km-src-actions button.ok {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent-strong);
+}
+
+/* Content typography — mirror the Crepe editor's Typora-ish hierarchy. */
+.km-doc h1,
+.km-doc h2,
+.km-doc h3,
+.km-doc h4,
+.km-doc h5,
+.km-doc h6 {
+  font-weight: 700;
+  line-height: 1.3;
+  margin: 1.8em 0 0.6em;
+  color: var(--text-strong);
+}
+.km-doc h1 {
+  font-size: 2.25em;
+  letter-spacing: -0.03em;
+  border-bottom: 1px solid var(--border-soft);
+  padding-bottom: 0.3em;
+}
+.km-doc h2 {
+  font-size: 1.75em;
+  letter-spacing: -0.02em;
+}
+.km-doc h3 { font-size: 1.4em; font-weight: 600; }
+.km-doc h4 { font-size: 1.2em; font-weight: 600; }
+.km-doc h5,
+.km-doc h6 {
+  font-size: 1em;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.km-doc p { margin: 0.8em 0; line-height: 1.85; }
+.km-doc ul,
+.km-doc ol { margin: 0.8em 0; padding-left: 1.6em; line-height: 1.8; }
+.km-doc li { margin: 0.2em 0; }
+.km-doc a {
+  color: var(--accent);
+  text-decoration: none;
+  border-bottom: 1px solid var(--accent-soft);
+}
+.km-doc a:hover { border-color: var(--accent); }
+.km-doc blockquote {
+  margin: 1.5em 0;
+  padding: 0.5em 1.5em;
+  border-left: 4px solid var(--accent);
+  background: var(--accent-soft);
+  color: var(--text);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+}
+.km-doc pre {
+  background: var(--code-bg);
+  border: 1px solid var(--code-border);
+  border-radius: var(--radius-md);
+  padding: 16px 18px;
+  margin: 1.5em 0;
+  overflow-x: auto;
+  line-height: 1.6;
+}
+.km-doc pre code {
+  font-family: var(--font-mono);
+  font-size: 0.92em;
+  color: var(--text);
+}
+.km-doc code {
+  background: var(--code-bg);
+  border: 1px solid var(--code-border);
+  border-radius: var(--radius-sm);
+  padding: 1px 5px;
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+}
+.km-doc pre code {
+  background: none;
+  border: none;
+  padding: 0;
+}
+.km-doc hr {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 2em 0;
+}
+
+/* Tables — Excel-style with per-column filter + double-click cell editing. */
+.km-table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  margin: 1.2em 0;
+}
+.km-table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 0.92em;
+}
+.km-table th,
+.km-table td {
+  border: 1px solid var(--border);
+  padding: 7px 10px;
+  text-align: left;
+  vertical-align: top;
+}
+.km-table th {
+  background: var(--hover-elevated, var(--border-soft));
+  color: var(--text-strong);
+  position: relative;
+  white-space: nowrap;
+  font-weight: 600;
+}
+.km-table td {
+  cursor: cell;
+}
+.km-table td:hover {
+  background: var(--hover);
+}
+.km-table tr.km-filtered {
+  display: none;
+}
+.km-th-flex {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  justify-content: space-between;
+}
+.km-filter-btn {
+  border: none;
+  background: none;
+  cursor: pointer;
+  font-size: 10px;
+  color: var(--muted);
+  padding: 2px 4px;
+  border-radius: var(--radius-sm);
+  line-height: 1;
+}
+.km-filter-btn:hover {
+  background: var(--active);
+  color: var(--text);
+}
+.km-filter-btn.active {
+  color: #fff;
+  background: var(--accent);
+}
+.km-cell-input {
+  width: 100%;
+  font: inherit;
+  border: 2px solid var(--accent);
+  border-radius: var(--radius-sm);
+  padding: 4px;
+  background: var(--bg-editor);
+  color: var(--text);
+}
+textarea.km-cell-input {
+  min-height: 60px;
+  resize: vertical;
+  font-family: var(--font-mono);
+}
+
+/* Column filter dropdown — appended to <body>, so it's styled globally. */
+.km-filter-pop {
+  position: absolute;
+  z-index: 1200;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  width: 240px;
+  padding: 8px;
+  font-size: 13px;
+  color: var(--text);
+}
+.km-filter-pop .km-fp-search {
+  width: 100%;
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  margin-bottom: 6px;
+  font: inherit;
+  background: var(--bg-editor);
+  color: var(--text);
+}
+.km-filter-pop .km-fp-tools {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 6px;
+  font-size: 12px;
+}
+.km-filter-pop .km-fp-tools a {
+  color: var(--accent);
+  cursor: pointer;
+  text-decoration: underline;
+}
+.km-filter-pop .km-fp-list {
+  max-height: 220px;
+  overflow: auto;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  padding: 4px;
+}
+.km-filter-pop label {
+  display: flex;
+  gap: 6px;
+  align-items: flex-start;
+  padding: 3px 4px;
+  cursor: pointer;
+  line-height: 1.3;
+}
+.km-filter-pop label:hover {
+  background: var(--hover);
+}
+.km-filter-pop .km-fp-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 8px;
+}
+.km-filter-pop .km-fp-actions button {
+  font: inherit;
+  font-size: 12px;
+  padding: 4px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  background: var(--bg-elevated);
+  color: var(--text);
+}
+.km-filter-pop .km-fp-actions button.ok {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent-strong);
+}
+
+/* While a custom (Typora) theme is active, let it own the writing surface. */
+body.hm-has-custom-theme .km-doc {
+  max-width: none;
+  color: inherit;
 }

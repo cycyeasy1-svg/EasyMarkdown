@@ -24,6 +24,13 @@ export default defineConfig({
   },
   renderer: {
     root: resolve(__dirname, 'src/renderer'),
+    // Bind the dev server to IPv4 127.0.0.1 explicitly. On Windows, `localhost`
+    // often resolves to IPv6 `::1`, so Vite binds ::1 only — but Electron's
+    // Chromium maps `localhost` to IPv4 127.0.0.1, so the renderer can't reach
+    // the dev server (ERR_CONNECTION_REFUSED → black window). Forcing 127.0.0.1
+    // makes the bind address match what Electron dials. No effect on the packaged
+    // app (it loads from file://), nor on macOS/Linux (127.0.0.1 always works).
+    server: { host: '127.0.0.1' },
     define: {
       __APP_VERSION__: JSON.stringify(pkg.version)
     },

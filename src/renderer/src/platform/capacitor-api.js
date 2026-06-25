@@ -7,9 +7,9 @@
 // native menus, PDF export, image-host exec) degrade to safe no-ops and are
 // also advertised via `capabilities` so the UI can hide what isn't available.
 //
-// File model (MVP): an app-private library under Documents/HorseMD. Paths handed
+// File model (MVP): an app-private library under Documents/EasyMarkdown. Paths handed
 // to the renderer are POSIX-relative to that Documents directory (e.g.
-// "HorseMD/notes.md"); the renderer treats `path` as an opaque string.
+// "EasyMarkdown/notes.md"); the renderer treats `path` as an opaque string.
 import { Capacitor } from '@capacitor/core'
 import { Filesystem, Directory, Encoding } from '@capacitor/filesystem'
 import { App as CapApp } from '@capacitor/app'
@@ -23,7 +23,7 @@ import { FilePicker } from '@capawesome/capacitor-file-picker'
 // use the app's external files dir there — always writable, no permission, and
 // still browsable in-app (and over USB).
 const DIR = Capacitor.getPlatform() === 'ios' ? Directory.Documents : Directory.External
-const LIB = 'HorseMD' // library subfolder
+const LIB = 'EasyMarkdown' // library subfolder
 const MD_RE = /\.(md|markdown|mdx)$/i
 
 const stat = async (path) => {
@@ -215,7 +215,7 @@ const saveAs = async (defaultName) => {
 // exist on mobile, so their subscribers are no-ops returning an unsubscribe fn.
 const noopOff = () => () => {}
 
-// File associations: another app "opens / copies a .md to HorseMD". iOS/Android
+// File associations: another app "opens / copies a .md to EasyMarkdown". iOS/Android
 // hand us a file/content URL; copy it into the library so the editor can open it
 // by a stable path (and the user keeps an editable copy).
 const onOpenPaths = (cb) => {
@@ -320,7 +320,7 @@ export function makeCapacitorApi() {
     shareFile: async (path) => {
       try {
         const { uri } = await Filesystem.getUri({ path, directory: DIR })
-        await Share.share({ files: [uri], dialogTitle: 'HorseMD' })
+        await Share.share({ files: [uri], dialogTitle: 'EasyMarkdown' })
         return { ok: true }
       } catch (e) {
         return { ok: false, error: e?.message || String(e) }

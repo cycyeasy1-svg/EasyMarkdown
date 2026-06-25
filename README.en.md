@@ -1,4 +1,4 @@
-# HorseMD
+# EasyMarkdown
 
 [![CI](https://github.com/BND-1/horseMD/actions/workflows/ci.yml/badge.svg)](https://github.com/BND-1/horseMD/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/BND-1/horseMD?include_prereleases)](https://github.com/BND-1/horseMD/releases)
@@ -11,12 +11,12 @@ thing Typora gets wrong: **every file opens as a tab in the same window**, not a
 new app instance. Browse a whole folder in the sidebar, flip between files in
 tabs, and write in a clean WYSIWYG editor.
 
-![HorseMD — folder workspace, tabs, and live WYSIWYG rendering](./docs/screenshots/hero_light.png)
+![EasyMarkdown — folder workspace, tabs, and live WYSIWYG rendering](./docs/screenshots/hero_light.png)
 
-## Why HorseMD
+## Why EasyMarkdown
 
 Most Markdown editors make you choose between a beautiful WYSIWYG canvas and a
-real multi-file workflow. HorseMD gives you both: a **single window** that holds
+real multi-file workflow. EasyMarkdown gives you both: a **single window** that holds
 your whole folder in a file tree, every open document in a **tab**, and an
 in-place live-preview editor powered by [Milkdown](https://milkdown.dev/)
 (ProseMirror). It runs on **Windows and macOS** from one codebase, and the whole
@@ -45,9 +45,9 @@ interface speaks both **English and 中文**.
 - **Split view** — two documents side by side, both editable (right-click a tab → "Open in Split", or the split button in the top bar; close with the ✕ on the right pane)
 - **Adjustable editor width** — status-bar presets (Narrow/Medium/Wide/Full) + a fine-tune slider
 - **Custom themes** — drop a `.css` into the themes folder; **Typora themes work directly**
-- **Unsaved scratch tabs survive a restart** — a new, never-saved doc is still there next time you open HorseMD
+- **Unsaved scratch tabs survive a restart** — a new, never-saved doc is still there next time you open EasyMarkdown
 - **Folder workspace** — a file tree with create / rename / duplicate / delete / reveal / export-PDF, plus **drag-and-drop to move** and expand-all / collapse-all
-- **Open in the same window** — double-clicking a file in Finder/Explorer adds a tab; "Open with HorseMD" on a folder opens it as a workspace
+- **Open in the same window** — double-clicking a file in Finder/Explorer adds a tab; "Open with EasyMarkdown" on a folder opens it as a workspace
 - **Command palette** (`Ctrl/Cmd+P`) — fuzzy-jump to any file or command
 - **Find in file** (`Ctrl/Cmd+F`) — highlights matches in the document with a live count
 - **Outline panel** (`Ctrl+Shift+L`) — click a heading to jump
@@ -101,25 +101,25 @@ Grab the latest installer from the [**Releases page**](https://github.com/BND-1/
 ### 🍎 macOS (step by step)
 
 1. Check your chip: **Apple menu → "About This Mac"**:
-   - **"Apple M1 / M2 / M3…"** (Apple Silicon) → download **`HorseMD-x.x.x-arm64.dmg`**.
-   - **"Intel"** → download **`HorseMD-x.x.x.dmg`** (the one without the `-arm64` suffix).
-2. Double-click the `.dmg` and **drag the HorseMD icon into the Applications folder**.
+   - **"Apple M1 / M2 / M3…"** (Apple Silicon) → download **`EasyMarkdown-x.x.x-arm64.dmg`**.
+   - **"Intel"** → download **`EasyMarkdown-x.x.x.dmg`** (the one without the `-arm64` suffix).
+2. Double-click the `.dmg` and **drag the EasyMarkdown icon into the Applications folder**.
 3. **First launch** (important): double-clicking usually shows **"damaged and can't be opened"** or **"can't verify the developer"** — that's just the missing signature. Use either:
 
-   - **Option A (easiest, recommended)**: in Finder → **Applications**, **Control-click (or right-click) HorseMD → Open**, then click **Open** in the dialog. After this it opens normally by double-click.
+   - **Option A (easiest, recommended)**: in Finder → **Applications**, **Control-click (or right-click) EasyMarkdown → Open**, then click **Open** in the dialog. After this it opens normally by double-click.
    - **Option B (if A still says "damaged")**: open **Terminal** (Launchpad → Other → Terminal), paste this line and press Return:
 
      ```bash
-     xattr -cr /Applications/HorseMD.app
+     xattr -cr /Applications/EasyMarkdown.app
      ```
 
-     then double-click HorseMD again.
+     then double-click EasyMarkdown again.
 
 > You only need to do this **once per Mac**; updates generally won't require it again.
 
 ### 🪟 Windows
 
-1. Download **`HorseMD-Setup-x.x.x.exe`** and run it.
+1. Download **`EasyMarkdown-Setup-x.x.x.exe`** and run it.
 2. If a blue **SmartScreen** "Windows protected your PC" prompt appears, click **More info → Run anyway**.
 3. Follow the installer (you can choose the install folder), then launch from Start menu / desktop.
 
@@ -127,12 +127,12 @@ Grab the latest installer from the [**Releases page**](https://github.com/BND-1/
 
 ## Community & support
 
-If HorseMD works well for you, come say hi 🐎 — talk Markdown, request features, report bugs.
+If EasyMarkdown works well for you, come say hi 🐎 — talk Markdown, request features, report bugs.
 
 | Add me on WeChat | WeChat group | Buy me a coffee ☕ |
 | :---: | :---: | :---: |
-| <img src="./docs/community/wechat-personal.jpg" width="220" alt="Author's WeChat"> | <img src="./docs/community/wechat-group.jpg" width="220" alt="HorseMD WeChat group"> | <img src="./docs/community/coffee.jpg" width="220" alt="Buy the author a coffee"> |
-| Add me (note "HorseMD") and I'll pull you into the group | Scan to join (group QR refreshes periodically — **if expired, add me on the left**) | If it's useful, treat the author to a coffee — the best fuel for updates |
+| <img src="./docs/community/wechat-personal.jpg" width="220" alt="Author's WeChat"> | <img src="./docs/community/wechat-group.jpg" width="220" alt="EasyMarkdown WeChat group"> | <img src="./docs/community/coffee.jpg" width="220" alt="Buy the author a coffee"> |
+| Add me (note "EasyMarkdown") and I'll pull you into the group | Scan to join (group QR refreshes periodically — **if expired, add me on the left**) | If it's useful, treat the author to a coffee — the best fuel for updates |
 
 ## Develop
 

@@ -19,4 +19,4 @@ Include:
 - The app version and OS.
 
 You can expect an initial response within a reasonable time frame. Thanks for
-helping keep HorseMD and its users safe.
+helping keep EasyMarkdown and its users safe.

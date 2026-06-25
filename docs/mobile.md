@@ -5,7 +5,7 @@
 
 ## 0. 为什么是 Capacitor
 
-HorseMD 的渲染层(React + Vite + **Milkdown Crepe**)是纯 Web/DOM 的,桌面只是用
+EasyMarkdown 的渲染层(React + Vite + **Milkdown Crepe**)是纯 Web/DOM 的,桌面只是用
 Electron 当壳、用 `window.api`(白名单 IPC)桥接原生能力。Capacitor 同样是"原生壳
 包 WebView",于是**整个渲染层可以原样复用**,我们要做的只是给 `window.api` 这套
 **契约**再写一个用 Capacitor 插件实现的版本。Milkdown 是 DOM 编辑器,RN 得塞进
@@ -84,7 +84,7 @@ capabilities = {
 存 Capacitor Filesystem 的 URI / Android SAF content URI 即可,业务逻辑大多无感。
 
 MVP 的文件来源两类:
-1. **App 私有库**(默认,零授权,永远可用):`Directory.Documents` 下的 `HorseMD/`,
+1. **App 私有库**(默认,零授权,永远可用):`Directory.Documents` 下的 `EasyMarkdown/`,
    新建 / 列表 / 编辑 / 保存都在这里。首页"最近文件"复用现有 recents。
 2. **导入 / 打开外部文件**:文档选择器选 .md → 读入成一个标签;保存走"另存/分享"。
 
@@ -127,9 +127,9 @@ npx cap open ios|android   # 出包 / 真机调试
 `package.json` 加 `build:mobile`、`cap:*` 脚本。`.gitignore` 忽略 `dist-mobile/`
 及原生构建产物(`ios/App/Pods`、`android/.gradle` 等;平台目录是否入库后续定)。
 
-`appId` 建议 `net.yangsir.horsemd`;应用名 HorseMD;图标/启动屏复用 `build/icon.png`。
+`appId` 建议 `net.yangsir.horsemd`;应用名 EasyMarkdown;图标/启动屏复用 `build/icon.png`。
 
-## 7. 文件关联("用 HorseMD 打开 .md")
+## 7. 文件关联("用 EasyMarkdown 打开 .md")
 
 - iOS:`Info.plist` 注册 `CFBundleDocumentTypes`(public.markdown / .md)。
 - Android:`AndroidManifest.xml` intent-filter(`text/markdown`、`.md`)。
@@ -166,7 +166,7 @@ npx cap open ios|android   # 出包 / 真机调试
    ```bash
    keytool -genkeypair -v -keystore android/app/horsemd.keystore \
      -alias horsemd -keyalg RSA -keysize 2048 -validity 10000 \
-     -dname "CN=HorseMD, O=HorseMD, C=CN"
+     -dname "CN=EasyMarkdown, O=EasyMarkdown, C=CN"
    ```
    按提示设一个口令(自己记牢)。
 2. 复制 `android/key.properties.example` → `android/key.properties`,填入口令(此文件已 gitignore)。

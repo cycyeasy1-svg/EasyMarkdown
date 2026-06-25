@@ -1,4 +1,4 @@
-# Contributing to HorseMD
+# Contributing to EasyMarkdown
 
 Thanks for taking the time to contribute! 🎉
 

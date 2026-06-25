@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import Editor from './components/Editor.jsx'
+import KeepEditor from './components/KeepEditor.jsx'
 import Sidebar from './components/Sidebar.jsx'
 import Tabs from './components/Tabs.jsx'
 import Outline from './components/Outline.jsx'
@@ -39,6 +40,11 @@ export default function App() {
   // writing surface front-and-center (desktop keeps its previous default).
   const [sidebarOpen, setSidebarOpen] = useState(session.sidebarOpen ?? !isMobile)
   const [sidebarMode, setSidebarMode] = useState(session.sidebarMode || 'files') // 'files' or 'outline'
+  // Desktop sidebar width (px), dragged via the divider on its right edge and
+  // persisted across sessions. Ignored on mobile (the sidebar overlays).
+  const [sidebarWidth, setSidebarWidth] = useState(() =>
+    Math.min(560, Math.max(180, Number(session.sidebarWidth) || 260))
+  )
   const [theme, setTheme] = useState(session.theme || DEFAULT_THEME)
   // Active custom CSS theme (filename in userData/themes), or null. Overlays the
   // built-in base theme. `customThemes` is the list scanned from that folder.
@@ -86,9 +92,13 @@ export default function App() {
   // User preferences (page width, image-host command). Persisted separately from
   // the session; see settings.js.
   const [settings, setSettings] = useState(loadSettings)
+  // Keep-mode table-filter results per tab id ({ shown, total } or null) — drives
+  // the status-bar "filtered N/M" badge for the active tab.
+  const [keepFilters, setKeepFilters] = useState({})
 
   const editorHostRef = useRef(null) // active rich editor's scroll container
   const editorAreaRef = useRef(null) // flex row holding the editor panes (for split-drag math)
+  const paneLeftRef = useRef(null) // sidebar <aside> (for resize-drag math)
   const sourceRef = useRef(null) // active source-mode <textarea>
   const scrollRatioRef = useRef(null) // pending scroll position to restore across a mode switch
   const findInputRef = useRef(null)
@@ -122,6 +132,10 @@ export default function App() {
   // Tab ids the user explicitly chose to render richly despite being "heavy"
   // (would otherwise open in the fast plain-text editor to avoid a long freeze).
   const [richForced, setRichForced] = useState(() => new Set())
+  // Tab ids the user explicitly switched to the Milkdown (Crepe) editor. `.md`
+  // docs default to the source-backed "keep" editor (zero-diff saves); this Set
+  // opts a tab into full WYSIWYG instead. Mirrors `richForced` (heavy-doc opt-in).
+  const [milkdownForced, setMilkdownForced] = useState(() => new Set())
 
   const activeTab = useMemo(() => tabs.find((t) => t.id === activeId) || null, [tabs, activeId])
   const activePath = activeTab?.path || null
@@ -158,6 +172,16 @@ export default function App() {
       return changed ? next : prev
     })
     setRichForced((prev) => {
+      if (!prev.size) return prev
+      let changed = false
+      const next = new Set()
+      for (const id of prev) {
+        if (live.has(id)) next.add(id)
+        else changed = true
+      }
+      return changed ? next : prev
+    })
+    setMilkdownForced((prev) => {
       if (!prev.size) return prev
       let changed = false
       const next = new Set()
@@ -276,6 +300,30 @@ export default function App() {
       scrollRatioRef.current = null
     }
     setSourceMode((v) => !v)
+  }, [])
+
+  // Switch the active Markdown tab between keep mode (source-backed, default) and
+  // the Milkdown WYSIWYG editor. Only meaningful for `.md` docs that aren't heavy
+  // (heavy docs use the plain textarea) and not while global source mode is on.
+  const toggleEditorMode = useCallback(() => {
+    const id = activeIdRef.current
+    const tab = tabsRef.current.find((t) => t.id === id)
+    if (!tab || isPlainTextDoc(tab)) return
+    setMilkdownForced((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) {
+        // Milkdown → keep: Milkdown re-serializes the whole document, so its
+        // content may differ byte-wise from the original. Going back to keep
+        // adopts that reformatted text as the new source — warn if it's unsaved.
+        if (tab.content !== tab.savedContent && !window.confirm(tRef.current('confirm.switchKeepUnsaved'))) {
+          return prev
+        }
+        next.delete(id)
+      } else {
+        next.add(id)
+      }
+      return next
+    })
   }, [])
 
   useLayoutEffect(() => {
@@ -441,6 +489,24 @@ export default function App() {
       return list[(i + 1) % list.length].id
     })
     setHome(false)
+  }, [])
+
+  // Drag the divider on the sidebar's right edge to resize it. Width is measured
+  // from the sidebar's own left so the activity bar offset doesn't matter.
+  const startSidebarDrag = useCallback((e) => {
+    e.preventDefault()
+    const left = paneLeftRef.current?.getBoundingClientRect().left ?? 0
+    const onMove = (ev) => {
+      setSidebarWidth(Math.min(560, Math.max(180, Math.round(ev.clientX - left))))
+    }
+    const onUp = () => {
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+      document.body.classList.remove('hm-col-resizing')
+    }
+    document.body.classList.add('hm-col-resizing')
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
   }, [])
 
   // Drag the divider between the two split panes to change their ratio.
@@ -755,10 +821,20 @@ export default function App() {
     if (isMobile) setSidebarOpen(false)
     const doJump = () => {
       const host = editorHostRef.current
-      if (!host) return false
-      const hs = host.querySelectorAll(
-        '.ProseMirror h1, .ProseMirror h2, .ProseMirror h3, .ProseMirror h4, .ProseMirror h5, .ProseMirror h6'
-      )
+      let hs = host
+        ? host.querySelectorAll(
+            '.ProseMirror h1, .ProseMirror h2, .ProseMirror h3, .ProseMirror h4, .ProseMirror h5, .ProseMirror h6'
+          )
+        : null
+      // Keep mode: no ProseMirror — jump within the visible rendered `.km-doc`.
+      if (!hs || !hs.length) {
+        const kms = editorAreaRef.current?.querySelectorAll('.km-doc') || []
+        let km = null
+        kms.forEach((k) => {
+          if (!km && k.offsetParent !== null) km = k
+        })
+        hs = km ? km.querySelectorAll('h1, h2, h3, h4, h5, h6') : []
+      }
       const el = hs[index]
       if (!el) return false
       el.scrollIntoView({ behavior: 'smooth', block: 'start' })
@@ -871,6 +947,7 @@ export default function App() {
       setSidebarOpen(true)
     },
     toggleSource,
+    toggleEditorMode,
     toggleTheme: cycleTheme,
     find: () => {
       // Leave the Home page so find acts on the visible document, not a hidden one.
@@ -883,7 +960,7 @@ export default function App() {
   useEffect(() => {
     const offMenu = window.api.onMenu((cmd) => handlers.current[cmd]?.())
     const offOpen = window.api.onOpenPaths((paths) => openPaths(paths))
-    // A folder path arriving from Explorer's "Open with HorseMD" folder menu.
+    // A folder path arriving from Explorer's "Open with EasyMarkdown" folder menu.
     const offFolder = window.api.onOpenFolderPath?.((dir) => {
       if (!dir || !isAbsolutePath(dir)) return // never open a relative path as a workspace
       setWorkspace({ rootPath: dir, rootName: baseName(dir) })
@@ -999,6 +1076,7 @@ export default function App() {
       recents,
       sidebarOpen,
       sidebarMode,
+      sidebarWidth,
       openPaths: tabs.map((t) => t.path).filter(Boolean),
       // Persist unsaved scratch/new tabs (no path, with edited content) so they
       // survive a restart — closing the app no longer silently loses them. Only
@@ -1017,7 +1095,7 @@ export default function App() {
     // for a brief pause, then write once. The close path flushes the last edit.
     const id = setTimeout(flushSession, 400)
     return () => clearTimeout(id)
-  }, [workspace, theme, customTheme, lang, recents, sidebarOpen, sidebarMode, tabs, activePath, flushSession])
+  }, [workspace, theme, customTheme, lang, recents, sidebarOpen, sidebarMode, sidebarWidth, tabs, activePath, flushSession])
 
   // Flush the pending session snapshot immediately when the window is closing,
   // so the debounce above never drops the user's last few keystrokes.
@@ -1108,6 +1186,7 @@ export default function App() {
         { id: 'cmd.files', title: t('cmd.files'), icon: 'folder', run: () => handlers.current.toggleFiles() },
         { id: 'cmd.outline', title: t('cmd.outline'), icon: 'outline', run: () => handlers.current.toggleOutline() },
         { id: 'cmd.source', title: t('cmd.source'), icon: 'code', run: () => handlers.current.toggleSource() },
+        { id: 'cmd.toggleKeep', title: t('cmd.toggleKeep'), icon: 'shield', run: () => handlers.current.toggleEditorMode() },
         { id: 'cmd.theme', title: t('cmd.theme'), icon: 'moon', run: () => handlers.current.toggleTheme() },
         { id: 'cmd.find', title: t('cmd.find'), icon: 'search', run: () => handlers.current.find() }
       ].filter(Boolean)
@@ -1117,7 +1196,15 @@ export default function App() {
 
   // Discriminate the active view: the source <textarea> sets sourceRef only when
   // it's mounted (source mode or a .txt doc); otherwise we're in the rich editor.
-  const richRoot = () => editorHostRef.current?.querySelector('.ProseMirror') || null
+  // Keep mode has no ProseMirror — fall back to the visible rendered `.km-doc`
+  // so find still searches the document content there.
+  const richRoot = () => {
+    const pm = editorHostRef.current?.querySelector('.ProseMirror')
+    if (pm) return pm
+    const kms = editorAreaRef.current?.querySelectorAll('.km-doc') || []
+    for (const km of kms) if (km.offsetParent !== null) return km // the on-screen one
+    return null
+  }
   const findQueryRef = useRef('')
   const activeIdxRef = useRef(-1)
 
@@ -1195,7 +1282,7 @@ export default function App() {
           title={t('nav.home')}
           onClick={() => handlers.current.home()}
         >
-          <img className="activity-logo" src={logoUrl} alt="HorseMD" />
+          <img className="activity-logo" src={logoUrl} alt="EasyMarkdown" />
         </button>
         <button
           className={`activity-item${sidebarMode === 'files' ? ' active' : ''}`}
@@ -1285,7 +1372,11 @@ export default function App() {
       )}
 
       <div className="body">
-        <aside className={`pane-left${sidebarOpen ? '' : ' collapsed'}`}>
+        <aside
+          ref={paneLeftRef}
+          className={`pane-left${sidebarOpen ? '' : ' collapsed'}`}
+          style={!isMobile && sidebarOpen ? { width: sidebarWidth, maxWidth: sidebarWidth } : undefined}
+        >
           {sidebarOpen && (
             sidebarMode === 'files' ? (
               <Sidebar
@@ -1301,6 +1392,10 @@ export default function App() {
             )
           )}
         </aside>
+
+        {!isMobile && sidebarOpen && (
+          <div className="hm-sidebar-divider" onMouseDown={startSidebarDrag} title={t('side.dragResize')} />
+        )}
 
         <main className="pane-center">
           {find.open && (
@@ -1387,6 +1482,39 @@ export default function App() {
                     onMouseDown={onPaneFocus}
                     onChange={(e) => updateContent(tab.id, e.target.value, false)}
                   />
+                )
+              }
+              // `.md` default: the source-backed "keep" editor (zero-diff saves).
+              // The user can opt this tab into Milkdown WYSIWYG (milkdownForced).
+              // Reaching here means it's a Markdown doc not shown as plain source.
+              const usesKeep = !milkdownForced.has(tab.id)
+              if (usesKeep) {
+                if (!inView && !mountedIds.has(tab.id)) return null
+                return (
+                  <div
+                    // Distinct key prefix from the Milkdown wrapper so toggling
+                    // modes fully remounts (no ref/child reconciliation surprises).
+                    key={`keep:${tab.id}:${tab.reloadNonce}`}
+                    className={`editor-scroll km-scroll${paneClass}`}
+                    style={{ display: inView ? undefined : 'none', order, flex: paneFlex }}
+                    onFocusCapture={onPaneFocus}
+                    onMouseDownCapture={onPaneFocus}
+                  >
+                    <KeepEditor
+                      initialContent={tab.content}
+                      docPath={tab.path}
+                      onChange={(md, isInitial) => updateContent(tab.id, md, isInitial)}
+                      onReady={(api) => {
+                        editorApis.current[tab.id] = api
+                      }}
+                      onFilterChange={(info) =>
+                        setKeepFilters((m) => {
+                          if (!info && !(tab.id in m)) return m
+                          return { ...m, [tab.id]: info }
+                        })
+                      }
+                    />
+                  </div>
                 )
               }
               // Lazy mount: don't create a Crepe editor for a tab the user hasn't
@@ -1488,12 +1616,21 @@ export default function App() {
         setLang={setLang}
         sourceMode={sourceMode}
         onToggleSource={toggleSource}
+        keepEligible={
+          !!activeTab &&
+          !isPlainTextDoc(activeTab) &&
+          !(activeTab.heavy && !richForced.has(activeTab.id)) &&
+          !sourceMode
+        }
+        keepMode={!!activeTab && !milkdownForced.has(activeTab.id)}
+        onToggleKeep={() => handlers.current.toggleEditorMode()}
         activeBlock={activeBlock}
         onPickBlock={(id) => editorApis.current[activeId]?.setBlock(id)}
         pageWidth={settings.pageWidth}
         onSetPageWidth={(w) => updateSettings({ pageWidth: w })}
         fontSize={settings.fontSize}
         onSetFontSize={(s) => updateSettings({ fontSize: s })}
+        filterInfo={activeTab ? keepFilters[activeTab.id] : null}
       />
 
       <CommandPalette

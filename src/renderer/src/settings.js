@@ -33,8 +33,12 @@ export const FONT_SIZE_PRESETS = [
   { id: 'xlarge', size: 20 }
 ]
 
+// New installs default to full width (the editor fills the pane). Existing users
+// keep whatever they saved. DEFAULT_PAGE_WIDTH stays the numeric slider fallback.
+export const DEFAULT_PAGE_WIDTH_PREF = 'full'
+
 export const DEFAULT_SETTINGS = {
-  pageWidth: DEFAULT_PAGE_WIDTH,
+  pageWidth: DEFAULT_PAGE_WIDTH_PREF,
   fontSize: DEFAULT_FONT_SIZE,
   // Empty = no image host: pasted/uploaded images keep the default behavior
   // (a local object URL). When set, it's run like Typora's "custom command":
@@ -60,7 +64,7 @@ export function loadSettings() {
   try {
     const raw = JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}')
     return {
-      pageWidth: normalizeWidth(raw.pageWidth ?? DEFAULT_PAGE_WIDTH),
+      pageWidth: normalizeWidth(raw.pageWidth ?? DEFAULT_PAGE_WIDTH_PREF),
       fontSize: normalizeFontSize(raw.fontSize ?? DEFAULT_FONT_SIZE),
       imageUploadCommand:
         typeof raw.imageUploadCommand === 'string' ? raw.imageUploadCommand : ''

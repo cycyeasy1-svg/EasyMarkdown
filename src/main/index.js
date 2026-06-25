@@ -109,7 +109,7 @@ if (!gotLock) {
 }
 
 // Split launch args into markdown files and folders. A folder argument (from
-// the Explorer "Open with HorseMD" folder menu) opens as a workspace; markdown
+// the Explorer "Open with EasyMarkdown" folder menu) opens as a workspace; markdown
 // files open as tabs. Non-existent paths and flags are ignored.
 function extractArgs(argv) {
   const files = []
@@ -162,6 +162,11 @@ function createWindow() {
     minHeight: 480,
     show: false,
     backgroundColor: '#1a1b20',
+    // Dev-only window icon: the packaged app already gets its icon from
+    // build/icon.ico|icns via electron-builder, and build/ isn't bundled into
+    // the asar — so only point at it when running unpacked (npm run dev), else
+    // Electron warns about a missing file.
+    icon: app.isPackaged ? undefined : join(__dirname, '../../build/icon.png'),
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'hidden',
     // macOS: place the traffic lights at a fixed spot so the renderer can
     // reserve a matching gap (see `.app.is-mac` rules in app.css). y centers the
@@ -818,7 +823,7 @@ ipcMain.handle('update:check', async () => {
     // as an instant crash on open). net.fetch goes through Chromium's resolver,
     // which fails gracefully instead of crashing.
     const res = await net.fetch('https://api.github.com/repos/BND-1/horseMD/releases/latest', {
-      headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'HorseMD-Updater' }
+      headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'EasyMarkdown-Updater' }
     })
     if (!res.ok) return { ok: false }
     const data = await res.json()

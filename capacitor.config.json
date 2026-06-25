@@ -1,6 +1,6 @@
 {
-  "appId": "com.horsemd.app",
-  "appName": "HorseMD",
+  "appId": "com.easymarkdown.app",
+  "appName": "EasyMarkdown",
   "webDir": "dist-mobile",
   "ios": {
     "contentInset": "never",

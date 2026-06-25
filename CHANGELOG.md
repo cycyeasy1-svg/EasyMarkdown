@@ -8,11 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [0.3.0] - 2026-06-19
 
-HorseMD goes mobile, plus a batch of editor & UI improvements and an important
+EasyMarkdown goes mobile, plus a batch of editor & UI improvements and an important
 desktop crash fix.
 
 ### Added
-- **Mobile apps — iOS & Android.** HorseMD now runs on phones and tablets
+- **Mobile apps — iOS & Android.** EasyMarkdown now runs on phones and tablets
   (Capacitor): open / edit / save local Markdown, share & export files out, with
   themes, i18n, outline, and the command palette all working. Android ships as an
   APK on the release page; iOS is built from source (free Apple ID signing).
@@ -122,7 +122,7 @@ page width, in-cell line breaks, an Intel macOS build, and a nicer update prompt
 
 ### Changed
 - **Windows installer: the install location is now selectable**, and uninstalling
-  *or updating* only removes the files HorseMD shipped — any files you saved
+  *or updating* only removes the files EasyMarkdown shipped — any files you saved
   inside the install folder are left untouched.
 - **Cleaner split UI** — a 1px hairline divider, a single faint ✕ (hover-tooltip)
   to close the split, and the focused pane marked by its tab's accent underline
@@ -190,7 +190,7 @@ page width, in-cell line breaks, an Intel macOS build, and a nicer update prompt
   and a single click still selects the image / edits its caption.
 - **Home button** at the top of the activity bar (the app icon) — returns to the
   welcome/landing page while keeping open tabs mounted (clicking a tab goes back).
-- **Version number** shown next to "HorseMD" on the welcome page, so you can tell
+- **Version number** shown next to "EasyMarkdown" on the welcome page, so you can tell
   which build you're running.
 - **Raw HTML tables now render as tables** (like Typora). An HTML `<table>…</table>`
   written in the Markdown is shown as a real, theme-styled table instead of
@@ -235,7 +235,7 @@ page width, in-cell line breaks, an Intel macOS build, and a nicer update prompt
   Custom Highlight API: it no longer matches the text typed in the find box, and
   next/previous are instant (no IPC round-trip). Shows a live `x/total` count.
 - **Uninstall no longer deletes user files.** The uninstaller now removes only
-  the files HorseMD installed, so a document saved inside the install folder
+  the files EasyMarkdown installed, so a document saved inside the install folder
   (e.g. a Markdown note next to the app) is preserved instead of being wiped by
   a blanket recursive delete. The install location is also fixed to a dedicated
   per-user folder so the app can't be installed into a folder of your own files.
@@ -250,7 +250,7 @@ page width, in-cell line breaks, an Intel macOS build, and a nicer update prompt
 - Sidebar right-click: **Duplicate** a file, and **Export as PDF**.
 - Custom Windows caption buttons (minimize / maximize / close) with hover states
   (close turns red), replacing the native overlay.
-- Explorer **"Open with HorseMD"** entry on folders — opens a directory as a
+- Explorer **"Open with EasyMarkdown"** entry on folders — opens a directory as a
   workspace; the app now accepts a folder path on launch.
 - **Notify-only update check**: on launch, looks up the latest GitHub release and
   shows a dismissible "new version available" toast.
@@ -260,7 +260,7 @@ page width, in-cell line breaks, an Intel macOS build, and a nicer update prompt
 ### Changed
 - Source/rich toggle now **keeps the scroll position** and no longer rebuilds the
   background editors, so switching is much faster.
-- Shorter executable description ("HorseMD Markdown Editor") so the Explorer
+- Shorter executable description ("EasyMarkdown Markdown Editor") so the Explorer
   "Open with" name isn't a long sentence.
 
 ### Fixed
