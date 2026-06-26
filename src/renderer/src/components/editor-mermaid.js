@@ -15,7 +15,25 @@ import { Decoration, DecorationSet } from '@milkdown/prose/view'
 // Rendered SVGs cached by `theme::code` so re-renders (every keystroke rebuilds
 // the decoration set) reuse the previous SVG instead of re-running Mermaid, and
 // light/dark variants don't clobber each other. Shared across editor instances.
+//
+// Capped LRU so a long session editing many distinct diagrams (each keystroke
+// produces a new key) doesn't grow the cache without bound. Map preserves
+// insertion order, so the oldest key is evicted first; reads re-insert the hit
+// to mark it most-recently-used.
+const CACHE_MAX = 120
 const cache = new Map()
+const cacheGet = (k) => {
+  const v = cache.get(k)
+  if (v !== undefined) {
+    cache.delete(k)
+    cache.set(k, v)
+  }
+  return v
+}
+const cacheSet = (k, v) => {
+  cache.set(k, v)
+  while (cache.size > CACHE_MAX) cache.delete(cache.keys().next().value)
+}
 const pending = new Set()
 let seq = 0
 let mermaidMod = null
@@ -42,9 +60,9 @@ async function ensureRender(theme, code, refresh) {
     // Re-initialize per render so the diagram matches the current theme.
     mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', theme })
     const { svg } = await mermaid.render(id, code)
-    cache.set(k, { svg })
+    cacheSet(k, { svg })
   } catch (e) {
-    cache.set(k, { error: (e && e.message) || String(e) })
+    cacheSet(k, { error: (e && e.message) || String(e) })
   } finally {
     pending.delete(k)
     // Mermaid leaves a temporary element behind on syntax errors; clean it up.
@@ -65,7 +83,7 @@ function renderDom(code, refresh, t) {
     return wrap
   }
   const theme = curTheme()
-  const c = cache.get(keyFor(theme, trimmed))
+  const c = cacheGet(keyFor(theme, trimmed))
   if (c && c.svg) {
     wrap.innerHTML = c.svg
   } else if (c && c.error) {

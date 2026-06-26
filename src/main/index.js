@@ -190,6 +190,10 @@ function createWindow() {
   })
 
   mainWindow.once('ready-to-show', () => {
+    // Open maximized by default so the user doesn't have to click the
+    // maximize button on every launch. The 1280×820 size above is the
+    // restore size once they un-maximize.
+    mainWindow.maximize()
     focusMainWindow()
     const { files, folders } = extractArgs(process.argv)
     if (folders.length) sendToRenderer('open-folder', folders[0])
@@ -895,9 +899,13 @@ function buildMenu() {
         { type: 'separator' },
         { label: 'Toggle Theme', accelerator: 'CmdOrCtrl+Shift+T', click: menuCmd('toggleTheme') },
         { type: 'separator' },
-        { role: 'resetZoom' },
-        { role: 'zoomIn' },
-        { role: 'zoomOut' },
+        // Content-only zoom (not Electron's whole-window webFrame zoom): the
+        // renderer scales just the editor document. Keep the familiar
+        // accelerators so Cmd/Ctrl +/-/0 feel native.
+        { label: 'Zoom In', accelerator: 'CmdOrCtrl+=', click: menuCmd('zoomIn') },
+        { label: 'Zoom In', accelerator: 'CmdOrCtrl+Plus', click: menuCmd('zoomIn'), visible: false, acceleratorWorksWhenHidden: true },
+        { label: 'Zoom Out', accelerator: 'CmdOrCtrl+-', click: menuCmd('zoomOut') },
+        { label: 'Reset Zoom', accelerator: 'CmdOrCtrl+0', click: menuCmd('zoomReset') },
         { type: 'separator' },
         { role: 'togglefullscreen' },
         { role: 'toggleDevTools' }

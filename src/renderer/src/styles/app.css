@@ -841,6 +841,9 @@ button:focus-visible,
   font-size: 12.5px;
   line-height: 1.6;
   color: var(--muted);
+  /* The statusbar sets white-space:nowrap; reset it so these lines wrap inside
+     the popover instead of overflowing the box. */
+  white-space: normal;
   overflow-wrap: break-word;
   word-break: break-word;
 }
@@ -1228,13 +1231,13 @@ button:focus-visible,
      a clear window-drag area to the right of the tabs. */
   flex: 0 1 auto;
   height: 100%;
-  gap: 2px;
+  gap: 4px;
   overflow: hidden;
 }
 .tabs-scroll {
   display: flex;
   align-items: center;
-  gap: 2px;
+  gap: 4px;
   overflow-x: auto;
   overflow-y: hidden;
   scrollbar-width: none;
@@ -1248,10 +1251,19 @@ button:focus-visible,
   display: flex;
   align-items: center;
   gap: 8px;
-  max-width: 180px;
+  /* Browser-style sizing: a single tab grows to fit the whole filename (up to a
+     generous cap); as tabs pile up they shrink toward a minimum and then the
+     strip scrolls. flex-shrink lets the strip compress instead of always
+     scrolling. */
+  flex: 0 1 auto;
+  min-width: 84px;
+  max-width: 260px;
   height: 30px;
   padding: 0 12px;
+  border: 1px solid var(--border-soft);
+  border-bottom-color: transparent;
   border-radius: var(--radius-md) var(--radius-md) 0 0;
+  background: var(--bg);
   color: var(--muted);
   font-size: 13px;
   font-weight: 500;
@@ -1263,10 +1275,14 @@ button:focus-visible,
 }
 .tab:hover {
   background: var(--hover);
+  border-color: var(--border);
+  border-bottom-color: transparent;
   color: var(--text);
 }
 .tab.active {
   background: var(--bg-editor);
+  border-color: var(--border);
+  border-bottom-color: transparent;
   color: var(--text-strong);
 }
 .tab.active::after {
@@ -1296,6 +1312,7 @@ button:focus-visible,
 .tab-title {
   overflow: hidden;
   text-overflow: ellipsis;
+  min-width: 0;
 }
 .tab-close {
   display: grid;
@@ -1404,6 +1421,19 @@ button:focus-visible,
 .tree-row.active {
   background: var(--accent-soft);
   color: var(--accent-strong);
+}
+/* Files open in a tab (but not the active one) get a small dot at the row's
+   right edge. A non-background marker so it stacks cleanly with hover/active. */
+.tree-row.opened::after {
+  content: '';
+  margin-left: auto;
+  margin-right: 8px;
+  width: 6px;
+  height: 6px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--accent);
+  opacity: 0.6;
 }
 /* Drag-and-drop: the folder under the pointer gets a clear drop-target ring. */
 .tree-row.drag-over {
@@ -1554,19 +1584,38 @@ button:focus-visible,
   flex: 1;
 }
 .outline-item {
-  padding: 5px 10px;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 5px 10px 5px 4px;
   border-radius: var(--radius-sm);
   cursor: pointer;
   color: var(--muted);
   font-size: 13px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  transition: all 0.12s var(--ease-out);
+  transition: background 0.12s var(--ease-out), color 0.12s var(--ease-out);
 }
 .outline-item:hover {
   background: var(--hover);
   color: var(--text);
+}
+/* Fold toggle for a heading that has deeper sub-headings. Reuses the file
+   tree's chevron rotation; a spacer keeps childless rows' text aligned. */
+.outline-chevron {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  flex-shrink: 0;
+  color: var(--faint);
+  border-radius: var(--radius-sm);
+  transition: transform 0.2s var(--ease-spring), color 0.12s var(--ease-out);
+}
+.outline-chevron.chevron-expanded { transform: rotate(90deg); }
+.outline-chevron:not(.outline-chevron-spacer):hover { color: var(--text); }
+.outline-label {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .outline-item.lvl-1 {
   color: var(--text);
@@ -2045,8 +2094,10 @@ body.hm-full-width .editor-skeleton {
   background: var(--bg-editor);
   color: var(--text);
   font-family: var(--font-mono);
-  /* Track the editor font size, kept ~2px smaller (mono reads larger). */
-  font-size: calc(var(--editor-font-size, 16px) - 2px);
+  /* Track the editor font size, kept ~2px smaller (mono reads larger), and follow
+     the overall zoom. The textarea is a flex item, so we scale its font (not
+     `zoom`, which would disturb the flex sizing) — for plain source that's enough. */
+  font-size: calc((var(--editor-font-size, 16px) - 2px) * var(--editor-zoom, 1));
   line-height: 1.75;
   padding: 40px max(60px, calc((100% - var(--editor-max-width, 800px)) / 2)) 60vh;
   user-select: text;
@@ -2117,6 +2168,22 @@ body.hm-full-width .source-editor {
 .findbar button:hover {
   background: var(--hover);
   color: var(--text);
+}
+/* Mode toggle (text ⇄ line): tinted when line-locate is active. */
+.findbar-mode.active {
+  color: var(--accent-strong);
+  background: var(--accent-soft);
+}
+/* Line-locate: briefly glow the jumped-to preview block. Display-only — the
+   class is added/removed on the rendered `.km-block` / .ProseMirror child and
+   never touches the source. */
+.hm-line-flash {
+  animation: hmLineFlash 1.5s var(--ease-out);
+  border-radius: var(--radius-sm);
+}
+@keyframes hmLineFlash {
+  0%, 30% { background-color: var(--accent-soft); box-shadow: 0 0 0 6px var(--accent-soft); }
+  100% { background-color: transparent; box-shadow: 0 0 0 6px transparent; }
 }
 
 /* =====================================================
@@ -2365,6 +2432,9 @@ body.hm-full-width .source-editor {
   color: var(--text);
   transition: all 0.2s var(--ease-out);
   box-shadow: var(--shadow-sm);
+  /* Keep each button's label on one line — CJK (Japanese) text otherwise
+     breaks mid-word inside the button. The flex row still wraps button-by-button. */
+  white-space: nowrap;
 }
 .welcome-actions button:hover {
   background: var(--active);
@@ -2472,6 +2542,8 @@ body.hm-full-width .source-editor {
   display: inline-flex;
   align-items: center;
   gap: 5px;
+  /* Keep "<kbd> label" pairs intact; CJK labels otherwise wrap mid-word. */
+  white-space: nowrap;
 }
 kbd {
   font-family: var(--font-mono);
@@ -2531,6 +2603,8 @@ body.dark .milkdown {
   --crepe-font-title: var(--font-write);
   --crepe-font-default: var(--font-write);
   --crepe-font-code: var(--font-mono);
+  /* Overall zoom — see .km-doc. Magnifies the rich-editor document content. */
+  zoom: var(--editor-zoom, 1);
 }
 .milkdown .ProseMirror {
   /* Body font size is user-adjustable (status bar). Headings/code use em, so the
@@ -3153,6 +3227,12 @@ body.dark .milkdown {
   line-height: 1.8;
   color: var(--text);
   font-family: var(--font-write);
+  /* Overall zoom (Excel-style): magnifies the whole document — text, table cell
+     padding, borders, gaps — so zooming out fits a wide table on screen. Applied
+     on the content block, not the scroll container, so flex/scroll stay intact.
+     `zoom` (not transform: scale) so it affects layout: scrollWidth shrinks and
+     getBoundingClientRect stays correct for the filter popover / cell editor. */
+  zoom: var(--editor-zoom, 1);
 }
 body.hm-full-width .km-doc {
   max-width: none;
@@ -3163,9 +3243,23 @@ body.hm-full-width .km-doc {
   text-align: center;
 }
 
-/* Each block wraps its rendered content + a hover-revealed "edit source" button. */
+/* Each block wraps its rendered content + a hover-revealed "edit source" button.
+   On hover the whole block gets a soft background (mirrors the table-cell hover)
+   so the user can see exactly which range the edit button will affect. The
+   symmetric negative-margin/padding lets the highlight bleed into the gutters
+   without shifting the content. */
 .km-block {
   position: relative;
+  margin-left: -14px;
+  margin-right: -14px;
+  padding-left: 14px;
+  padding-right: 14px;
+  border-radius: var(--radius-md);
+  transition: background 0.12s var(--ease-out);
+}
+/* Highlight only editable (non-table) blocks — tables keep their cell hover. */
+.km-block:has(> .km-src-edit):hover {
+  background: var(--hover);
 }
 .km-block > *:first-child {
   margin-top: 0;
@@ -3173,29 +3267,47 @@ body.hm-full-width .km-doc {
 .km-doc > .km-block:first-child > :nth-child(2) {
   margin-top: 0;
 }
+/* Edit-source entry point: a pencil pill at the block's top-right, revealed on
+   hover. Anchored to the right so its label is never clipped by the scroll
+   container (the old left-gutter placement cut off wider labels like the
+   Japanese "ソースを編集"). */
 .km-src-edit {
   position: absolute;
-  left: -10px;
-  top: 2px;
-  transform: translateX(-100%);
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   opacity: 0;
   transition: opacity 0.15s var(--ease-out);
   font-size: 11px;
-  padding: 2px 8px;
+  padding: 3px 9px;
   border: 1px solid var(--border);
   background: var(--bg-elevated);
   border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-sm);
   cursor: pointer;
   white-space: nowrap;
   color: var(--muted);
-  z-index: 2;
+  z-index: 3;
+}
+/* Multi-line blocks pin the button to the top-right; single-line stays centered. */
+.km-block.km-multiline > .km-src-edit {
+  top: 6px;
+  transform: none;
+}
+.km-src-edit svg {
+  flex: none;
+  opacity: 0.85;
 }
 .km-block:hover > .km-src-edit {
   opacity: 1;
 }
 .km-src-edit:hover {
   color: var(--text);
-  background: var(--hover);
+  background: var(--hover-elevated);
+  border-color: var(--accent);
 }
 .km-src-editor {
   width: 100%;
@@ -3314,7 +3426,15 @@ body.hm-full-width .km-doc {
 
 /* Tables — Excel-style with per-column filter + double-click cell editing. */
 .km-table-wrap {
-  overflow-x: auto;
+  /* Constrained-height scroll box: the table scrolls inside it on BOTH axes.
+     This (a) lets the header stick to the top of the box on vertical scroll and
+     (b) keeps the horizontal scrollbar within one screen — reachable without
+     scrolling to the very bottom of a long table.
+     Cap = editor viewport height (window minus top bar + status bar, less a
+     small breathing margin), so the box grows/shrinks with the window instead of
+     a fixed fraction — fills the screen without ever overflowing the chrome. */
+  max-height: calc(100vh - var(--topbar-h) - var(--status-h) - 40px);
+  overflow: auto;
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   margin: 1.2em 0;
@@ -3334,7 +3454,13 @@ body.hm-full-width .km-doc {
 .km-table th {
   background: var(--hover-elevated, var(--border-soft));
   color: var(--text-strong);
-  position: relative;
+  /* Lock the header to the top of the scroll box. border-collapse:collapse drops
+     a sticky cell's own borders while scrolling, so redraw top/bottom rules with
+     an inset shadow. z-index keeps it above scrolled body cells. */
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  box-shadow: inset 0 1px 0 var(--border), inset 0 -1px 0 var(--border);
   white-space: nowrap;
   font-weight: 600;
 }
@@ -3458,6 +3584,48 @@ textarea.km-cell-input {
   background: var(--accent);
   color: #fff;
   border-color: var(--accent-strong);
+}
+
+/* Right-click table menu: insert / delete rows & columns (keep mode). */
+.km-table-menu {
+  position: fixed;
+  z-index: 1300;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  padding: 4px;
+  min-width: 168px;
+  font-size: 13px;
+  color: var(--text);
+}
+.km-table-menu .km-tm-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  font-size: 13px;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+}
+.km-table-menu .km-tm-item:hover {
+  background: var(--hover);
+}
+.km-table-menu .km-tm-item.disabled {
+  color: var(--muted);
+  cursor: default;
+}
+.km-table-menu .km-tm-item.disabled:hover {
+  background: transparent;
+}
+.km-table-menu .km-tm-sep {
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--border-soft);
 }
 
 /* While a custom (Typora) theme is active, let it own the writing surface. */

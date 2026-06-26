@@ -10,8 +10,14 @@ import {
   PAGE_WIDTH_MAX,
   FONT_SIZE_PRESETS,
   FONT_SIZE_MIN,
-  FONT_SIZE_MAX
+  FONT_SIZE_MAX,
+  ZOOM_PRESETS,
+  ZOOM_MIN,
+  ZOOM_MAX,
+  ZOOM_STEP
 } from '../settings.js'
+
+const zoomPct = (z) => Math.round(z * 100) + '%'
 
 // App version, injected at build time from package.json (see electron.vite.config).
 const APP_VERSION = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : ''
@@ -112,9 +118,17 @@ function AdjustGroup({ title, valueLabel, presets, activeIndex, onPick, pct, fro
 // holds both the font-size and editor-width adjusters. Replaces the two separate
 // status-bar buttons so the bar stays uncluttered. `hm-pagewidth` lets mobile
 // hide it via CSS (mobile sets size in the "more" sheet and forces full width).
-function LayoutControl({ fontSize, onSetFontSize, pageWidth, onSetPageWidth }) {
+function LayoutControl({ fontSize, onSetFontSize, pageWidth, onSetPageWidth, zoom, onSetZoom }) {
   const { t } = useI18n()
   const { open, setOpen, ref } = usePopover()
+
+  const zoomPctVal = (zoom - ZOOM_MIN) / (ZOOM_MAX - ZOOM_MIN)
+  const zoomIdx = ZOOM_PRESETS.findIndex((p) => p.zoom === zoom)
+  const zoomFromX = (track, clientX) => {
+    const r = track.getBoundingClientRect()
+    const p = Math.min(1, Math.max(0, (clientX - r.left) / r.width))
+    return ZOOM_MIN + p * (ZOOM_MAX - ZOOM_MIN)
+  }
 
   const fontPct = (fontSize - FONT_SIZE_MIN) / (FONT_SIZE_MAX - FONT_SIZE_MIN)
   const fontIdx = FONT_SIZE_PRESETS.findIndex((p) => p.size === fontSize)
@@ -162,6 +176,17 @@ function LayoutControl({ fontSize, onSetFontSize, pageWidth, onSetPageWidth }) {
             pct={widthPct}
             fromX={widthFromX}
             onSet={onSetPageWidth}
+          />
+          <div className="hm-pop-sep" />
+          <AdjustGroup
+            title={t('settings.zoom')}
+            valueLabel={zoomPct(zoom)}
+            presets={ZOOM_PRESETS.map((p) => ({ ...p, label: zoomPct(p.zoom) }))}
+            activeIndex={zoomIdx}
+            onPick={(p) => onSetZoom(p.zoom)}
+            pct={zoomPctVal}
+            fromX={zoomFromX}
+            onSet={onSetZoom}
           />
         </div>
       )}
@@ -300,7 +325,7 @@ function LangSwitch({ lang, setLang }) {
   return (
     <div className="block-switch" ref={ref}>
       <button className="status-btn" onClick={() => setOpen((v) => !v)} title={t('tip.language')}>
-        <Icon name="globe" size={14} /> {lang === 'zh' ? '中文' : 'EN'}
+        <Icon name="globe" size={14} /> {LANGS.find((l) => l.id === lang)?.label ?? 'EN'}
       </button>
       {open && (
         <div className="block-switch-menu">
@@ -375,12 +400,16 @@ function MobileMore({
   onPickCustom,
   onRefreshThemes,
   fontSize,
-  onSetFontSize
+  onSetFontSize,
+  zoom,
+  onSetZoom
 }) {
   const { t } = useI18n()
   const { open, setOpen, ref } = usePopover()
   const stepFont = (delta) =>
     onSetFontSize(Math.min(FONT_SIZE_MAX, Math.max(FONT_SIZE_MIN, fontSize + delta)))
+  const stepZoom = (delta) =>
+    onSetZoom(Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, zoom + delta)))
   const toggle = () => {
     if (!open) onRefreshThemes?.()
     setOpen((v) => !v)
@@ -433,6 +462,27 @@ function MobileMore({
               className="hm-fontstep"
               onClick={() => stepFont(1)}
               disabled={fontSize >= FONT_SIZE_MAX}
+              aria-label="+"
+            >
+              +
+            </button>
+          </div>
+
+          <div className="theme-menu-label">{t('settings.zoom')}</div>
+          <div className="hm-sheet-fontsize">
+            <button
+              className="hm-fontstep"
+              onClick={() => stepZoom(-ZOOM_STEP)}
+              disabled={zoom <= ZOOM_MIN}
+              aria-label="−"
+            >
+              −
+            </button>
+            <span className="hm-fontstep-value">{zoomPct(zoom)}</span>
+            <button
+              className="hm-fontstep"
+              onClick={() => stepZoom(ZOOM_STEP)}
+              disabled={zoom >= ZOOM_MAX}
               aria-label="+"
             >
               +
@@ -508,6 +558,8 @@ export default function StatusBar({
   onSetPageWidth,
   fontSize,
   onSetFontSize,
+  zoom,
+  onSetZoom,
   customThemes,
   customTheme,
   onPickCustom,
@@ -576,6 +628,8 @@ export default function StatusBar({
                 onRefreshThemes={onRefreshThemes}
                 fontSize={fontSize}
                 onSetFontSize={onSetFontSize}
+                zoom={zoom}
+                onSetZoom={onSetZoom}
               />
             </>
           )
@@ -599,6 +653,8 @@ export default function StatusBar({
               onSetFontSize={onSetFontSize}
               pageWidth={pageWidth}
               onSetPageWidth={onSetPageWidth}
+              zoom={zoom}
+              onSetZoom={onSetZoom}
             />
             <ThemePicker
               theme={theme}

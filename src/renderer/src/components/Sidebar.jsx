@@ -4,7 +4,7 @@ import { useI18n } from '../i18n.jsx'
 import { baseName, dirName as parentDir, joinPath as join, isMarkdownName, isValidName, isExistsError } from '../paths.js'
 import { copyToClipboard } from '../ui.js'
 
-export default function Sidebar({ workspace, activePath, onOpenFile, onOpenRight, onExportPdf, refreshNonce }) {
+export default function Sidebar({ workspace, activePath, openTabPaths, openTabPathsRaw, onOpenFile, onOpenRight, onExportPdf, refreshNonce }) {
   const { t } = useI18n()
   const copyText = (text) => copyToClipboard(text, t('code.copied'))
   const [childrenMap, setChildrenMap] = useState({}) // path -> nodes[]
@@ -29,6 +29,9 @@ export default function Sidebar({ workspace, activePath, onOpenFile, onOpenRight
   // Last path we scrolled to — so we reveal a file once when it's opened, not on
   // every later manual expand/collapse of unrelated folders.
   const lastScrolledRef = useRef(null)
+  // Open-tab paths we've already auto-revealed, so re-expanding doesn't fight a
+  // folder the user later collapses by hand (reset when the workspace changes).
+  const revealedRef = useRef(new Set())
 
   const loadDir = useCallback(async (dir) => {
     const nodes = await window.api.readDir(dir)
@@ -42,6 +45,7 @@ export default function Sidebar({ workspace, activePath, onOpenFile, onOpenRight
     setExpanded(new Set([workspace.rootPath]))
     setChildrenMap({})
     setCreating(null)
+    revealedRef.current = new Set()
     loadDir(workspace.rootPath)
   }, [workspace, loadDir])
 
@@ -52,44 +56,84 @@ export default function Sidebar({ workspace, activePath, onOpenFile, onOpenRight
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refreshNonce])
 
-  // Issue #11: follow the active file — when a file is opened/switched (via the
-  // tree, search, recents, internal links… all of which update activePath),
-  // auto-expand its ancestor folders so it's revealed in the tree. Only touches
-  // the ancestor chain (additive — never collapses what the user expanded), and
-  // only for files inside this workspace.
-  useEffect(() => {
-    if (!workspace || !activePath) return
-    const norm = (p) => p.replace(/\\/g, '/')
-    const root = norm(workspace.rootPath)
-    if (!norm(activePath).startsWith(root + '/')) return // not in this workspace
-    let cancelled = false
-    ;(async () => {
-      const ancestors = []
-      let d = parentDir(activePath)
-      let guard = 0
-      while (d && guard++ < 50) {
-        ancestors.unshift(d)
-        if (norm(d) === root) break
-        const up = parentDir(d)
-        if (!up || up === d) break
-        d = up
+  // Expand the ancestor folders of the given files so they're revealed in the
+  // tree. Additive — only ever adds to `expanded`, never collapses what the user
+  // opened. Loads each ancestor dir (so its children render) before expanding.
+  // Used both to follow the active file and to surface restored open tabs.
+  const revealAncestors = useCallback(
+    async (paths, isCancelled) => {
+      if (!workspace) return
+      const norm = (p) => p.replace(/\\/g, '/')
+      const root = norm(workspace.rootPath)
+      const ancestors = new Set()
+      for (const p of paths) {
+        if (!p || !norm(p).startsWith(root + '/')) continue // skip files outside this workspace
+        let d = parentDir(p)
+        let guard = 0
+        while (d && guard++ < 50) {
+          ancestors.add(d)
+          if (norm(d) === root) break
+          const up = parentDir(d)
+          if (!up || up === d) break
+          d = up
+        }
       }
-      // Load each ancestor (so its children render) — skip ones already loaded.
+      if (!ancestors.size) return
       for (const dir of ancestors) {
-        if (cancelled) return
+        if (isCancelled?.()) return
         if (!childrenRef.current[dir]) await loadDir(dir)
       }
-      if (cancelled) return
+      if (isCancelled?.()) return
       setExpanded((s) => {
         const n = new Set(s)
         ancestors.forEach((a) => n.add(a))
         return n
       })
-    })()
+    },
+    [workspace, loadDir]
+  )
+
+  // Issue #11: follow the active file — when a file is opened/switched (via the
+  // tree, search, recents, internal links… all of which update activePath),
+  // auto-expand its ancestor folders so it's revealed in the tree.
+  useEffect(() => {
+    if (!activePath) return
+    let cancelled = false
+    revealAncestors([activePath], () => cancelled)
     return () => {
       cancelled = true
     }
-  }, [activePath, workspace, loadDir])
+  }, [activePath, revealAncestors])
+
+  // Reveal every open tab's folder too, not just the active one — so a restored
+  // session (many tabs deep in the tree) shows them all, with their open-file
+  // dots. Each path is revealed only once (`revealedRef`), so this never fights a
+  // folder the user later collapses manually; it only expands newly-seen tabs.
+  useEffect(() => {
+    if (!workspace || !openTabPathsRaw?.length) return
+    const fresh = openTabPathsRaw.filter((p) => p && !revealedRef.current.has(p))
+    if (!fresh.length) return
+    fresh.forEach((p) => revealedRef.current.add(p))
+    let superseded = false
+    // Expand unconditionally (additive + idempotent) so every open tab reveals
+    // even as more tabs stream in during restore — don't cancel the expansion.
+    revealAncestors(fresh).then(() => {
+      // The tree just grew (folders expanded) — re-pin the active file's row into
+      // view. Wait for the next paint so we scroll to its *final* position, not the
+      // spot it sat at before these folders expanded below/around it. Bypasses the
+      // lastScrolledRef guard on purpose; runs only for freshly-seen tabs (restore /
+      // new opens), never on the user's own manual folder expansion. `superseded`
+      // keeps only the last batch's scroll, so the view ends on the active file.
+      if (superseded) return
+      requestAnimationFrame(() => {
+        if (superseded || !activeRowRef.current) return
+        activeRowRef.current.scrollIntoView({ block: 'nearest' })
+      })
+    })
+    return () => {
+      superseded = true
+    }
+  }, [openTabPathsRaw, workspace, revealAncestors])
 
   // Scroll the active file's row into view once it (and its ancestors) are
   // rendered. Guarded by lastScrolledRef so we only reveal on open, not on every
@@ -370,13 +414,15 @@ export default function Sidebar({ workspace, activePath, onOpenFile, onOpenRight
     const isDir = node.type === 'dir'
     const isOpen = expanded.has(node.path)
     const isActive = node.path === activePath
+    // Open in a tab but not the active one → gets a dot marker (see .tree-row.opened).
+    const isOpenTab = !isDir && !isActive && openTabPaths?.has(node.path.replace(/\\/g, '/'))
     const renaming = rename && rename.path === node.path
     const isDropTarget = isDir && dragOver === node.path
     return (
       <div key={node.path}>
         <div
           ref={isActive ? activeRowRef : undefined}
-          className={`tree-row${isActive ? ' active' : ''}${isDropTarget ? ' drag-over' : ''}`}
+          className={`tree-row${isActive ? ' active' : ''}${isOpenTab ? ' opened' : ''}${isDropTarget ? ' drag-over' : ''}`}
           style={{ paddingLeft: 8 + depth * 14 }}
           draggable={!renaming}
           onDragStart={(e) => {

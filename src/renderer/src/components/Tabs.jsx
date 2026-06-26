@@ -13,6 +13,8 @@ export default function Tabs({
   onClose,
   onNew,
   onCloseOthers,
+  onCloseLeft,
+  onCloseRight,
   onOpenRight,
   onRename,
   onDuplicate,
@@ -122,6 +124,9 @@ export default function Tabs({
               const tab = menu.tab
               const hasPath = !!tab.path
               const noPathTip = !hasPath ? t('tab.noPath') : undefined
+              const menuIdx = tabs.findIndex((x) => x.id === tab.id)
+              const hasLeft = menuIdx > 0
+              const hasRight = menuIdx !== -1 && menuIdx < tabs.length - 1
               const run = (fn) => () => { fn(); setMenu(null) }
               return (
                 <>
@@ -163,6 +168,16 @@ export default function Tabs({
                   {onCloseOthers && tabs.length > 1 && (
                     <button className="tab-menu-item" onClick={run(() => onCloseOthers(tab.id))}>
                       {t('tab.closeOthers')}
+                    </button>
+                  )}
+                  {onCloseLeft && hasLeft && (
+                    <button className="tab-menu-item" onClick={run(() => onCloseLeft(tab.id))}>
+                      {t('tab.closeLeft')}
+                    </button>
+                  )}
+                  {onCloseRight && hasRight && (
+                    <button className="tab-menu-item" onClick={run(() => onCloseRight(tab.id))}>
+                      {t('tab.closeRight')}
                     </button>
                   )}
                   {onDelete && (

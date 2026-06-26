@@ -218,6 +218,67 @@ export function replaceCellInLine(line, colIdx, newValue) {
   return parts.join('|')
 }
 
+// ── structural table edits (keep mode) ──
+// All operate on RAW lines (\r preserved) and stay strictly within the table's
+// line range, so the zero-diff guarantee holds outside the touched table. They
+// edit pipe segments in place (like replaceCellInLine), so every cell the edit
+// doesn't touch keeps its exact original bytes.
+
+// Split a raw line into pipe segments (NOT trimmed), tracking the trailing \r and
+// whether the row leads with a pipe. Mirrors splitRow/replaceCellInLine parsing.
+function splitSegments(line) {
+  const eol = String(line).endsWith('\r') ? '\r' : ''
+  const body = eol ? line.slice(0, -1) : line
+  const parts = []
+  let cur = ''
+  let esc = false
+  for (let i = 0; i < body.length; i++) {
+    const ch = body[i]
+    if (ch === '\\' && !esc) {
+      esc = true
+      cur += ch
+      continue
+    }
+    if (ch === '|' && !esc) {
+      parts.push(cur)
+      cur = ''
+    } else cur += ch
+    esc = false
+  }
+  parts.push(cur)
+  return { parts, eol, body }
+}
+
+// Insert a new column segment at column `colIdx` (the new column takes that
+// index). `content` is the cell body (e.g. '' for data/header, '---' for sep).
+export function insertColumnInLine(line, colIdx, content) {
+  const { parts, eol, body } = splitSegments(line)
+  const hasLead = body.trim().startsWith('|')
+  const pos = (hasLead ? 1 : 0) + colIdx
+  parts.splice(Math.max(0, Math.min(pos, parts.length)), 0, ' ' + content + ' ')
+  return parts.join('|') + eol
+}
+
+// Remove the column segment at `colIdx`. No-op if the index is out of range.
+export function removeColumnInLine(line, colIdx) {
+  const { parts, eol, body } = splitSegments(line)
+  const hasLead = body.trim().startsWith('|')
+  const pos = (hasLead ? 1 : 0) + colIdx
+  if (pos >= 0 && pos < parts.length) parts.splice(pos, 1)
+  return parts.join('|') + eol
+}
+
+// Build a blank data row with `nCols` empty cells, matching `refLine`'s pipe
+// style (leading/trailing pipe + \r) so the new line blends into the table.
+export function buildTableRow(nCols, refLine) {
+  const eol = String(refLine).endsWith('\r') ? '\r' : ''
+  const t = (eol ? refLine.slice(0, -1) : refLine).trim()
+  const lead = t.startsWith('|')
+  const trail = t.endsWith('|')
+  const inner = Array(Math.max(1, nCols)).fill('  ').join('|')
+  return (lead ? '|' : '') + inner + (trail ? '|' : '') + eol
+}
+
 // ── render helpers (return HTML strings; pure) ──
 function renderList(b, viewLines) {
   const lines = viewLines.slice(b.start, b.end + 1)
@@ -318,7 +379,13 @@ export function renderDoc(rawLines, filterState = {}, opts = {}) {
       bi +
       '">' +
       (editable && !forExport
-        ? '<button class="km-src-edit" data-bi="' + bi + '" type="button">' + escapeHtml(srcEditLabel) + '</button>'
+        ? '<button class="km-src-edit" data-bi="' +
+          bi +
+          '" type="button" title="' +
+          escapeAttr(srcEditLabel) +
+          '"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg><span>' +
+          escapeHtml(srcEditLabel) +
+          '</span></button>'
         : '') +
       inner +
       '</div>'

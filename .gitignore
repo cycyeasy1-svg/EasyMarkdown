@@ -29,5 +29,8 @@ test-articles/
 build/_*.png
 *参考*.html
 
+# generated at dist time from onboarding.js (scripts/gen-readme.mjs)
+build/README.dist.md
+
 # device build (xcodebuild -derivedDataPath)
 ios/App/build-device/

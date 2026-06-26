@@ -1,6 +1,13 @@
 import { useEffect, useRef } from 'react'
 import { useI18n } from '../i18n.jsx'
-import { renderDoc, inline, replaceCellInLine } from '../keep-parser.js'
+import {
+  renderDoc,
+  inline,
+  replaceCellInLine,
+  insertColumnInLine,
+  removeColumnInLine,
+  buildTableRow
+} from '../keep-parser.js'
 
 /**
  * Keep mode (source-backed editing) — the default editor for `.md`.
@@ -24,7 +31,7 @@ import { renderDoc, inline, replaceCellInLine } from '../keep-parser.js'
  *   - Remount (key includes reloadNonce) re-reads initialContent on external edits.
  */
 export default function KeepEditor({ initialContent, onChange, onReady, onOutline, onFilterChange }) {
-  const { t } = useI18n()
+  const { t, lang } = useI18n()
   const tRef = useRef(t)
   tRef.current = t
 
@@ -45,6 +52,7 @@ export default function KeepEditor({ initialContent, onChange, onReady, onOutlin
   const activeEditRef = useRef(null) // { td, raw } during a cell edit
   const activePopRef = useRef(null) // the open filter dropdown element
   const activePopBtnRef = useRef(null) // the ▼ button that opened it (for toggle)
+  const activeMenuRef = useRef(null) // the open table context menu element
 
   useEffect(() => {
     const host = hostRef.current
@@ -80,6 +88,23 @@ export default function KeepEditor({ initialContent, onChange, onReady, onOutlin
       host.innerHTML = html
       blocksRef.current = blocks
       viewLinesRef.current = viewLines
+      // Tag multi-line blocks so the edit button pins to the top-right; single-line
+      // blocks keep it vertically centered. Primary signal is the source line span;
+      // a fontSize-based height check also catches a long single line that wraps.
+      blocks.forEach((b, bi) => {
+        if (b.type === 'table') return
+        const bl = host.querySelector('.km-block[data-bi="' + bi + '"]')
+        if (!bl) return
+        let multi = b.end > b.start
+        if (!multi) {
+          const content = Array.from(bl.children).find((c) => !c.classList.contains('km-src-edit'))
+          if (content) {
+            const fs = parseFloat(getComputedStyle(content).fontSize) || 16
+            multi = content.offsetHeight > fs * 2.2
+          }
+        }
+        bl.classList.toggle('km-multiline', multi)
+      })
       Object.keys(filterStateRef.current).forEach((ti) => applyFilter(parseInt(ti)))
       pushOutline()
       reportFilter()
@@ -202,6 +227,112 @@ export default function KeepEditor({ initialContent, onChange, onReady, onOutlin
       }
     }
 
+    // ── structural table edits: add / remove rows & columns ──
+    // Each rewrites only lines within the table's range, then re-parses. The
+    // ti → table-block lookup is resolved fresh at call time (line indices shift
+    // after a structural edit, so we never cache a stale block).
+    const getTable = (ti) => blocksRef.current.filter((b) => b.type === 'table')[ti]
+
+    const doInsertRow = (ti, ri, where) => {
+      const b = getTable(ti)
+      if (!b) return
+      let at
+      if (where === 'first') at = b.sepLine + 1
+      else if (where === 'above') at = b.dataRows[ri]?.lineIdx
+      else at = (b.dataRows[ri]?.lineIdx ?? b.sepLine) + 1
+      if (at == null) return
+      const row = buildTableRow(b.headers.length, rawLinesRef.current[b.headerLine] || '')
+      rawLinesRef.current.splice(at, 0, row)
+      emitChange()
+      rerender()
+    }
+    const doDeleteRow = (ti, ri) => {
+      const b = getTable(ti)
+      if (!b) return
+      const dr = b.dataRows[ri]
+      if (!dr) return
+      rawLinesRef.current.splice(dr.lineIdx, 1)
+      emitChange()
+      rerender()
+    }
+    const doInsertColumn = (ti, colIdx) => {
+      const b = getTable(ti)
+      if (!b) return
+      for (let ln = b.start; ln <= b.end; ln++) {
+        const content = ln === b.sepLine ? '---' : ''
+        rawLinesRef.current[ln] = insertColumnInLine(rawLinesRef.current[ln], colIdx, content)
+      }
+      delete filterStateRef.current[ti] // column indices shifted — drop stale filters
+      emitChange()
+      rerender()
+    }
+    const doDeleteColumn = (ti, colIdx) => {
+      const b = getTable(ti)
+      if (!b || b.headers.length <= 1) return // never delete the last column
+      for (let ln = b.start; ln <= b.end; ln++) {
+        rawLinesRef.current[ln] = removeColumnInLine(rawLinesRef.current[ln], colIdx)
+      }
+      delete filterStateRef.current[ti] // column indices shifted — drop stale filters
+      emitChange()
+      rerender()
+    }
+
+    const closeMenu = () => {
+      if (activeMenuRef.current) {
+        activeMenuRef.current.remove()
+        activeMenuRef.current = null
+      }
+    }
+    const openTableMenu = (x, y, ti, ri, ci, isHeader) => {
+      closeMenu()
+      const T = tRef.current
+      const b = getTable(ti)
+      const items = []
+      if (isHeader) {
+        items.push({ label: T('keep.rowInsertFirst'), fn: () => doInsertRow(ti, ri, 'first') })
+      } else {
+        items.push({ label: T('keep.rowInsertAbove'), fn: () => doInsertRow(ti, ri, 'above') })
+        items.push({ label: T('keep.rowInsertBelow'), fn: () => doInsertRow(ti, ri, 'below') })
+      }
+      items.push('sep')
+      items.push({ label: T('keep.colInsertLeft'), fn: () => doInsertColumn(ti, ci) })
+      items.push({ label: T('keep.colInsertRight'), fn: () => doInsertColumn(ti, ci + 1) })
+      items.push('sep')
+      if (!isHeader) items.push({ label: T('keep.rowDelete'), fn: () => doDeleteRow(ti, ri) })
+      items.push({
+        label: T('keep.colDelete'),
+        fn: () => doDeleteColumn(ti, ci),
+        disabled: !b || b.headers.length <= 1
+      })
+
+      const menu = document.createElement('div')
+      menu.className = 'km-table-menu'
+      items.forEach((it) => {
+        if (it === 'sep') {
+          const hr = document.createElement('div')
+          hr.className = 'km-tm-sep'
+          menu.appendChild(hr)
+          return
+        }
+        const el = document.createElement('button')
+        el.type = 'button'
+        el.className = 'km-tm-item' + (it.disabled ? ' disabled' : '')
+        el.textContent = it.label
+        if (!it.disabled)
+          el.onclick = () => {
+            closeMenu()
+            it.fn()
+          }
+        menu.appendChild(el)
+      })
+      document.body.appendChild(menu)
+      const mw = menu.offsetWidth || 180
+      const mh = menu.offsetHeight || 0
+      menu.style.left = Math.min(x, window.innerWidth - mw - 8) + 'px'
+      menu.style.top = Math.min(y, window.innerHeight - mh - 8) + 'px'
+      activeMenuRef.current = menu
+    }
+
     // ── Excel-style column filter (display only — never touches rawLines) ──
     const closePop = () => {
       if (activePopRef.current) {
@@ -311,7 +442,18 @@ export default function KeepEditor({ initialContent, onChange, onReady, onOutlin
     // ── event delegation on the host container ──
     const onDblClick = (e) => {
       const td = e.target.closest('td')
-      if (td && host.contains(td)) startCellEdit(td)
+      if (td && host.contains(td)) {
+        startCellEdit(td)
+        return
+      }
+      // Double-clicking the highlighted area of an editable (non-table) block
+      // enters source edit — same affordance as the pencil button. The guard
+      // (a direct `.km-src-edit` child) excludes tables and skips a block that's
+      // already editing, where the button is replaced by the textarea.
+      const block = e.target.closest('.km-block')
+      if (block && host.contains(block) && block.querySelector(':scope > .km-src-edit')) {
+        startBlockEdit(parseInt(block.getAttribute('data-bi')))
+      }
     }
     const onClick = (e) => {
       const se = e.target.closest('.km-src-edit')
@@ -327,7 +469,21 @@ export default function KeepEditor({ initialContent, onChange, onReady, onOutlin
         else openFilterPop(fb)
       }
     }
-    // Close the filter dropdown on an outside click.
+    // Right-click on a table cell → row/column add-remove menu.
+    const onContextMenu = (e) => {
+      const cell = e.target.closest('td, th')
+      if (!cell || !host.contains(cell)) return
+      const table = cell.closest('table.km-table')
+      if (!table) return
+      e.preventDefault()
+      const ti = parseInt(table.getAttribute('data-ti'))
+      const ci = parseInt(cell.getAttribute('data-ci'))
+      const isHeader = cell.tagName === 'TH'
+      const tr = cell.closest('tr')
+      const ri = isHeader ? -1 : parseInt(tr.getAttribute('data-ri'))
+      openTableMenu(e.clientX, e.clientY, ti, ri, ci, isHeader)
+    }
+    // Close the filter dropdown / table menu on an outside click.
     const onDocDown = (e) => {
       if (
         activePopRef.current &&
@@ -336,11 +492,17 @@ export default function KeepEditor({ initialContent, onChange, onReady, onOutlin
       ) {
         closePop()
       }
+      if (activeMenuRef.current && !activeMenuRef.current.contains(e.target)) closeMenu()
+    }
+    const onEsc = (e) => {
+      if (e.key === 'Escape' && activeMenuRef.current) closeMenu()
     }
 
     host.addEventListener('dblclick', onDblClick)
     host.addEventListener('click', onClick)
+    host.addEventListener('contextmenu', onContextMenu)
     document.addEventListener('click', onDocDown)
+    document.addEventListener('keydown', onEsc)
 
     rerender()
 
@@ -355,13 +517,31 @@ export default function KeepEditor({ initialContent, onChange, onReady, onOutlin
     return () => {
       destroyed = true
       closePop()
+      closeMenu()
       onFilterChangeRef.current?.(null) // drop this tab's filter badge on unmount
       host.removeEventListener('dblclick', onDblClick)
       host.removeEventListener('click', onClick)
+      host.removeEventListener('contextmenu', onContextMenu)
       document.removeEventListener('click', onDocDown)
+      document.removeEventListener('keydown', onEsc)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // Hot-swap the static "edit source" labels when the UI language changes. The
+  // doc HTML is rendered once on mount (rerender lives in a []-deps effect), so
+  // the baked-in labels would otherwise stay in the original language. Patch them
+  // in place instead of re-rendering, to preserve any active edit/filter state.
+  useEffect(() => {
+    const host = hostRef.current
+    if (!host) return
+    const label = tRef.current('keep.editSource')
+    host.querySelectorAll('.km-src-edit').forEach((btn) => {
+      btn.title = label
+      const span = btn.querySelector('span')
+      if (span) span.textContent = label
+    })
+  }, [lang])
 
   return <div className="km-doc" ref={hostRef} />
 }

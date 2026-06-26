@@ -1,6 +1,6 @@
 {
   "name": "horse",
-  "version": "1.0.0",
+  "version": "1.0.2",
   "description": "EasyMarkdown Markdown Editor",
   "author": "mini_md",
   "license": "MIT",
@@ -19,8 +19,8 @@
     "build": "electron-vite build",
     "preview": "electron-vite preview",
     "start": "electron-vite preview",
-    "dist": "electron-vite build && electron-builder",
-    "dist:dir": "electron-vite build && electron-builder --dir",
+    "dist": "electron-vite build && node scripts/gen-readme.mjs && electron-builder",
+    "dist:dir": "electron-vite build && node scripts/gen-readme.mjs && electron-builder --dir",
     "build:mobile": "vite build --config vite.mobile.config.mjs",
     "cap:sync": "npm run build:mobile && cap sync",
     "cap:ios": "npm run build:mobile && cap sync ios && cap open ios",
@@ -56,6 +56,12 @@
     "productName": "EasyMarkdown",
     "files": [
       "out/**/*"
+    ],
+    "extraFiles": [
+      {
+        "from": "build/README.dist.md",
+        "to": "README.md"
+      }
     ],
     "icon": "build/icon.ico",
     "publish": [

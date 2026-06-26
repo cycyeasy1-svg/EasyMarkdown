@@ -2,7 +2,8 @@ import { createContext, useContext } from 'react'
 
 export const LANGS = [
   { id: 'en', label: 'English' },
-  { id: 'zh', label: '中文' }
+  { id: 'zh', label: '中文' },
+  { id: 'ja', label: '日本語' }
 ]
 
 export const STRINGS = {
@@ -114,12 +115,19 @@ export const STRINGS = {
     // outline
     'outline.title': 'Outline',
     'outline.empty': 'No headings',
+    'outline.expand': 'Expand',
+    'outline.collapse': 'Collapse',
 
     // find
     'find.placeholder': 'Find in document',
     'find.next': 'Next',
     'find.prev': 'Prev',
     'find.close': 'Close',
+    'find.modeText': 'Search text — click to locate by line',
+    'find.modeLine': 'Go to line — click to search text',
+    'find.linePlaceholder': 'Go to line…',
+    'find.lineNext': 'Next line',
+    'find.linePrev': 'Previous line',
 
     // command palette
     'palette.placeholder': 'Search files and commands…',
@@ -160,6 +168,7 @@ export const STRINGS = {
     'settings.font.medium': 'Medium',
     'settings.font.large': 'Large',
     'settings.font.xlarge': 'XL',
+    'settings.zoom': 'Zoom',
     'settings.fineTune': 'Fine',
     'imghost.button': 'Image host',
     'imghost.on': 'Ready',
@@ -202,6 +211,8 @@ export const STRINGS = {
     'tab.openRight': 'Open in Split (Right)',
     'tab.close': 'Close',
     'tab.closeOthers': 'Close Others',
+    'tab.closeLeft': 'Close Tabs to the Left',
+    'tab.closeRight': 'Close Tabs to the Right',
     'tab.noPath': 'Unsaved file — save it first',
 
     // split view
@@ -213,10 +224,17 @@ export const STRINGS = {
     'heavy.loadRich': 'Render as rich text',
 
     // keep mode (source-backed editing) — zero-diff editor
-    'keep.editSource': 'Edit source',
+    'keep.editSource': 'Edit content',
     'keep.filterSearch': 'Search values…',
     'keep.selectAll': 'Select all',
     'keep.selectNone': 'Clear',
+    'keep.rowInsertAbove': 'Insert row above',
+    'keep.rowInsertBelow': 'Insert row below',
+    'keep.rowInsertFirst': 'Insert row',
+    'keep.rowDelete': 'Delete row',
+    'keep.colInsertLeft': 'Insert column left',
+    'keep.colInsertRight': 'Insert column right',
+    'keep.colDelete': 'Delete column',
     'status.filtered': 'Filtered {shown}/{total}',
     'mode.keep': 'Keep',
     'mode.rich': 'Milkdown',
@@ -335,11 +353,18 @@ export const STRINGS = {
 
     'outline.title': '大纲',
     'outline.empty': '暂无标题',
+    'outline.expand': '展开',
+    'outline.collapse': '收起',
 
     'find.placeholder': '在文档中查找',
     'find.next': '下一个',
     'find.prev': '上一个',
     'find.close': '关闭',
+    'find.modeText': '文本检索 — 点击切换为按行号定位',
+    'find.modeLine': '按行号定位 — 点击切换为文本检索',
+    'find.linePlaceholder': '跳转到行号…',
+    'find.lineNext': '下一行',
+    'find.linePrev': '上一行',
 
     'palette.placeholder': '搜索文件和命令…',
     'palette.empty': '无匹配项',
@@ -378,6 +403,7 @@ export const STRINGS = {
     'settings.font.medium': '中',
     'settings.font.large': '大',
     'settings.font.xlarge': '特大',
+    'settings.zoom': '缩放',
     'settings.fineTune': '微调',
     'imghost.button': '图床',
     'imghost.on': '已就绪',
@@ -417,6 +443,8 @@ export const STRINGS = {
     'tab.openRight': '在右侧分屏打开',
     'tab.close': '关闭',
     'tab.closeOthers': '关闭其他',
+    'tab.closeLeft': '关闭左侧标签',
+    'tab.closeRight': '关闭右侧标签',
     'tab.noPath': '未保存的文件，请先保存',
 
     'split.toggle': '分屏',
@@ -427,10 +455,17 @@ export const STRINGS = {
     'heavy.loadRich': '渲染为富文本',
 
     // 保持模式(源码保真编辑)—— 零差分编辑器
-    'keep.editSource': '改源码',
+    'keep.editSource': '内容编辑',
     'keep.filterSearch': '搜索值…',
     'keep.selectAll': '全选',
     'keep.selectNone': '全不选',
+    'keep.rowInsertAbove': '在上方插入行',
+    'keep.rowInsertBelow': '在下方插入行',
+    'keep.rowInsertFirst': '插入行',
+    'keep.rowDelete': '删除本行',
+    'keep.colInsertLeft': '在左侧插入列',
+    'keep.colInsertRight': '在右侧插入列',
+    'keep.colDelete': '删除本列',
     'status.filtered': '筛选 {shown}/{total} 条',
     'mode.keep': '保持',
     'mode.rich': 'Milkdown',
@@ -443,14 +478,261 @@ export const STRINGS = {
     'update.whatsNew': '更新内容',
     'update.download': '前往下载',
     'update.later': '稍后'
+  },
+
+  ja: {
+    // status bar
+    'status.ready': '準備完了',
+    'status.unsaved': '未保存',
+    'status.saved': '保存済み',
+    'status.modified': '変更あり',
+    'status.words': '{n} 単語',
+    'status.chars': '{n} 文字',
+    'status.read': '読了 {n} 分',
+    'status.stats': 'ドキュメント統計',
+    'status.statWords': '単語数',
+    'status.statChars': '文字数',
+    'status.statCharsNoSpace': '文字数（空白を除く）',
+    'status.statRead': '読了時間',
+    'status.readValue': '{n} 分',
+    'status.source': 'ソース',
+    'status.rich': 'リッチ',
+    'status.more': 'その他',
+    'status.save': '保存',
+    'status.share': 'エクスポート / 共有',
+    'status.shareShort': 'エクスポート',
+    'about.title': '情報',
+    'about.intro': '本製品は {author} がオープンソースプロジェクト {project} をフォークして開発・維持しています。',
+    'about.thanks': '原作者 {author} とコミュニティの惜しみない貢献に心より感謝します。',
+    'about.license': 'MIT ライセンスのもとで公開されています。',
+    'save.shareNeedsSave': '先にファイルを保存してからエクスポートしてください。',
+    'save.nameTitle': '名前を付けて保存',
+    'save.savedTo': '保存しました ✓\nファイル名：{name}\n場所：{loc}',
+    'save.locIos': '「ファイル」App › EasyMarkdown',
+    'save.locAndroid': 'EasyMarkdown ライブラリ（アプリ内）',
+    'save.failed': '保存に失敗しました：{msg}',
+    'tip.toggleSource': 'ソースモードの切り替え (Ctrl+/)',
+    'tip.toggleTheme': 'テーマ',
+    'theme.custom': 'カスタム',
+    'theme.openFolder': 'テーマフォルダを開く',
+    'theme.getMore': 'テーマをもっと入手…',
+    'tip.language': '言語',
+    'tip.changeBlock': 'ブロックタイプを変更',
+    'tip.minimize': '最小化',
+    'tip.maximize': '最大化',
+    'tip.restore': '元のサイズに戻す',
+    'tip.close': '閉じる',
+    'tb.bold': '太字 (Ctrl+B)',
+    'tb.italic': '斜体 (Ctrl+I)',
+    'tb.strike': '取り消し線',
+    'tb.code': 'インラインコード',
+    'tb.link': 'リンク',
+    'side.collapsePane': 'サイドバーを折りたたむ',
+    'side.expandPane': 'サイドバーを展開',
+    'side.dragResize': 'ドラッグでサイズ変更',
+
+    // welcome (empty state)
+    'welcome.tagline': 'Markdown をリアルタイムにプレビュー・編集できるツール。',
+    'welcome.newFile': '新規ファイル',
+    'welcome.openFile': 'ファイルを開く',
+    'welcome.openFolder': 'フォルダを開く',
+    'welcome.recent': '最近のファイル',
+    'time.justNow': 'たった今',
+    'time.minutesAgo': '{n} 分前',
+    'time.hoursAgo': '{n} 時間前',
+    'time.yesterday': '昨日',
+    'hint.palette': 'パレット',
+    'hint.sidebar': 'サイドバー',
+    'hint.new': '新規',
+    'hint.save': '保存',
+
+    // tabs
+    'tab.new': '新規タブ (Ctrl+N)',
+    'tab.untitled': '無題',
+
+    // sidebar
+    'side.noFolder': 'フォルダが開かれていません',
+    'side.openFolder': 'フォルダを開く',
+    'side.newFile': '新規ファイル',
+    'side.newFolder': '新規フォルダ',
+    'side.collapseAll': 'すべて折りたたむ',
+    'side.expandAll': 'すべて展開',
+    'side.empty': 'ここにはまだ Markdown ファイルがありません。',
+    'side.ctxNewFile': '新規ファイル',
+    'side.ctxNewFolder': '新規フォルダ',
+    'side.rename': '名前を変更',
+    'side.duplicate': '複製',
+    'side.exportPdf': 'PDF としてエクスポート…',
+    'side.reveal': 'エクスプローラーで表示',
+    'side.delete': '削除',
+    'err.duplicate': '複製できませんでした：',
+    'prompt.newFile': '新しいファイル名',
+    'prompt.newFolder': '新しいフォルダ名',
+    'prompt.newFolderDefault': '新規フォルダ',
+    'confirm.trash': '「{name}」をゴミ箱に移動しますか？',
+    'confirm.closeUnsaved': '「{name}」には未保存の変更があります。閉じてもよろしいですか？',
+    'confirm.quitUnsaved': '未保存の変更があります。終了してもよろしいですか？',
+    'error.fileMissing': '「{name}」は存在しません——移動または削除された可能性があります。「最近のファイル」から削除しました。',
+    'error.openFailed': '「{name}」を開けませんでした。',
+    'err.createFile': 'ファイルを作成できませんでした：',
+    'err.createFolder': 'フォルダを作成できませんでした：',
+    'err.move': '移動できませんでした：',
+    'err.rename': '名前を変更できませんでした：',
+    'err.delete': '削除できませんでした：',
+    'err.invalidName': 'この名前は使用できません：',
+    'err.nameExists': 'このフォルダには同じ名前のファイルまたはフォルダが既に存在します。別の名前を使用してください。',
+    'side.emptyFolder': '空 — Markdown ファイルがありません',
+    'edit.confirm': '確定（Enter）',
+    'edit.cancel': 'キャンセル（Esc）',
+
+    // outline
+    'outline.title': 'アウトライン',
+    'outline.empty': '見出しがありません',
+    'outline.expand': '展開',
+    'outline.collapse': '折りたたむ',
+
+    // find
+    'find.placeholder': 'ドキュメント内を検索',
+    'find.next': '次へ',
+    'find.prev': '前へ',
+    'find.close': '閉じる',
+    'find.modeText': 'テキスト検索 — クリックで行番号ジャンプに切替',
+    'find.modeLine': '行番号でジャンプ — クリックでテキスト検索に切替',
+    'find.linePlaceholder': '行番号へジャンプ…',
+    'find.lineNext': '次の行',
+    'find.linePrev': '前の行',
+
+    // command palette
+    'palette.placeholder': 'ファイルとコマンドを検索…',
+    'palette.empty': '一致する項目がありません',
+
+    // commands
+    'cmd.new': '新規ファイル',
+    'cmd.open': 'ファイルを開く…',
+    'cmd.openFolder': 'フォルダを開く…',
+    'cmd.save': '保存',
+    'cmd.saveAs': '名前を付けて保存…',
+    'cmd.exportPdf': 'PDF としてエクスポート…',
+    'error.exportPdfUnavailable': 'PDF としてエクスポートするには、先に Markdown ドキュメントを開いてください。',
+    'cmd.sidebar': 'サイドバーの切り替え',
+    'nav.home': 'ホーム',
+    'lightbox.close': '閉じる（Esc）',
+    'image.caption': '画像のキャプションを入力',
+    'image.pasteLink': 'またはリンクを貼り付け',
+    'image.uploadFile': 'ファイルをアップロード',
+    'image.upload': 'アップロード',
+    'image.confirm': '確定',
+    'cmd.files': 'ファイルエクスプローラーを表示',
+    'cmd.outline': 'アウトラインを表示',
+    'cmd.source': 'ソースモードの切り替え',
+    'cmd.theme': 'テーマを切り替え',
+    'cmd.find': 'ファイル内を検索',
+
+    // page width (status-bar popover) + image host (top-bar popover)
+    'settings.pageWidth': 'エディタ幅',
+    'settings.width.narrow': '狭い',
+    'settings.width.medium': '中',
+    'settings.width.wide': '広い',
+    'settings.width.full': '全幅',
+    'settings.layout': 'フォントサイズと幅',
+    'settings.layoutLabel': 'レイアウト',
+    'settings.fontSize': 'フォントサイズ',
+    'settings.font.small': '小',
+    'settings.font.medium': '中',
+    'settings.font.large': '大',
+    'settings.font.xlarge': '特大',
+    'settings.zoom': 'ズーム',
+    'settings.fineTune': '微調整',
+    'imghost.button': '画像ホスト',
+    'imghost.on': '準備完了',
+    'imghost.off': 'オフ',
+    'settings.imageHost': '画像アップロードコマンド',
+    'settings.imageHostDesc':
+      '設定すると、貼り付け・ドロップ・アップロードした画像がこのコマンドで処理され、返された URL が挿入されます（Typora と同様）。',
+    'settings.imageHostPlaceholder': '例：picgo upload',
+    'settings.imageHostHint':
+      '画像ファイルのパスが引数として末尾に追加されます。コマンドは画像 URL を標準出力に出力する必要があります。空欄の場合は画像をローカルに保持します。',
+    'imghost.uploading': '画像をアップロード中…',
+    'imghost.uploaded': '画像をアップロードしました',
+    'imghost.failed': '画像のアップロードに失敗しました —— ローカルコピーを保持しました',
+
+    // mermaid live preview
+    'mermaid.rendering': '図を描画中…',
+    'mermaid.empty': '空の mermaid ブロック',
+    'mermaid.error': '図のエラー：',
+
+    // block types
+    'block.turnInto': '変換',
+    'block.paragraph': 'テキスト',
+    'block.h1': '見出し 1',
+    'block.h2': '見出し 2',
+    'block.h3': '見出し 3',
+    'block.h4': '見出し 4',
+    'block.h5': '見出し 5',
+    'block.h6': '見出し 6',
+    'block.heading': '見出し',
+
+    // editor
+    'editor.placeholder': '/ でコマンドを呼び出すか、そのまま書き始めてください…',
+    'code.copy': 'コピー',
+    'code.copied': 'コピーしました',
+
+    // tab context menu
+    'tab.copyPath': 'ファイルパスをコピー',
+    'tab.copyName': 'ファイル名をコピー',
+    'tab.reveal': 'フォルダで表示',
+    'tab.openRight': '分割（右）で開く',
+    'tab.close': '閉じる',
+    'tab.closeOthers': '他を閉じる',
+    'tab.closeLeft': '左側のタブを閉じる',
+    'tab.closeRight': '右側のタブを閉じる',
+    'tab.noPath': '未保存のファイルです。先に保存してください',
+
+    // split view
+    'split.toggle': 'エディタを分割',
+    'split.close': '分割を閉じる',
+    'split.drag': 'ドラッグでサイズ変更',
+    'split.needTwo': '分割表示を使うには別のファイルを開いてください。',
+    'heavy.notice': '大きなファイル —— 高速化のためプレーンテキストで表示しています。',
+    'heavy.loadRich': 'リッチテキストで表示',
+
+    // keep mode (source-backed editing) — zero-diff editor
+    'keep.editSource': '内容を編集',
+    'keep.filterSearch': '値を検索…',
+    'keep.selectAll': 'すべて選択',
+    'keep.selectNone': 'クリア',
+    'keep.rowInsertAbove': '上に行を挿入',
+    'keep.rowInsertBelow': '下に行を挿入',
+    'keep.rowInsertFirst': '行を挿入',
+    'keep.rowDelete': 'この行を削除',
+    'keep.colInsertLeft': '左に列を挿入',
+    'keep.colInsertRight': '右に列を挿入',
+    'keep.colDelete': 'この列を削除',
+    'status.filtered': '絞り込み {shown}/{total}',
+    'mode.keep': 'キープ',
+    'mode.rich': 'Milkdown',
+    'tip.toggleKeep': '編集モードを切り替え（キープ ⇄ Milkdown）',
+    'cmd.toggleKeep': 'エディタモードを切り替え（キープ / Milkdown）',
+    'confirm.switchKeepUnsaved':
+      'Milkdown がこのドキュメントを再整形した可能性があります。キープモードに戻すと再整形後のテキストが引き継がれ、差分が生じる場合があります。切り替えてもよろしいですか？',
+
+    // update
+    'update.title': '新しいバージョンがあります',
+    'update.whatsNew': '更新内容',
+    'update.download': 'ダウンロード',
+    'update.later': '後で'
   }
 }
 
 export const DEFAULT_LANG = (() => {
   try {
-    return /^zh/i.test(navigator.language || '') ? 'zh' : 'en'
+    const l = navigator.language || ''
+    if (/^zh/i.test(l)) return 'zh'
+    if (/^ja/i.test(l)) return 'ja'
+    if (/^en/i.test(l)) return 'en'
+    return 'zh'
   } catch {
-    return 'en'
+    return 'zh'
   }
 })()
 

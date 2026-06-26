@@ -15,7 +15,8 @@ function relTime(ts, lang, t) {
   const days = Math.floor(hr / 24)
   if (days === 1) return t('time.yesterday')
   try {
-    return new Date(ts).toLocaleDateString(lang === 'zh' ? 'zh-CN' : 'en-US', {
+    const locale = lang === 'zh' ? 'zh-CN' : lang === 'ja' ? 'ja-JP' : 'en-US'
+    return new Date(ts).toLocaleDateString(locale, {
       month: 'short',
       day: 'numeric'
     })

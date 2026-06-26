@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron'
+import { contextBridge, ipcRenderer, webUtils } from 'electron'
 
 // Subscribe to a main→renderer channel; returns an unsubscribe function.
 const on = (channel) => (cb) => {
@@ -31,6 +31,17 @@ const api = {
   watchStop: (dir) => ipcRenderer.invoke('watch:stop', dir),
   watchFile: (path) => ipcRenderer.invoke('watch:file', path),
   unwatchFile: (path) => ipcRenderer.invoke('watch:unfile', path),
+
+  // Resolve the absolute path of a dropped/picked File. Electron 34 removed the
+  // renderer-side File.path for security, so OS file drag-and-drop must go
+  // through webUtils. Returns '' if the File isn't backed by a real path.
+  pathForFile: (file) => {
+    try {
+      return webUtils.getPathForFile(file) || ''
+    } catch {
+      return ''
+    }
+  },
 
   // shell
   openExternal: (url) => ipcRenderer.invoke('shell:openExternal', url),

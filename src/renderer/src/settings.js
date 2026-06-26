@@ -33,6 +33,24 @@ export const FONT_SIZE_PRESETS = [
   { id: 'xlarge', size: 20 }
 ]
 
+// Overall editor zoom (Excel-style). Unlike font size — which scales only the
+// glyphs — zoom magnifies the WHOLE document subtree: text, cell padding,
+// borders, gaps, images. Zooming out is the way to fit a many-column table on
+// screen (its real width shrinks, so the horizontal scrollbar can disappear).
+// Stored as a factor; 1 = 100%.
+export const ZOOM_MIN = 0.5
+export const ZOOM_MAX = 2
+export const DEFAULT_ZOOM = 1
+export const ZOOM_STEP = 0.1
+
+// Quick presets shown as a segmented control above the fine-tune slider.
+export const ZOOM_PRESETS = [
+  { id: 'z75', zoom: 0.75 },
+  { id: 'z100', zoom: 1 },
+  { id: 'z125', zoom: 1.25 },
+  { id: 'z150', zoom: 1.5 }
+]
+
 // New installs default to full width (the editor fills the pane). Existing users
 // keep whatever they saved. DEFAULT_PAGE_WIDTH stays the numeric slider fallback.
 export const DEFAULT_PAGE_WIDTH_PREF = 'full'
@@ -40,6 +58,7 @@ export const DEFAULT_PAGE_WIDTH_PREF = 'full'
 export const DEFAULT_SETTINGS = {
   pageWidth: DEFAULT_PAGE_WIDTH_PREF,
   fontSize: DEFAULT_FONT_SIZE,
+  zoom: DEFAULT_ZOOM,
   // Empty = no image host: pasted/uploaded images keep the default behavior
   // (a local object URL). When set, it's run like Typora's "custom command":
   // the image file path is appended as an argument and the command prints the
@@ -60,12 +79,21 @@ function normalizeFontSize(s) {
   return Math.min(FONT_SIZE_MAX, Math.max(FONT_SIZE_MIN, Math.round(n)))
 }
 
+export function normalizeZoom(z) {
+  const n = Number(z)
+  if (!Number.isFinite(n)) return DEFAULT_ZOOM
+  // Snap to a 0.05 grid so slider/step/wheel all land on clean percentages.
+  const snapped = Math.round(n / 0.05) * 0.05
+  return Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, snapped))
+}
+
 export function loadSettings() {
   try {
     const raw = JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}')
     return {
       pageWidth: normalizeWidth(raw.pageWidth ?? DEFAULT_PAGE_WIDTH_PREF),
       fontSize: normalizeFontSize(raw.fontSize ?? DEFAULT_FONT_SIZE),
+      zoom: normalizeZoom(raw.zoom ?? DEFAULT_ZOOM),
       imageUploadCommand:
         typeof raw.imageUploadCommand === 'string' ? raw.imageUploadCommand : ''
     }
@@ -104,4 +132,11 @@ export function applyFontSize(size) {
     '--editor-font-size',
     normalizeFontSize(size) + 'px'
   )
+}
+
+// Apply the overall editor zoom as a CSS variable. The editor content layers
+// (`.km-doc`, `.milkdown`, and the source textarea's font) read it via `zoom`,
+// so the whole document magnifies while the app chrome keeps its own sizes.
+export function applyZoom(zoom) {
+  document.documentElement.style.setProperty('--editor-zoom', String(normalizeZoom(zoom)))
 }

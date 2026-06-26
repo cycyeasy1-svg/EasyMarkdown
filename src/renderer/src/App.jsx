@@ -1,5 +1,9 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import Editor from './components/Editor.jsx'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, lazy, Suspense } from 'react'
+// The Milkdown/Crepe rich editor pulls in the whole ProseMirror + KaTeX stack
+// (~3.6 MB). It's only used when a tab opts into WYSIWYG (`milkdownForced`); the
+// `.md` default is the lightweight source-backed KeepEditor. Loading it lazily
+// keeps that heavy code (and its memory) out of startup for the common case.
+const Editor = lazy(() => import('./components/Editor.jsx'))
 import KeepEditor from './components/KeepEditor.jsx'
 import Sidebar from './components/Sidebar.jsx'
 import Tabs from './components/Tabs.jsx'
@@ -15,11 +19,20 @@ import WindowControls from './components/WindowControls.jsx'
 import UpdateToast from './components/UpdateToast.jsx'
 import RenameModal from './components/RenameModal.jsx'
 import ImageHostButton from './components/ImageHostButton.jsx'
-import { loadSettings, saveSettings, applyPageWidth, applyFontSize } from './settings.js'
+import {
+  loadSettings,
+  saveSettings,
+  applyPageWidth,
+  applyFontSize,
+  applyZoom,
+  normalizeZoom,
+  ZOOM_STEP,
+  DEFAULT_ZOOM
+} from './settings.js'
 import { applyCustomTheme } from './customThemes.js'
 import { fireToast, HM_TOAST_EVENT } from './ui.js'
 import logoUrl from './assets/logo.png'
-import { clearFindHighlights, findRangesInEl, paintFindHighlights, scrollRangeIntoView, matchIndices } from './find.js'
+import { clearFindHighlights, findRangesInEl, paintFindHighlights, scrollRangeIntoView, matchIndices, blockIndexForLine } from './find.js'
 import {
   isNewerVersion, isAbsolutePath, sanitizeWorkspace, baseName, dirName, joinPath,
   isPlainTextDoc, isHeavyDoc, genId, LS, loadSession
@@ -75,7 +88,8 @@ export default function App() {
   const [focusedPane, setFocusedPane] = useState('left')
   const [refreshNonce, setRefreshNonce] = useState(0)
   const [files, setFiles] = useState([])
-  const [find, setFind] = useState({ open: false, query: '', matches: 0, active: 0 })
+  // `mode` is 'text' (content search) or 'line' (jump to a markdown source line).
+  const [find, setFind] = useState({ open: false, query: '', matches: 0, active: 0, mode: 'text' })
   // Current match set: Range objects (rich editor) or character offsets (source
   // textarea). Held in a ref so next/prev don't trigger re-renders.
   const findRangesRef = useRef([])
@@ -139,6 +153,15 @@ export default function App() {
 
   const activeTab = useMemo(() => tabs.find((t) => t.id === activeId) || null, [tabs, activeId])
   const activePath = activeTab?.path || null
+  // Native (OS-separator) paths of every open tab — used by the sidebar to expand
+  // the tree to each open file (must match the tree's `node.path` format).
+  const openTabPathsRaw = useMemo(() => tabs.map((t) => t.path).filter(Boolean), [tabs])
+  // Same paths normalized to forward slashes — the sidebar marks these rows with a
+  // dot. Normalized so Windows backslashes don't break the comparison.
+  const openTabPaths = useMemo(
+    () => new Set(openTabPathsRaw.map((p) => p.replace(/\\/g, '/'))),
+    [openTabPathsRaw]
+  )
   // Split is "live" only when the right-pane tab exists and differs from the
   // active (left) one. Hidden on the welcome/home screen.
   const splitTab = useMemo(
@@ -232,12 +255,34 @@ export default function App() {
     applyFontSize(settings.fontSize)
   }, [settings.fontSize])
   useEffect(() => {
+    applyZoom(settings.zoom)
+  }, [settings.zoom])
+  useEffect(() => {
     saveSettings(settings)
   }, [settings])
   // Merge a partial settings change (from the Settings modal).
   const updateSettings = useCallback((partial) => {
     setSettings((prev) => ({ ...prev, ...partial }))
   }, [])
+  // Step the overall zoom by a delta, clamped/snapped. Functional update so the
+  // keyboard/wheel handlers (mounted once) always read the latest zoom.
+  const bumpZoom = useCallback((delta) => {
+    setSettings((prev) => ({ ...prev, zoom: normalizeZoom((prev.zoom ?? DEFAULT_ZOOM) + delta) }))
+  }, [])
+
+  // Ctrl/Cmd + mouse wheel over the editor → zoom (Excel/browser convention).
+  // The +/-/0 keys are the View-menu accelerators (handled via onMenu), so only
+  // the wheel needs wiring here. Non-passive so we can cancel the native scroll.
+  useEffect(() => {
+    const onWheel = (e) => {
+      if (!(e.ctrlKey || e.metaKey)) return
+      if (!e.target.closest?.('.editor-area')) return
+      e.preventDefault()
+      bumpZoom(e.deltaY < 0 ? ZOOM_STEP : -ZOOM_STEP)
+    }
+    window.addEventListener('wheel', onWheel, { passive: false })
+    return () => window.removeEventListener('wheel', onWheel, { passive: false })
+  }, [bumpZoom])
 
   // ----------------------------- custom themes ----------------------------
   const refreshThemes = useCallback(() => {
@@ -425,6 +470,10 @@ export default function App() {
       ...prev,
       { id, path: null, title: t('tab.untitled'), content: '', savedContent: '', mtimeMs: null, reloadNonce: 0 }
     ])
+    // New (untitled) markdown opens in Milkdown WYSIWYG; opened files default to
+    // the source-backed keep editor. Keyed by tab id so it survives a later save
+    // (path change) without flipping the editor mid-edit.
+    setMilkdownForced((prev) => new Set(prev).add(id))
     setActiveId(id)
     setHome(false)
   }, [t])
@@ -620,6 +669,26 @@ export default function App() {
       setActiveId(keepId)
       setSplitId(null)
       return prev.filter((t) => t.id === keepId)
+    })
+  }, [])
+
+  // Close every tab on one side of `pivotId` (from the tab right-click menu).
+  // `side` is 'left' (lower indexes) or 'right' (higher indexes).
+  const closeSide = useCallback((pivotId, side) => {
+    setTabs((prev) => {
+      const idx = prev.findIndex((t) => t.id === pivotId)
+      if (idx === -1) return prev
+      const toClose = side === 'left' ? prev.slice(0, idx) : prev.slice(idx + 1)
+      if (!toClose.length) return prev
+      const firstDirty = toClose.find((t) => t.content !== t.savedContent)
+      if (firstDirty && !window.confirm(tRef.current('confirm.closeUnsaved', { name: firstDirty.title }))) {
+        return prev
+      }
+      const next = side === 'left' ? prev.slice(idx) : prev.slice(0, idx + 1)
+      const survives = (id) => id != null && next.some((t) => t.id === id)
+      setActiveId((cur) => (survives(cur) ? cur : pivotId))
+      setSplitId((cur) => (survives(cur) ? cur : null))
+      return next
     })
   }, [])
 
@@ -949,6 +1018,11 @@ export default function App() {
     toggleSource,
     toggleEditorMode,
     toggleTheme: cycleTheme,
+    // Overall editor zoom — also the View menu's zoom items (repurposed from
+    // Electron's whole-window webFrame zoom to this content-only zoom).
+    zoomIn: () => bumpZoom(ZOOM_STEP),
+    zoomOut: () => bumpZoom(-ZOOM_STEP),
+    zoomReset: () => setSettings((prev) => ({ ...prev, zoom: DEFAULT_ZOOM })),
     find: () => {
       // Leave the Home page so find acts on the visible document, not a hidden one.
       setHome(false)
@@ -989,6 +1063,55 @@ export default function App() {
       window.removeEventListener('mm:openFolder', onOpenFolderEvt)
     }
   }, [openPaths, openFolder])
+
+  // --- Drop OS files/folders onto the window to open them ---
+  // A markdown (or any) file dragged from the Finder/Explorer onto the app
+  // opens as a tab; a dropped folder opens as the workspace. Handlers run in
+  // the CAPTURE phase so we beat ProseMirror's own drop handling, and we always
+  // preventDefault on a file drop — otherwise Electron navigates the window to
+  // file://… and the whole app is replaced. Image files dropped into the
+  // writing area are left to the editor's own insert handling (Editor.jsx).
+  useEffect(() => {
+    const isFileDrag = (e) => e.dataTransfer?.types?.includes('Files')
+    const onDragOver = (e) => {
+      if (!isFileDrag(e)) return
+      e.preventDefault()
+      e.dataTransfer.dropEffect = 'copy'
+    }
+    const onDrop = (e) => {
+      const dt = e.dataTransfer
+      if (!isFileDrag(e)) return
+      e.preventDefault() // block the navigate-to-file default, always
+      const inEditor = e.target.closest?.('.milkdown, .ProseMirror, .cm-editor, textarea')
+      // webkitGetAsEntry() must be read synchronously, before any await, while
+      // the DataTransfer is still live.
+      const items = [...(dt.items || [])]
+      const dirs = []
+      const files = []
+      ;[...(dt.files || [])].forEach((f, i) => {
+        if (items[i]?.webkitGetAsEntry?.()?.isDirectory) dirs.push(f)
+        else files.push(f)
+      })
+      // Images dropped onto the writing area belong to the editor — skip them.
+      const docFiles = files.filter((f) => !(inEditor && f.type.startsWith('image/')))
+      if (!dirs.length && !docFiles.length) return
+      e.stopPropagation()
+      const dir = dirs[0] && window.api.pathForFile(dirs[0])
+      if (dir && isAbsolutePath(dir)) {
+        setWorkspace({ rootPath: dir, rootName: baseName(dir) })
+        setSidebarMode('files')
+        setSidebarOpen(true)
+      }
+      const paths = docFiles.map((f) => window.api.pathForFile(f)).filter(Boolean)
+      if (paths.length) openPaths(paths)
+    }
+    window.addEventListener('dragover', onDragOver, true)
+    window.addEventListener('drop', onDrop, true)
+    return () => {
+      window.removeEventListener('dragover', onDragOver, true)
+      window.removeEventListener('drop', onDrop, true)
+    }
+  }, [openPaths])
 
   // Ctrl+Tab cycling + restore session tabs on first mount
   useEffect(() => {
@@ -1044,6 +1167,12 @@ export default function App() {
       }))
       tabsRef.current = [...tabsRef.current, ...created]
       setTabs((prev) => [...prev, ...created])
+      // Restored scratch docs are new (unsaved) markdown → Milkdown WYSIWYG.
+      setMilkdownForced((prev) => {
+        const next = new Set(prev)
+        created.forEach((c) => next.add(c.id))
+        return next
+      })
       return created
     }
     // Restore silently: skip files that were deleted/moved since last session
@@ -1166,6 +1295,8 @@ export default function App() {
       ...prev,
       { id, path: null, title: doc.title, content: doc.content, savedContent: doc.content, mtimeMs: null, reloadNonce: 0 }
     ])
+    // The welcome doc showcases the editor → render it in Milkdown WYSIWYG.
+    setMilkdownForced((prev) => new Set(prev).add(id))
     setActiveId(id)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -1207,6 +1338,9 @@ export default function App() {
   }
   const findQueryRef = useRef('')
   const activeIdxRef = useRef(-1)
+  const findModeRef = useRef('text')
+  const lineBiRef = useRef(-1) // last located block index (line mode)
+  useEffect(() => { findModeRef.current = find.mode }, [find.mode])
 
   // Run a fresh search for `query`, scoped to the editor content.
   const runFind = useCallback((query) => {
@@ -1253,18 +1387,95 @@ export default function App() {
     setFind((f) => ({ ...f, active: i + 1 }))
   }, [])
 
+  // ── Line-number locate ──
+  // Briefly highlight a preview block (display-only class) and scroll it center.
+  const flashBlock = (el) => {
+    if (!el) return
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    el.classList.remove('hm-line-flash')
+    void el.offsetWidth // restart the animation if the same block is re-targeted
+    el.classList.add('hm-line-flash')
+    window.setTimeout(() => el.classList.remove('hm-line-flash'), 1500)
+  }
+
+  // Jump the preview to the block that renders markdown source line `raw`. In
+  // source mode this is an exact line jump; in keep/rich mode it resolves the
+  // containing top-level block (`.km-block[data-bi]` / Nth .ProseMirror child).
+  // `commit` (Enter/next/prev) is allowed to steal focus to show a text selection;
+  // live typing (commit=false) only scrolls so the find input keeps focus.
+  const runLineJump = useCallback((raw, commit = false) => {
+    const str = String(raw ?? '').trim()
+    findQueryRef.current = str
+    if (sourceRef.current) {
+      const el = sourceRef.current
+      const lines = el.value.split('\n')
+      const total = lines.length
+      const n = parseInt(str, 10)
+      if (!str || !Number.isFinite(n)) { setFind((f) => ({ ...f, matches: total, active: 0 })); return }
+      const ln = Math.min(Math.max(1, n), total)
+      const cs = getComputedStyle(el)
+      const lh = parseFloat(cs.lineHeight) || parseFloat(cs.fontSize) * 1.5 || 20
+      el.scrollTop = Math.max(0, (ln - 1) * lh - el.clientHeight / 2)
+      if (commit) {
+        let off = 0
+        for (let k = 0; k < ln - 1; k++) off += lines[k].length + 1
+        el.focus()
+        el.setSelectionRange(off, off + lines[ln - 1].length)
+      }
+      setFind((f) => ({ ...f, matches: total, active: ln }))
+      return
+    }
+    const tab = tabsRef.current.find((x) => x.id === activeIdRef.current)
+    const content = tab?.content ?? ''
+    const n = parseInt(str, 10)
+    const { bi, total } = blockIndexForLine(content, Number.isFinite(n) ? n : 1)
+    if (!str || !Number.isFinite(n)) { lineBiRef.current = -1; setFind((f) => ({ ...f, matches: total, active: 0 })); return }
+    lineBiRef.current = bi
+    const root = richRoot()
+    let block = null
+    if (root && bi >= 0) {
+      block = root.classList.contains('km-doc')
+        ? root.querySelector(`.km-block[data-bi="${bi}"]`)
+        : root.children[bi] || null
+    }
+    flashBlock(block)
+    setFind((f) => ({ ...f, matches: total, active: Math.min(Math.max(1, n), total) }))
+  }, [])
+
+  // Next/prev in line mode steps the target line by ±1 and re-jumps.
+  const stepLine = useCallback((backwards = false) => {
+    const n = parseInt(String(findQueryRef.current).trim(), 10)
+    const cur = Number.isFinite(n) ? n : 1
+    const next = Math.max(1, cur + (backwards ? -1 : 1))
+    setFind((f) => ({ ...f, query: String(next) }))
+    runLineJump(String(next), true)
+  }, [runLineJump])
+
+  const toggleFindMode = useCallback(() => {
+    clearFindHighlights()
+    findRangesRef.current = []
+    activeIdxRef.current = -1
+    lineBiRef.current = -1
+    findQueryRef.current = ''
+    setFind((f) => ({ ...f, mode: f.mode === 'line' ? 'text' : 'line', query: '', matches: 0, active: 0 }))
+    setTimeout(() => findInputRef.current?.focus(), 0)
+  }, [])
+
   const closeFind = useCallback(() => {
     clearFindHighlights()
     findRangesRef.current = []
     activeIdxRef.current = -1
+    lineBiRef.current = -1
     findQueryRef.current = ''
-    setFind({ open: false, query: '', matches: 0, active: 0 })
+    setFind((f) => ({ open: false, query: '', matches: 0, active: 0, mode: f.mode }))
   }, [])
 
-  // Re-run the search when switching tabs while the find bar is open, so ranges
-  // point at the newly-visible document.
+  // Re-run the search/jump when switching tabs while the find bar is open, so it
+  // points at the newly-visible document.
   useEffect(() => {
-    if (find.open) runFind(findQueryRef.current)
+    if (!find.open) return
+    if (findModeRef.current === 'line') runLineJump(findQueryRef.current, false)
+    else runFind(findQueryRef.current)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeId])
 
@@ -1335,6 +1546,8 @@ export default function App() {
           onClose={closeTab}
           onNew={newTab}
           onCloseOthers={closeOthers}
+          onCloseLeft={(id) => closeSide(id, 'left')}
+          onCloseRight={(id) => closeSide(id, 'right')}
           onOpenRight={openRight}
           onRename={renameTabFile}
           onDuplicate={duplicateTabFile}
@@ -1382,6 +1595,8 @@ export default function App() {
               <Sidebar
                 workspace={workspace}
                 activePath={activePath}
+                openTabPaths={openTabPaths}
+                openTabPathsRaw={openTabPathsRaw}
                 onOpenFile={(p) => { openPaths([p]); if (isMobile) setSidebarOpen(false) }}
                 onOpenRight={openFileRight}
                 onExportPdf={exportPathToPdf}
@@ -1400,28 +1615,46 @@ export default function App() {
         <main className="pane-center">
           {find.open && (
             <div className="findbar">
-              <Icon name="search" size={14} />
+              <button
+                className={`findbar-mode${find.mode === 'line' ? ' active' : ''}`}
+                title={t(find.mode === 'line' ? 'find.modeLine' : 'find.modeText')}
+                onClick={toggleFindMode}
+              >
+                <Icon name={find.mode === 'line' ? 'hash' : 'search'} size={14} />
+              </button>
               <input
                 ref={findInputRef}
                 value={find.query}
-                placeholder={t('find.placeholder')}
+                inputMode={find.mode === 'line' ? 'numeric' : undefined}
+                placeholder={t(find.mode === 'line' ? 'find.linePlaceholder' : 'find.placeholder')}
                 onChange={(e) => {
                   const q = e.target.value
                   setFind((f) => ({ ...f, query: q }))
-                  runFind(q) // live: highlight as you type
+                  if (find.mode === 'line') runLineJump(q, false) // live: scroll to the line
+                  else runFind(q) // live: highlight as you type
                 }}
                 onKeyDown={(e) => {
-                  if (e.key === 'Enter') { e.preventDefault(); stepFind(e.shiftKey) }
+                  if (e.key === 'Enter') {
+                    e.preventDefault()
+                    if (find.mode === 'line') runLineJump(find.query, true)
+                    else stepFind(e.shiftKey)
+                  }
                   if (e.key === 'Escape') closeFind()
                 }}
               />
               <span className="findbar-count">
-                {find.query ? `${find.active}/${find.matches}` : ''}
+                {find.query && find.matches ? `${find.active}/${find.matches}` : ''}
               </span>
-              <button title={t('find.prev')} onClick={() => stepFind(true)}>
+              <button
+                title={t(find.mode === 'line' ? 'find.linePrev' : 'find.prev')}
+                onClick={() => (find.mode === 'line' ? stepLine(true) : stepFind(true))}
+              >
                 <Icon name="chevron-up" size={14} />
               </button>
-              <button title={t('find.next')} onClick={() => stepFind(false)}>
+              <button
+                title={t(find.mode === 'line' ? 'find.lineNext' : 'find.next')}
+                onClick={() => (find.mode === 'line' ? stepLine(false) : stepFind(false))}
+              >
                 <Icon name="chevron-down" size={14} />
               </button>
               <button title={t('find.close')} onClick={closeFind}>
@@ -1462,11 +1695,15 @@ export default function App() {
               // grows to fill the rest. Outside split, panes fill the row.
               const paneFlex = split && isLeft ? `0 0 calc(${(splitRatio * 100).toFixed(2)}% - 3px)` : undefined
 
-              // Plain-text docs always use the textarea; "heavy" Markdown docs do
-              // too until the user opts into rich (avoids a multi-second freeze);
-              // the active pane also uses it in global source mode. The right pane
-              // never shows global source mode.
-              const heavyAsSource = tab.heavy && !richForced.has(tab.id)
+              // Plain-text docs always use the textarea; the active pane also uses
+              // it in global source mode (the right pane never shows it).
+              // "Heavy" only matters for the Milkdown (Crepe) editor — its
+              // near-quadratic handling of one giant paragraph freezes the thread.
+              // The source-backed keep editor is plain DOM and renders heavy docs
+              // fine, so only fall back to plain source for a Milkdown-bound tab
+              // (and only until the user opts into rich-despite-heavy).
+              const heavyAsSource =
+                tab.heavy && milkdownForced.has(tab.id) && !richForced.has(tab.id)
               const usesTextarea = isPlainTextDoc(tab) || heavyAsSource || (sourceMode && isLeft)
               if (usesTextarea) {
                 if (!inView) return null
@@ -1533,26 +1770,33 @@ export default function App() {
                   onFocusCapture={onPaneFocus}
                   onMouseDownCapture={onPaneFocus}
                 >
-                  <Editor
-                    tabId={`${tab.id}:${tab.reloadNonce}`}
-                    initialContent={tab.content}
-                    docPath={tab.path}
-                    imageUploadCommand={settings.imageUploadCommand}
-                    onChange={(md, isInitial) => updateContent(tab.id, md, isInitial)}
-                    onReady={(api) => {
-                      editorApis.current[tab.id] = api
-                    }}
-                    onActiveBlock={(id) => {
-                      if (tab.id === activeIdRef.current) setActiveBlock(id)
-                    }}
-                  />
+                  <Suspense fallback={null}>
+                    <Editor
+                      tabId={`${tab.id}:${tab.reloadNonce}`}
+                      initialContent={tab.content}
+                      docPath={tab.path}
+                      imageUploadCommand={settings.imageUploadCommand}
+                      onChange={(md, isInitial) => updateContent(tab.id, md, isInitial)}
+                      onReady={(api) => {
+                        editorApis.current[tab.id] = api
+                      }}
+                      onActiveBlock={(id) => {
+                        if (tab.id === activeIdRef.current) setActiveBlock(id)
+                      }}
+                    />
+                  </Suspense>
                 </div>
               )
             })}
 
-            {/* Heavy-doc notice: this Markdown file is shown as plain source to
-                stay responsive; offer a one-click switch to the rich editor. */}
-            {!home && activeTab && activeTab.heavy && !richForced.has(activeTab.id) && (
+            {/* Heavy-doc notice: only shown when a Milkdown-bound doc is being
+                displayed as plain source to stay responsive (the keep editor
+                renders heavy docs directly); offer a one-click switch to rich. */}
+            {!home &&
+              activeTab &&
+              activeTab.heavy &&
+              milkdownForced.has(activeTab.id) &&
+              !richForced.has(activeTab.id) && (
               <div className="hm-heavy-banner">
                 <span>{t('heavy.notice')}</span>
                 <button onClick={() => setRichForced((s) => new Set(s).add(activeTab.id))}>
@@ -1630,6 +1874,8 @@ export default function App() {
         onSetPageWidth={(w) => updateSettings({ pageWidth: w })}
         fontSize={settings.fontSize}
         onSetFontSize={(s) => updateSettings({ fontSize: s })}
+        zoom={settings.zoom}
+        onSetZoom={(z) => updateSettings({ zoom: normalizeZoom(z) })}
         filterInfo={activeTab ? keepFilters[activeTab.id] : null}
       />
 
