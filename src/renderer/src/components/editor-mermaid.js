@@ -17,6 +17,7 @@ import { Decoration, DecorationSet } from '@milkdown/prose/view'
 // light/dark variants don't clobber each other. Shared across editor instances.
 const cache = new Map()
 const pending = new Set()
+const retried = new Set() // keys whose first render errored and get a one-shot retry
 let seq = 0
 let mermaidMod = null
 
@@ -31,21 +32,37 @@ const curTheme = () => (document.body.classList.contains('dark') ? 'dark' : 'def
 const keyFor = (theme, code) => theme + '::' + code
 
 // Render `code` to an SVG (async, cached). `refresh` re-dispatches the plugin so
-// the freshly-cached SVG replaces the "rendering…" placeholder.
+// the freshly-cached SVG replaces the "rendering…" placeholder. The FIRST render
+// right after the lazy import can race with Mermaid's own init and fail — so on
+// error we retry once before caching the error (otherwise a flaky first render
+// stuck the block on "rendering…" until the source changed).
 async function ensureRender(theme, code, refresh) {
   const k = keyFor(theme, code)
   if (cache.has(k) || pending.has(k)) return
   pending.add(k)
   const id = 'hm-mermaid-' + ++seq
+  let result = null
   try {
     const mermaid = await getMermaid()
     // Re-initialize per render so the diagram matches the current theme.
     mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', theme })
     const { svg } = await mermaid.render(id, code)
-    cache.set(k, { svg })
+    result = { svg }
+    retried.delete(k)
   } catch (e) {
-    cache.set(k, { error: (e && e.message) || String(e) })
+    if (!retried.has(k)) {
+      // Retry once after Mermaid has settled; don't cache the flaky failure.
+      retried.add(k)
+      pending.delete(k)
+      document.getElementById(id)?.remove()
+      document.getElementById('d' + id)?.remove()
+      setTimeout(refresh, 300)
+      return
+    }
+    result = { error: (e && e.message) || String(e) }
+    retried.delete(k)
   } finally {
+    if (result) cache.set(k, result)
     pending.delete(k)
     // Mermaid leaves a temporary element behind on syntax errors; clean it up.
     document.getElementById(id)?.remove()

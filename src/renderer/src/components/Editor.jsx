@@ -11,7 +11,9 @@ import {
 } from '@milkdown/kit/core'
 import { imageBlockConfig } from '@milkdown/kit/component/image-block'
 import { inlineImageConfig } from '@milkdown/kit/component/image-inline'
+import { codeBlockConfig } from '@milkdown/kit/component/code-block'
 import { inlineCodeSchema } from '@milkdown/kit/preset/commonmark'
+import { LanguageDescription, LanguageSupport, StreamLanguage } from '@codemirror/language'
 import { TextSelection } from '@milkdown/prose/state'
 import '@milkdown/crepe/theme/common/style.css'
 import '@milkdown/crepe/theme/frame.css'
@@ -33,6 +35,20 @@ import { highlightFeatures, highlightStringifyHandler, toggleHighlightCommand, a
 // instead of capturing a single instance, which previously made the button act
 // on the wrong (hidden) tab when more than one tab was open.
 const liveEditors = new Set()
+
+// A "Mermaid" entry for the code-block language picker. Mermaid has no real
+// CodeMirror language (the diagram is rendered by our own widget in
+// editor-mermaid.js), so load() returns a no-op language — the picker just needs
+// to offer it so users can set a block's language to "mermaid" directly, instead
+// of only via the ```mermaid fence info string.
+const mermaidLanguage = LanguageDescription.of({
+  name: 'Mermaid',
+  alias: ['mermaid', 'mmd'],
+  extensions: ['mmd', 'mermaid'],
+  async load() {
+    return new LanguageSupport(StreamLanguage.define(() => ({ token: () => null })))
+  }
+})
 
 // Localize the image-block / inline-image UI text (caption placeholder, upload
 // buttons…) from the current translator. Applied at create and re-applied on a
@@ -272,6 +288,12 @@ export default function Editor({
       // language switch preserves this onUpload.
       ctx.update(imageBlockConfig.key, (v) => ({ ...v, onUpload: persistImage }))
       ctx.update(inlineImageConfig.key, (v) => ({ ...v, onUpload: persistImage }))
+      // Offer "Mermaid" in the code-block language picker (3a). Prepended so it
+      // shows first; the default CodeMirror languages follow unchanged.
+      ctx.update(codeBlockConfig.key, (v) => ({
+        ...v,
+        languages: [mermaidLanguage, ...(v.languages || [])]
+      }))
       // Live-render ```mermaid code blocks as diagrams (widget decoration after
       // the editable source — see editor-mermaid.js).
       ctx.update(prosePluginsCtx, (plugins) => [
