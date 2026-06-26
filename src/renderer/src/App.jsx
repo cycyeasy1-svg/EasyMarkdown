@@ -14,7 +14,14 @@ import WindowControls from './components/WindowControls.jsx'
 import UpdateToast from './components/UpdateToast.jsx'
 import RenameModal from './components/RenameModal.jsx'
 import ImageHostButton from './components/ImageHostButton.jsx'
-import { loadSettings, saveSettings, applyPageWidth, applyFontSize } from './settings.js'
+import {
+  loadSettings,
+  saveSettings,
+  applyPageWidth,
+  applyFontSize,
+  applyLineHeight,
+  applyParagraphSpacing
+} from './settings.js'
 import { applyCustomTheme } from './customThemes.js'
 import { fireToast, HM_TOAST_EVENT } from './ui.js'
 import logoUrl from './assets/logo.png'
@@ -207,6 +214,12 @@ export default function App() {
   useEffect(() => {
     applyFontSize(settings.fontSize)
   }, [settings.fontSize])
+  useEffect(() => {
+    applyLineHeight(settings.lineHeight)
+  }, [settings.lineHeight])
+  useEffect(() => {
+    applyParagraphSpacing(settings.paragraphSpacing)
+  }, [settings.paragraphSpacing])
   useEffect(() => {
     saveSettings(settings)
   }, [settings])
@@ -1497,6 +1510,10 @@ export default function App() {
         onSetPageWidth={(w) => updateSettings({ pageWidth: w })}
         fontSize={settings.fontSize}
         onSetFontSize={(s) => updateSettings({ fontSize: s })}
+        lineHeight={settings.lineHeight}
+        onSetLineHeight={(v) => updateSettings({ lineHeight: v })}
+        paragraphSpacing={settings.paragraphSpacing}
+        onSetParagraphSpacing={(v) => updateSettings({ paragraphSpacing: v })}
       />
 
       <CommandPalette
