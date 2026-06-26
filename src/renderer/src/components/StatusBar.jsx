@@ -5,6 +5,7 @@ import { THEMES, themeById } from '../themes.js'
 import { LANGS } from '../i18n.jsx'
 import { FONT_SIZE_MIN, FONT_SIZE_MAX } from '../settings.js'
 import LayoutControl from './LayoutControl.jsx'
+import { usePopover } from '../hooks/usePopover.js'
 
 function stats(md) {
   const text = (md || '')
@@ -19,19 +20,7 @@ function stats(md) {
 }
 
 // Small popover that closes on outside click.
-function usePopover() {
-  const [open, setOpen] = useState(false)
-  const ref = useRef(null)
-  useEffect(() => {
-    if (!open) return
-    const onDown = (e) => {
-      if (ref.current && !ref.current.contains(e.target)) setOpen(false)
-    }
-    window.addEventListener('mousedown', onDown)
-    return () => window.removeEventListener('mousedown', onDown)
-  }, [open])
-  return { open, setOpen, ref }
-}
+// usePopover is imported from ../hooks (shared with LayoutControl).
 
 
 // Document stats: one status-bar button showing the character count → popover

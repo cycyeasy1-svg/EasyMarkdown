@@ -7,6 +7,7 @@
 import { useRef, useState } from 'react'
 import { Icon } from './icons.jsx'
 import { useI18n } from '../i18n.jsx'
+import { usePopover } from '../hooks/usePopover.js'
 import {
   PAGE_WIDTH_PRESETS,
   PAGE_WIDTH_MIN,
@@ -19,34 +20,48 @@ import {
   LINE_HEIGHT_MAX,
   PARA_SPACING_PRESETS,
   PARA_SPACING_MIN,
-  PARA_SPACING_MAX
+  PARA_SPACING_MAX,
+  applyFontSize,
+  applyLineHeight,
+  applyParagraphSpacing,
+  applyPageWidth
 } from '../settings.js'
 
-// A small hook kept local (StatusBar has its own copy; this module is standalone).
-function usePopover() {
-  const [open, setOpen] = useState(false)
-  const ref = useRef(null)
-  return { open, setOpen, ref }
-}
+// usePopover is shared from ../hooks (closes on outside click + Escape).
 
-// Map a pointer X over `track` to a value in [min, max], clamped, 1-decimal.
-const fromX = (track, clientX, min, max, round = (n) => n) => {
+// Pointer X over `track` → value in [min, max], clamped + rounded.
+const valueFromX = (track, clientX, min, max, round) => {
   const r = track.getBoundingClientRect()
   const p = Math.min(1, Math.max(0, (clientX - r.left) / r.width))
   return round(min + p * (max - min))
 }
 
-function AdjustGroup({ title, valueLabel, presets, activeIndex, onPick, pct, fromXFrac, onSet }) {
+// `liveApply`, if given, writes the CSS variable DIRECTLY during a drag (no
+// React state round-trip), so the slider stays smooth even though each new value
+// reflows the whole editor. The value is persisted via `onSet` once, on release.
+function AdjustGroup({ title, valueLabel, presets, activeIndex, onPick, value, min, max, round = (n) => n, onSet, liveApply }) {
   const { t } = useI18n()
   const trackRef = useRef(null)
+  const draftRef = useRef(null) // latest drag value (ref, so pointerup reads it)
   const [dragging, setDragging] = useState(false)
+  const [draft, setDraft] = useState(null) // live drag value (null = use prop)
+  const cur = draft === null ? value : draft
+  const pct = (cur - min) / (max - min)
   const startDrag = (e) => {
     e.preventDefault()
     setDragging(true)
-    onSet(fromXFrac(trackRef.current, e.clientX))
-    const onMove = (ev) => onSet(fromXFrac(trackRef.current, ev.clientX))
+    const apply = (v) => {
+      draftRef.current = v
+      setDraft(v)
+      if (liveApply) liveApply(v)
+    }
+    apply(valueFromX(trackRef.current, e.clientX, min, max, round))
+    const onMove = (ev) => apply(valueFromX(trackRef.current, ev.clientX, min, max, round))
     const onUp = () => {
       setDragging(false)
+      onSet(draftRef.current) // commit the final dragged value
+      setDraft(null)
+      draftRef.current = null
       window.removeEventListener('pointermove', onMove)
       window.removeEventListener('pointerup', onUp)
     }
@@ -96,15 +111,12 @@ export default function LayoutControl({
   const { open, setOpen, ref } = usePopover()
 
   const round1 = (n) => Math.round(n * 10) / 10
-  const fontPct = (fontSize - FONT_SIZE_MIN) / (FONT_SIZE_MAX - FONT_SIZE_MIN)
+  const round10 = (n) => Math.round(n / 10) * 10
   const fontIdx = FONT_SIZE_PRESETS.findIndex((p) => p.size === fontSize)
-  const lhPct = (lineHeight - LINE_HEIGHT_MIN) / (LINE_HEIGHT_MAX - LINE_HEIGHT_MIN)
   const lhIdx = LINE_HEIGHT_PRESETS.findIndex((p) => p.value === lineHeight)
-  const psPct = (paragraphSpacing - PARA_SPACING_MIN) / (PARA_SPACING_MAX - PARA_SPACING_MIN)
   const psIdx = PARA_SPACING_PRESETS.findIndex((p) => p.value === paragraphSpacing)
 
   const isFull = pageWidth === 'full'
-  const widthPct = isFull ? 1 : (pageWidth - PAGE_WIDTH_MIN) / (PAGE_WIDTH_MAX - PAGE_WIDTH_MIN)
   const widthIdx = PAGE_WIDTH_PRESETS.findIndex((p) =>
     p.width === 'full' ? isFull : !isFull && pageWidth === p.width
   )
@@ -124,9 +136,12 @@ export default function LayoutControl({
             presets={FONT_SIZE_PRESETS.map((p) => ({ ...p, label: t('settings.font.' + p.id) }))}
             activeIndex={fontIdx}
             onPick={(p) => onSetFontSize(p.size)}
-            pct={fontPct}
-            fromXFrac={(track, x) => fromX(track, x, FONT_SIZE_MIN, FONT_SIZE_MAX, Math.round)}
+            value={fontSize}
+            min={FONT_SIZE_MIN}
+            max={FONT_SIZE_MAX}
+            round={Math.round}
             onSet={onSetFontSize}
+            liveApply={applyFontSize}
           />
           <div className="hm-pop-sep" />
           <AdjustGroup
@@ -135,9 +150,12 @@ export default function LayoutControl({
             presets={LINE_HEIGHT_PRESETS.map((p) => ({ ...p, label: t('settings.lineHeightPreset.' + p.id) }))}
             activeIndex={lhIdx}
             onPick={(p) => onSetLineHeight(p.value)}
-            pct={lhPct}
-            fromXFrac={(track, x) => fromX(track, x, LINE_HEIGHT_MIN, LINE_HEIGHT_MAX, round1)}
+            value={lineHeight}
+            min={LINE_HEIGHT_MIN}
+            max={LINE_HEIGHT_MAX}
+            round={round1}
             onSet={onSetLineHeight}
+            liveApply={applyLineHeight}
           />
           <div className="hm-pop-sep" />
           <AdjustGroup
@@ -146,9 +164,12 @@ export default function LayoutControl({
             presets={PARA_SPACING_PRESETS.map((p) => ({ ...p, label: t('settings.paraSpacingPreset.' + p.id) }))}
             activeIndex={psIdx}
             onPick={(p) => onSetParagraphSpacing(p.value)}
-            pct={psPct}
-            fromXFrac={(track, x) => fromX(track, x, PARA_SPACING_MIN, PARA_SPACING_MAX, round1)}
+            value={paragraphSpacing}
+            min={PARA_SPACING_MIN}
+            max={PARA_SPACING_MAX}
+            round={round1}
             onSet={onSetParagraphSpacing}
+            liveApply={applyParagraphSpacing}
           />
           <div className="hm-pop-sep" />
           <AdjustGroup
@@ -157,9 +178,12 @@ export default function LayoutControl({
             presets={PAGE_WIDTH_PRESETS.map((p) => ({ ...p, label: t('settings.width.' + p.id) }))}
             activeIndex={widthIdx}
             onPick={(p) => onSetPageWidth(p.width)}
-            pct={widthPct}
-            fromXFrac={(track, x) => fromX(track, x, PAGE_WIDTH_MIN, PAGE_WIDTH_MAX, (n) => Math.round(n / 10) * 10)}
+            value={isFull ? PAGE_WIDTH_MAX : pageWidth}
+            min={PAGE_WIDTH_MIN}
+            max={PAGE_WIDTH_MAX}
+            round={round10}
             onSet={onSetPageWidth}
+            liveApply={applyPageWidth}
           />
         </div>
       )}
