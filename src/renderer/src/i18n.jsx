@@ -191,6 +191,7 @@ export const STRINGS = {
     'mermaid.error': 'Diagram error:',
     'mermaid.editCode': 'Edit code',
     'mermaid.hideCode': 'Hide code',
+    'mermaid.diagram': 'Diagram',
 
     // block types
     'block.turnInto': 'Turn into',
@@ -421,6 +422,7 @@ export const STRINGS = {
     'mermaid.error': '图表错误：',
     'mermaid.editCode': '编辑代码',
     'mermaid.hideCode': '隐藏代码',
+    'mermaid.diagram': '图表',
 
     'block.turnInto': '转换为',
     'block.paragraph': '正文',

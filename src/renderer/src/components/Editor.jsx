@@ -24,7 +24,7 @@ import { fireToast } from '../ui.js'
 import { renderHtmlNodeView, convertBlock, remarkMergeInlineHtml } from './editor-html.js'
 import { dirOf, isRelativePath, resolveToFileUrl } from './editor-images.js'
 import { inlineRichStyles } from './editor-copy.js'
-import { createMermaidPlugin } from './editor-mermaid.js'
+import { createMermaidPreviewRenderer } from './editor-mermaid.js'
 import { tableBreakKeymap, tableCellBreakHandler, brToBreakRemarkPlugin } from './editor-tablebreak.js'
 import { highlightFeatures, highlightStringifyHandler, toggleHighlightCommand, applyHighlightInView, HIGHLIGHT_COLORS } from './editor-highlight.js'
 
@@ -292,15 +292,22 @@ export default function Editor({
       // shows first; the default CodeMirror languages follow unchanged.
       ctx.update(codeBlockConfig.key, (v) => ({
         ...v,
-        languages: [mermaidLanguage, ...(v.languages || [])]
+        languages: [mermaidLanguage, ...(v.languages || [])],
+        // Mermaid: render the diagram as the block's "preview" (the built-in
+        // mechanism LaTeX uses), default to preview-only (source hidden), and put
+        // a Hide/Edit toggle in the toolbar next to Copy. Non-mermaid blocks have
+        // no preview, so their source always shows. See editor-mermaid.js.
+        renderPreview: createMermaidPreviewRenderer((k) => tRef.current(k)),
+        previewOnlyByDefault: true,
+        previewLabel: t('mermaid.diagram'),
+        previewLoading: t('mermaid.rendering'),
+        previewToggleText: (previewOnly) =>
+          previewOnly ? t('mermaid.editCode') : t('mermaid.hideCode')
       }))
-      // Live-render ```mermaid code blocks as diagrams (widget decoration after
-      // the editable source — see editor-mermaid.js).
       ctx.update(prosePluginsCtx, (plugins) => [
         ...plugins,
         // Table-cell line break (issue #7): keymap first so it wins Enter inside a cell.
-        tableBreakKeymap(),
-        createMermaidPlugin((k) => tRef.current(k))
+        tableBreakKeymap()
       ])
       // Table-cell line break — serialize a break to <br> inside a cell, and parse
       // inline <br> back into a break (see editor-tablebreak.js). Also serialize
