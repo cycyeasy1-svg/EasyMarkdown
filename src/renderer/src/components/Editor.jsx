@@ -795,9 +795,36 @@ export default function Editor({
           cleanups.push(() => imgObserver.disconnect())
         }
 
-        // --- Inject a heading-level button into Crepe's selection toolbar ---
+        // --- Inject custom buttons into Crepe's selection toolbar ---
         // Crepe's toolbar (bold/italic/strike…) has no submenu support, so we
-        // append our own "H" item; hovering it reveals H1…H6 / ¶.
+        // append our own items (a heading picker, a highlight color picker).
+        // Two shared helpers keep the two injections from drifting apart:
+        //   - editorForToolbar: the editor that owns a toolbar's selection (the
+        //     focused one), regardless of which instance injected the button;
+        //   - appendToolbarItem: the divider + button scaffolding both share.
+        const editorForToolbar = (toolbar) =>
+          [...liveEditors].find((ed) => ed.getView()?.hasFocus()) ||
+          [...liveEditors].find((ed) => ed.host.contains(toolbar)) ||
+          self
+
+        const appendToolbarItem = (toolbar, itemClass, title, svg) => {
+          if (toolbar.querySelector('.' + itemClass)) return null
+          const divider = document.createElement('div')
+          divider.className = 'divider hm-heading-divider'
+          const item = document.createElement('div')
+          item.className = 'toolbar-item ' + itemClass
+          item.setAttribute('role', 'button')
+          item.tabIndex = 0
+          item.title = title
+          item.innerHTML = svg
+          // Keep the selection alive while clicking the button / opening its popover.
+          item.addEventListener('mousedown', (e) => e.preventDefault())
+          toolbar.appendChild(divider)
+          toolbar.appendChild(item)
+          return item
+        }
+
+        // Heading picker: hover reveals H1…H6 / ¶.
         const HEAD_DEFS = [
           ['h1', 'H1', 'Ctrl+1'],
           ['h2', 'H2', 'Ctrl+2'],
@@ -808,17 +835,13 @@ export default function Editor({
           ['paragraph', '¶', 'Ctrl+0']
         ]
         const injectHeadingButton = (toolbar) => {
-          if (toolbar.querySelector('.hm-heading-item')) return
-          const divider = document.createElement('div')
-          divider.className = 'divider hm-heading-divider'
-
-          const item = document.createElement('div')
-          item.className = 'toolbar-item hm-heading-item'
-          item.setAttribute('role', 'button')
-          item.title = tRef.current('tip.changeBlock')
-          item.innerHTML =
+          const item = appendToolbarItem(
+            toolbar,
+            'hm-heading-item',
+            tRef.current('tip.changeBlock'),
             '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 4v16"/><path d="M18 4v16"/><path d="M6 12h12"/></svg>'
-
+          )
+          if (!item) return
           const pop = document.createElement('div')
           pop.className = 'hm-heading-pop'
           const inner = document.createElement('div')
@@ -835,39 +858,23 @@ export default function Editor({
             b.addEventListener('click', (e) => {
               e.preventDefault()
               e.stopPropagation()
-              // Act on the editor that owns this toolbar's selection — the
-              // focused one — not whichever instance injected the button.
-              const target =
-                [...liveEditors].find((ed) => ed.getView()?.hasFocus()) ||
-                [...liveEditors].find((ed) => ed.host.contains(toolbar)) ||
-                self
-              target.getApi()?.setBlock(id)
+              editorForToolbar(toolbar).getApi()?.setBlock(id)
             })
             inner.appendChild(b)
           }
           pop.appendChild(inner)
           item.appendChild(pop)
-          item.addEventListener('mousedown', (e) => e.preventDefault()) // keep selection
-          toolbar.appendChild(divider)
-          toolbar.appendChild(item)
         }
 
-        // A highlighter button next to the heading one: opens a small color
-        // picker (yellow / red / blue) and applies that highlight to the
-        // selection (issue #14). Routes to the focused editor like the heading
-        // button does.
+        // Highlight color picker (issue #14): hover reveals yellow/red/blue.
         const injectHighlightButton = (toolbar) => {
-          if (toolbar.querySelector('.hm-highlight-item')) return
-          const divider = document.createElement('div')
-          divider.className = 'divider hm-heading-divider'
-          const item = document.createElement('div')
-          item.className = 'toolbar-item hm-highlight-item'
-          item.setAttribute('role', 'button')
-          item.tabIndex = 0
-          item.title = tRef.current('tb.highlight')
-          item.innerHTML =
+          const item = appendToolbarItem(
+            toolbar,
+            'hm-highlight-item',
+            tRef.current('tb.highlight'),
             '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 17l-1 4 4-1L19 8l-3-3z"/><path d="M14 5l3 3"/><rect x="3" y="20" width="18" height="2" rx="1" fill="currentColor" stroke="none"/></svg>'
-
+          )
+          if (!item) return
           const pop = document.createElement('div')
           pop.className = 'hm-highlight-pop'
           const inner = document.createElement('div')
@@ -884,32 +891,25 @@ export default function Editor({
             sw.addEventListener('click', (e) => {
               e.preventDefault()
               e.stopPropagation()
-              const target =
-                [...liveEditors].find((ed) => ed.getView()?.hasFocus()) ||
-                [...liveEditors].find((ed) => ed.host.contains(toolbar)) ||
-                self
-              const v = target?.getView?.()
+              const v = editorForToolbar(toolbar)?.getView?.()
               if (v) applyHighlightInView(v, color)
             })
             inner.appendChild(sw)
           }
           pop.appendChild(inner)
           item.appendChild(pop)
-          item.addEventListener('mousedown', (e) => e.preventDefault()) // keep selection
-          toolbar.appendChild(divider)
-          toolbar.appendChild(item)
         }
 
 
         // Inject synchronously (no requestAnimationFrame — it's throttled when
         // the window is occluded, which would skip injection). The scan is cheap
-        // and injectHeadingButton early-returns once the button is present.
+        // and each injector early-returns once its button is present.
         // Scan globally because Crepe may render its toolbar outside `host`; the
-        // button routes its click to the focused editor (see the click handler),
+        // button routes its click to the focused editor (see editorForToolbar),
         // so it doesn't matter which instance injected it.
         // Crepe's toolbar buttons carry no label/identifier in the DOM, so we
         // add tooltips by their fixed order: bold, italic, strikethrough, inline
-        // code, link. (Our injected heading button is excluded and titled above.)
+        // code, link. Both of OUR injected items are excluded (titled above).
         const addToolbarTitles = (toolbar) => {
           const tips = [
             tRef.current('tb.bold'),
@@ -919,7 +919,7 @@ export default function Editor({
             tRef.current('tb.link')
           ]
           toolbar
-            .querySelectorAll('.toolbar-item:not(.hm-heading-item)')
+            .querySelectorAll('.toolbar-item:not(.hm-heading-item):not(.hm-highlight-item)')
             .forEach((btn, i) => {
               if (tips[i] && btn.title !== tips[i]) btn.title = tips[i]
             })
