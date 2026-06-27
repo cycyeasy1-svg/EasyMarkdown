@@ -7,7 +7,9 @@ import {
   nodeViewCtx,
   prosePluginsCtx,
   remarkPluginsCtx,
-  remarkStringifyOptionsCtx
+  remarkStringifyOptionsCtx,
+  parserCtx,
+  remarkCtx
 } from '@milkdown/kit/core'
 import { imageBlockConfig } from '@milkdown/kit/component/image-block'
 import { inlineImageConfig } from '@milkdown/kit/component/image-inline'
@@ -316,7 +318,17 @@ export default function Editor({
         tableBreakKeymap(),
         // Parse pasted ```fences into code_block nodes (so pasted ```mermaid
         // renders instead of getting mangled). See editor-md-paste.js.
-        createMdPastePlugin(),
+        createMdPastePlugin((md) => {
+          // Run Milkdown's own remark parser (same pipeline as opening a file)
+          // so pasted Markdown — headings, tables, math, mermaid, code — renders.
+          try {
+            const parser = ctx.get(parserCtx)
+            parser.run(ctx.get(remarkCtx), md)
+            return parser.toDoc()
+          } catch {
+            return null
+          }
+        }),
         // Split a mermaid block that holds 2+ diagrams (e.g. a 2nd paste appended
         // into the same block) back into one block per diagram.
         createMermaidSplitPlugin()
