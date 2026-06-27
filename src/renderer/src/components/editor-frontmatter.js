@@ -97,3 +97,35 @@ export function renderFrontmatterNodeView(node) {
   dom.appendChild(buildCard(node.attrs.value || ''))
   return { dom, ignoreMutation: () => true, stopEvent: () => false }
 }
+
+// remark-frontmatter only recognizes a `---` block at the very START of the
+// document. Anywhere else, commonmark turns `---\nkey: value\n---` into a
+// thematicBreak + a Setext heading. This plugin reconstructs that mangled pair
+// back into a `yaml` node, so front matter renders (and round-trips) no matter
+// where it sits — which is what users expect when they paste one mid-document.
+const headingText = (node) =>
+  (node.children || []).map((c) => c.value || '').join('\n').trim()
+const looksLikeYaml = (text) => !!text && /^[\w.-]+:\s?.*$/m.test(text)
+
+export function remarkFrontmatterAnywhere() {
+  return (tree) => {
+    if (!Array.isArray(tree.children)) return
+    const out = []
+    for (let i = 0; i < tree.children.length; i++) {
+      const node = tree.children[i]
+      const next = tree.children[i + 1]
+      if (
+        node.type === 'thematicBreak' &&
+        next &&
+        next.type === 'heading' &&
+        looksLikeYaml(headingText(next))
+      ) {
+        out.push({ type: 'yaml', value: headingText(next) })
+        i++ // consume the heading too
+      } else {
+        out.push(node)
+      }
+    }
+    tree.children = out
+  }
+}

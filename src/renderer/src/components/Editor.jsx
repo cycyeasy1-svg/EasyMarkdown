@@ -26,7 +26,7 @@ import { createMermaidPlugin } from './editor-mermaid.js'
 import { tableBreakKeymap, tableCellBreakHandler, brToBreakRemarkPlugin } from './editor-tablebreak.js'
 import { attachMdPasteHandler } from './editor-md-paste.js'
 import remarkFrontmatter from 'remark-frontmatter'
-import { frontmatterSchema, renderFrontmatterNodeView } from './editor-frontmatter.js'
+import { frontmatterSchema, renderFrontmatterNodeView, remarkFrontmatterAnywhere } from './editor-frontmatter.js'
 
 // Every mounted rich editor registers itself here. A rich-text tab stays mounted
 // after its first activation, so several editors (and several Crepe selection
@@ -235,8 +235,11 @@ export default function Editor({
       ctx.update(remarkPluginsCtx, (plugins) => [
         ...plugins,
         // Parse the `---` YAML block at the top of a doc into a `yaml` node
-        // (handled by the frontmatter block schema).
+        // (handled by the frontmatter block schema), and reconstruct mangled
+        // mid-doc `---` blocks (thematicBreak + Setext heading) back into yaml
+        // nodes so front matter works anywhere.
         { plugin: remarkFrontmatter, options: undefined },
+        { plugin: remarkFrontmatterAnywhere, options: undefined },
         { plugin: brToBreakRemarkPlugin, options: undefined },
         // Merge balanced inline HTML pairs (<span>…</span>, <sub>…</sub>) into one
         // html node so the node view can render them inline (see editor-html.js).
