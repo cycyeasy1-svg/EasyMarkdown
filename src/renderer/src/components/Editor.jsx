@@ -26,6 +26,7 @@ import { dirOf, isRelativePath, resolveToFileUrl } from './editor-images.js'
 import { inlineRichStyles } from './editor-copy.js'
 import { createMermaidPreviewRenderer } from './editor-mermaid.js'
 import { tableBreakKeymap, tableCellBreakHandler, brToBreakRemarkPlugin } from './editor-tablebreak.js'
+import { createMdPastePlugin } from './editor-md-paste.js'
 import { highlightFeatures, highlightStringifyHandler, toggleHighlightCommand, applyHighlightInView, HIGHLIGHT_COLORS } from './editor-highlight.js'
 
 // Every mounted rich editor registers itself here. A rich-text tab stays mounted
@@ -312,7 +313,10 @@ export default function Editor({
       ctx.update(prosePluginsCtx, (plugins) => [
         ...plugins,
         // Table-cell line break (issue #7): keymap first so it wins Enter inside a cell.
-        tableBreakKeymap()
+        tableBreakKeymap(),
+        // Parse pasted ```fences into code_block nodes (so pasted ```mermaid
+        // renders instead of getting mangled). See editor-md-paste.js.
+        createMdPastePlugin()
       ])
       // Table-cell line break — serialize a break to <br> inside a cell, and parse
       // inline <br> back into a break (see editor-tablebreak.js). Also serialize
