@@ -30,7 +30,7 @@ import { createMermaidPreviewRenderer, createMermaidSplitPlugin } from './editor
 import { tableBreakKeymap, tableCellBreakHandler, brToBreakRemarkPlugin } from './editor-tablebreak.js'
 import { createMdPastePlugin } from './editor-md-paste.js'
 import remarkFrontmatter from 'remark-frontmatter'
-import { frontmatterSchema, renderFrontmatterNodeView } from './editor-frontmatter.js'
+import { frontmatterSchema, renderFrontmatterNodeView, remarkFrontmatterAnywhere } from './editor-frontmatter.js'
 import { highlightFeatures, highlightStringifyHandler, toggleHighlightCommand, applyHighlightInView, HIGHLIGHT_COLORS } from './editor-highlight.js'
 
 // Every mounted rich editor registers itself here. A rich-text tab stays mounted
@@ -353,8 +353,11 @@ export default function Editor({
       ctx.update(remarkPluginsCtx, (plugins) => [
         ...plugins,
         // Parse the `---` YAML block at the top of a doc into a `yaml` node
-        // (handled by the frontmatter block schema).
+        // (handled by the frontmatter block schema), and reconstruct mangled
+        // mid-doc `---` blocks (thematicBreak + Setext heading) back into yaml
+        // nodes so front matter works anywhere.
         { plugin: remarkFrontmatter, options: undefined },
+        { plugin: remarkFrontmatterAnywhere, options: undefined },
         { plugin: brToBreakRemarkPlugin, options: undefined },
         // Merge fragmented inline HTML (<span>x</span>) into whole fragments so
         // the html node view can render them (issue #14).
