@@ -63,7 +63,6 @@ export function parseHeadings(md) {
 }
 
 export default function Outline({ content, activeIndex = -1, onJump }) {
-  const { t } = useI18n()
   // Re-parsing the whole document on every keystroke is wasted work — the outline
   // can lag a beat behind the cursor. Deferring the content keeps typing smooth on
   // large docs (React renders the heavy parse at low priority).
