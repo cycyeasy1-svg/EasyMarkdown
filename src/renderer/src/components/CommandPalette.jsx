@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
 import { Icon } from './icons.jsx'
 import { useI18n } from '../i18n.jsx'
 
@@ -18,6 +18,10 @@ function score(query, text) {
 export default function CommandPalette({ open, onClose, commands, files, onOpenFile }) {
   const { t } = useI18n()
   const [query, setQuery] = useState('')
+  // The input stays bound to `query` (instant), but the expensive scoring/sort
+  // over the whole file list runs against the deferred value, so fast typing in a
+  // large project doesn't block the field.
+  const deferredQuery = useDeferredValue(query)
   const [sel, setSel] = useState(0)
   const inputRef = useRef(null)
 
@@ -43,14 +47,14 @@ export default function CommandPalette({ open, onClose, commands, files, onOpenF
       run: () => onOpenFile(f.path)
     }))
     const all = [...cmdItems, ...fileItems]
-    if (!query) return all.slice(0, 50)
+    if (!deferredQuery) return all.slice(0, 50)
     return all
-      .map((it) => ({ it, s: Math.max(score(query, it.title), score(query, it.hint || '') * 0.6) }))
+      .map((it) => ({ it, s: Math.max(score(deferredQuery, it.title), score(deferredQuery, it.hint || '') * 0.6) }))
       .filter((x) => x.s > 0)
       .sort((a, b) => b.s - a.s)
       .slice(0, 50)
       .map((x) => x.it)
-  }, [query, commands, files, onOpenFile])
+  }, [deferredQuery, commands, files, onOpenFile])
 
   useEffect(() => {
     if (sel >= items.length) setSel(Math.max(0, items.length - 1))

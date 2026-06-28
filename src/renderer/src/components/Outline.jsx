@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
 import { useI18n } from '../i18n.jsx'
 import { Icon } from './icons.jsx'
 
@@ -28,7 +28,11 @@ export function parseHeadings(md) {
 
 export default function Outline({ content, activeIndex = -1, onJump }) {
   const { t } = useI18n()
-  const headings = useMemo(() => parseHeadings(content), [content])
+  // Re-parsing the whole document on every keystroke is wasted work — the outline
+  // can lag a beat behind the cursor. Deferring the content keeps typing smooth on
+  // large docs (React renders the heavy parse at low priority).
+  const deferredContent = useDeferredValue(content)
+  const headings = useMemo(() => parseHeadings(deferredContent), [deferredContent])
 
   // Section fold state. A heading is collapsible when a deeper heading follows
   // it; collapsing hides every descendant (deeper heading) until a sibling/uncle

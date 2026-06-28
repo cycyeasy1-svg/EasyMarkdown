@@ -247,11 +247,11 @@ Windows/Linux 下不再用系统原生的标题栏覆盖层，改由渲染层自
 
 > 持久化**防抖 400ms**（并在关闭/刷新时兜底刷一次），避免大文档每敲一个字就整篇序列化写盘导致打字卡顿。
 
-## 25. 可配置图床（类 Typora 自定义命令）
+## 25. 粘贴 / 拖入图片本地落地（类 Typora）
 
-**右上角图片按钮**配置一条上传命令(如 `picgo upload`)。之后**粘贴 / 拖入 / 上传**图片会:把图片写到临时文件 → 运行 `<命令> "<临时文件>"` → 取它打印到 stdout 的图片 URL 插入文档。命令留空 = 保持默认(图片为本地引用,不拦截粘贴/拖入,避免插入刷新即失效的 `blob:`)。
+**粘贴 / 拖入 / 上传**的图片会持久化为本地文件,而非刷新即失效的 `blob:`:已保存文档把图片写进同目录的 `./assets` 并插入相对路径(Typora 风格);未保存文档先放入全局 paste 目录,首次保存时迁入 `./assets`;任何失败都回退为内联 base64 data URL。
 
-**实现**：`ImageHostButton.jsx`(顶栏 popover,`position:fixed` 避开顶栏 `overflow:hidden`;配置后图标带强调色小点)+ `Editor.jsx` 的 `onUpload` / 粘贴 / 拖放钩子(代码块内不拦截)+ 主进程 `image:upload` IPC(临时文件 + `exec` + 解析最后一个 http(s) URL)。命令存 `localStorage["easymarkdown.settings.v1"]`。
+**实现**：`Editor.jsx` 的 `persistImage`(`onUpload` / 粘贴 / 拖放钩子,代码块内不拦截)+ 主进程 `image:save` / `image:savePaste` IPC。
 
 ## 26. 自定义页面宽度
 

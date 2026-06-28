@@ -25,6 +25,11 @@ android/key.properties
 # local test fixtures (generated)
 test-articles/
 
+# Playwright E2E output (committed fixtures under test/e2e/fixtures ARE tracked)
+test-results/
+playwright-report/
+.playwright/
+
 # scratch/preview images and design references
 build/_*.png
 *参考*.html

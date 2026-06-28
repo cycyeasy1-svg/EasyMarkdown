@@ -18,7 +18,7 @@ import '@milkdown/crepe/theme/common/link-tooltip.css'
 import { BLOCK_TYPES, blockById, currentBlockId } from '../blocks.js'
 import { useI18n } from '../i18n.jsx'
 import { fireToast } from '../ui.js'
-import { renderHtmlNodeView, convertBlock } from './editor-html.js'
+import { renderHtmlNodeView, convertBlock, mergeInlineHtmlRemarkPlugin } from './editor-html.js'
 import { dirOf, isRelativePath, resolveToFileUrl } from './editor-images.js'
 import { inlineRichStyles } from './editor-copy.js'
 import { createMermaidPlugin } from './editor-mermaid.js'
@@ -69,7 +69,6 @@ function applyImageText(ctx, tt) {
 export default function Editor({
   initialContent,
   docPath,
-  imageUploadCommand,
   onChange,
   onReady,
   onActiveBlock
@@ -77,10 +76,6 @@ export default function Editor({
   const { t } = useI18n()
   const tRef = useRef(t)
   tRef.current = t
-  // Live mirror of the image-host upload command, read at upload time (the Crepe
-  // onUpload callback is registered once at create but always uses the latest).
-  const uploadCmdRef = useRef(imageUploadCommand)
-  uploadCmdRef.current = imageUploadCommand
   const hostRef = useRef(null)
   const viewRef = useRef(null)
   const apiRef = useRef(null)
@@ -127,26 +122,9 @@ export default function Editor({
 
     // Turn a pasted / dropped / picked image file into a *persistable* src so it
     // never dies on reload (the "screenshots lost after save & reopen" bug):
-    //   1. image-host command configured → upload, use the returned URL
-    //   2. saved document → write into ./assets and use a relative path (Typora)
-    //   3. untitled doc / mobile / any failure → inline base64 data: URL
+    //   1. saved document → write into ./assets and use a relative path (Typora)
+    //   2. untitled doc / mobile / any failure → inline base64 data: URL
     const persistImage = async (file) => {
-      const cmd = (uploadCmdRef.current || '').trim()
-      if (cmd) {
-        fireToast(tRef.current('imghost.uploading'))
-        try {
-          const buf = await file.arrayBuffer()
-          const res = await window.api.uploadImage(cmd, file.name || 'image.png', new Uint8Array(buf))
-          if (res?.ok && res.url) {
-            fireToast(tRef.current('imghost.uploaded'))
-            return res.url
-          }
-          fireToast(tRef.current('imghost.failed'))
-        } catch {
-          fireToast(tRef.current('imghost.failed'))
-        }
-        // Upload failed — fall through to local persistence so it isn't lost.
-      }
       if (window.api.saveImage && docPath) {
         // Saved doc → write straight into ./assets, use a relative path.
         try {
@@ -248,7 +226,10 @@ export default function Editor({
       }))
       ctx.update(remarkPluginsCtx, (plugins) => [
         ...plugins,
-        { plugin: brToBreakRemarkPlugin, options: undefined }
+        { plugin: brToBreakRemarkPlugin, options: undefined },
+        // Merge balanced inline HTML pairs (<span>…</span>, <sub>…</sub>) into one
+        // html node so the node view can render them inline (see editor-html.js).
+        { plugin: mergeInlineHtmlRemarkPlugin, options: undefined }
       ])
     })
 
@@ -335,18 +316,11 @@ export default function Editor({
       }
       const kind = id === 'paragraph' ? 'text' : 'heading'
       const label = id === 'paragraph' ? tRef.current('block.paragraph') : def.short
-      // The badge's right edge: normally 10px left of the text. But Crepe's block
-      // drag-handle (shown on hover) also lives in that gutter — when it's visible
-      // on the caret's line, tuck the badge just left of the handle so the two
-      // sit side by side instead of overlapping. The badge stays visible either way.
-      let badgeRight = blockLeft - 10
-      const handle = document.querySelector('.milkdown-block-handle[data-show="true"]')
-      if (handle) {
-        const hr = handle.getBoundingClientRect()
-        if (hr.width && hr.height && coords.bottom > hr.top && coords.top < hr.bottom) {
-          badgeRight = Math.min(badgeRight, hr.left - 6)
-        }
-      }
+      // The badge's right edge: 10px left of the text. (We used to also nudge it
+      // aside for Crepe's hover drag-handle, but that required re-measuring on every
+      // mousemove — a per-frame forced reflow that made caret/pointer movement feel
+      // laggy. The badge stays visible and correct without it.)
+      const badgeRight = blockLeft - 10
       // Sit in the gutter; if the window is too narrow for that, tuck the tag
       // against the pane's left edge instead.
       const align = badgeRight - r.left >= 46 ? 'right' : 'left'
@@ -480,11 +454,10 @@ export default function Editor({
             scrollEl.addEventListener('scroll', onScroll, { passive: true })
             cleanups.push(() => scrollEl.removeEventListener('scroll', onScroll))
           }
-          // Re-evaluate the badge as the mouse moves (the block drag-handle shows
-          // on hover) so the badge can step aside when the handle appears.
-          const onMove = () => scheduleLevel()
-          view.dom.addEventListener('mousemove', onMove, { passive: true })
-          cleanups.push(() => view.dom.removeEventListener('mousemove', onMove))
+          // NOTE: no mousemove listener. The badge only needs to reposition on caret
+          // move (selectionchange) and scroll; recomputing it on every pointer move
+          // meant a forced reflow each frame, which made cursor movement / right-click
+          // feel laggy (worst at startup when the main thread is busy).
         }
         document.addEventListener('selectionchange', onSelChange)
         cleanups.push(() => document.removeEventListener('selectionchange', onSelChange))
@@ -847,9 +820,25 @@ export default function Editor({
                 '.tools-button-group, .button-group, .cm-panel, .cm-tooltip, ' +
                 '.preview-panel, .cell-handle, .line-handle, .handle, .add-button, ' +
                 '.operation, .operation-item, .drag-preview, .milkdown-block-handle, ' +
-                '.milkdown-toolbar, .image-resize-handle, .label-wrapper, .hm-mermaid-preview'
+                '.milkdown-toolbar, .image-resize-handle, .label-wrapper'
             )
             .forEach((el) => el.remove())
+          // Mermaid: the rendered diagram lives in a `.hm-mermaid-preview` widget
+          // right after its source code block. For the PDF we want the DIAGRAM, not
+          // the ```mermaid source — so when a preview holds a finished <svg>, drop
+          // the source block; if it never rendered (still a hint / an error), keep
+          // the source instead and drop the placeholder.
+          clone.querySelectorAll('.hm-mermaid-preview').forEach((prev) => {
+            const svg = prev.querySelector('svg')
+            const src = prev.previousElementSibling
+            if (svg) {
+              if (src && (src.matches?.('.milkdown-code-block') || src.querySelector?.('.cm-editor'))) {
+                src.remove()
+              }
+            } else {
+              prev.remove()
+            }
+          })
           // Flatten CodeMirror editors to plain <pre><code>.
           clone.querySelectorAll('.cm-editor').forEach((cm) => {
             const lines = [...cm.querySelectorAll('.cm-line')].map((l) => l.textContent)
@@ -862,6 +851,9 @@ export default function Editor({
           // Strip editor-only attributes but keep semantic tags + src/href/alt,
           // so the print stylesheet (in the main process) fully controls the look.
           clone.querySelectorAll('*').forEach((el) => {
+            // Leave the mermaid <svg> subtree untouched — its class/style/viewBox
+            // carry the diagram's geometry and colors; stripping them blanks it.
+            if (el.closest('svg')) return
             el.removeAttribute('class')
             el.removeAttribute('style')
             el.removeAttribute('contenteditable')

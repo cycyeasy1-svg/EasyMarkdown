@@ -172,18 +172,6 @@ export const STRINGS = {
     'settings.font.xlarge': 'XL',
     'settings.zoom': 'Zoom',
     'settings.fineTune': 'Fine',
-    'imghost.button': 'Image host',
-    'imghost.on': 'Ready',
-    'imghost.off': 'Off',
-    'settings.imageHost': 'Image upload command',
-    'settings.imageHostDesc':
-      'When set, pasted, dropped or uploaded images run through this command and the returned URL is inserted (like Typora).',
-    'settings.imageHostPlaceholder': 'e.g. picgo upload',
-    'settings.imageHostHint':
-      'The image file path is appended as an argument; the command must print the image URL to stdout. Leave empty to keep images local.',
-    'imghost.uploading': 'Uploading image…',
-    'imghost.uploaded': 'Image uploaded',
-    'imghost.failed': 'Image upload failed — kept a local copy',
 
     // mermaid live preview
     'mermaid.rendering': 'Rendering diagram…',
@@ -227,6 +215,7 @@ export const STRINGS = {
 
     // keep mode (source-backed editing) — zero-diff editor
     'keep.editSource': 'Edit content',
+    'keep.loading': 'Loading…',
     'keep.filterSearch': 'Search values…',
     'keep.selectAll': 'Select all',
     'keep.selectNone': 'Clear',
@@ -237,6 +226,13 @@ export const STRINGS = {
     'keep.colInsertLeft': 'Insert column left',
     'keep.colInsertRight': 'Insert column right',
     'keep.colDelete': 'Delete column',
+    'keep.copy': 'Copy content',
+    'keep.copySel': 'Copy selection',
+    'keep.copyCell': 'Copy cell',
+    'keep.copyRow': 'Copy row',
+    'keep.copyCol': 'Copy column',
+    'keep.copyTable': 'Copy whole table',
+    'keep.openSource': 'Open source here',
     'status.filtered': 'Filtered {shown}/{total}',
     'mode.keep': 'Keep',
     'mode.rich': 'Milkdown',
@@ -244,6 +240,10 @@ export const STRINGS = {
     'cmd.toggleKeep': 'Toggle Editor Mode (Keep / Milkdown)',
     'confirm.switchKeepUnsaved':
       'Milkdown may have reformatted this document. Switching back to Keep mode keeps the reformatted text and could introduce diffs. Switch anyway?',
+    'confirm.keepEditSave': 'The current edit has unsaved changes. Save them?',
+    'keep.editSaveBtn': 'Save',
+    'keep.editDiscardBtn': 'Discard',
+    'keep.editConfirmKey': 'Confirm (Ctrl+Enter)',
     'hint.modeTitle': 'Two editing modes',
     'hint.modeKeep': '**Keep** — source-backed, saves a zero-diff result. Default for .md.',
     'hint.modeRich': '**Milkdown** — free WYSIWYG, but rewrites the file and may change its formatting.',
@@ -399,7 +399,7 @@ export const STRINGS = {
     'cmd.theme': '切换主题',
     'cmd.find': '在文件中查找',
 
-    // 页宽（状态栏弹窗）+ 图床（顶栏弹窗）
+    // 页宽 / 字号 / 缩放（状态栏弹窗）
     'settings.pageWidth': '编辑区宽度',
     'settings.width.narrow': '窄',
     'settings.width.medium': '中',
@@ -414,18 +414,6 @@ export const STRINGS = {
     'settings.font.xlarge': '特大',
     'settings.zoom': '缩放',
     'settings.fineTune': '微调',
-    'imghost.button': '图床',
-    'imghost.on': '已就绪',
-    'imghost.off': '未配置',
-    'settings.imageHost': '图床上传命令',
-    'settings.imageHostDesc':
-      '设置后，粘贴、拖入或上传的图片会经此命令处理，并把返回的链接插入文档（类似 Typora）。',
-    'settings.imageHostPlaceholder': '例如：picgo upload',
-    'settings.imageHostHint':
-      '图片文件路径会作为参数追加到命令末尾；命令需将图片 URL 打印到标准输出。留空则图片保持本地。',
-    'imghost.uploading': '正在上传图片…',
-    'imghost.uploaded': '图片已上传',
-    'imghost.failed': '图片上传失败 —— 已保留本地副本',
 
     // mermaid 实时预览
     'mermaid.rendering': '正在渲染图表…',
@@ -465,6 +453,7 @@ export const STRINGS = {
 
     // 保持模式(源码保真编辑)—— 零差分编辑器
     'keep.editSource': '内容编辑',
+    'keep.loading': '加载中…',
     'keep.filterSearch': '搜索值…',
     'keep.selectAll': '全选',
     'keep.selectNone': '全不选',
@@ -475,6 +464,13 @@ export const STRINGS = {
     'keep.colInsertLeft': '在左侧插入列',
     'keep.colInsertRight': '在右侧插入列',
     'keep.colDelete': '删除本列',
+    'keep.copy': '复制内容',
+    'keep.copySel': '复制选中内容',
+    'keep.copyCell': '复制当前单元格',
+    'keep.copyRow': '复制当前行',
+    'keep.copyCol': '复制当前列',
+    'keep.copyTable': '复制整个表格',
+    'keep.openSource': '在此打开源码',
     'status.filtered': '筛选 {shown}/{total} 条',
     'mode.keep': '保持',
     'mode.rich': 'Milkdown',
@@ -482,6 +478,10 @@ export const STRINGS = {
     'cmd.toggleKeep': '切换编辑器模式(保持 / Milkdown)',
     'confirm.switchKeepUnsaved':
       'Milkdown 可能已重排该文档。切回保持模式会沿用重排后的文本,可能引入差分。仍要切换吗?',
+    'confirm.keepEditSave': '当前编辑栏有未保存的更改,是否保存?',
+    'keep.editSaveBtn': '保存',
+    'keep.editDiscardBtn': '丢弃',
+    'keep.editConfirmKey': '确认（Ctrl+回车）',
     'hint.modeTitle': '两种编辑模式',
     'hint.modeKeep': '**保持** —— 以原文为正本，保存零差分。.md 默认用它。',
     'hint.modeRich': '**Milkdown** —— 自由所见即所得，但会重写文件、可能改变原有格式。',
@@ -659,18 +659,6 @@ export const STRINGS = {
     'settings.font.xlarge': '特大',
     'settings.zoom': 'ズーム',
     'settings.fineTune': '微調整',
-    'imghost.button': '画像ホスト',
-    'imghost.on': '準備完了',
-    'imghost.off': 'オフ',
-    'settings.imageHost': '画像アップロードコマンド',
-    'settings.imageHostDesc':
-      '設定すると、貼り付け・ドロップ・アップロードした画像がこのコマンドで処理され、返された URL が挿入されます（Typora と同様）。',
-    'settings.imageHostPlaceholder': '例：picgo upload',
-    'settings.imageHostHint':
-      '画像ファイルのパスが引数として末尾に追加されます。コマンドは画像 URL を標準出力に出力する必要があります。空欄の場合は画像をローカルに保持します。',
-    'imghost.uploading': '画像をアップロード中…',
-    'imghost.uploaded': '画像をアップロードしました',
-    'imghost.failed': '画像のアップロードに失敗しました —— ローカルコピーを保持しました',
 
     // mermaid live preview
     'mermaid.rendering': '図を描画中…',
@@ -714,6 +702,7 @@ export const STRINGS = {
 
     // keep mode (source-backed editing) — zero-diff editor
     'keep.editSource': '内容を編集',
+    'keep.loading': '読み込み中…',
     'keep.filterSearch': '値を検索…',
     'keep.selectAll': 'すべて選択',
     'keep.selectNone': 'クリア',
@@ -724,6 +713,13 @@ export const STRINGS = {
     'keep.colInsertLeft': '左に列を挿入',
     'keep.colInsertRight': '右に列を挿入',
     'keep.colDelete': 'この列を削除',
+    'keep.copy': 'コンテンツをコピー',
+    'keep.copySel': '選択範囲をコピー',
+    'keep.copyCell': 'セルをコピー',
+    'keep.copyRow': '行をコピー',
+    'keep.copyCol': '列をコピー',
+    'keep.copyTable': '表全体をコピー',
+    'keep.openSource': 'ここでソースを開く',
     'status.filtered': '絞り込み {shown}/{total}',
     'mode.keep': 'キープ',
     'mode.rich': 'Milkdown',
@@ -731,6 +727,10 @@ export const STRINGS = {
     'cmd.toggleKeep': 'エディタモードを切り替え（キープ / Milkdown）',
     'confirm.switchKeepUnsaved':
       'Milkdown がこのドキュメントを再整形した可能性があります。キープモードに戻すと再整形後のテキストが引き継がれ、差分が生じる場合があります。切り替えてもよろしいですか？',
+    'confirm.keepEditSave': '現在の編集欄に未保存の変更があります。保存しますか？',
+    'keep.editSaveBtn': '保存',
+    'keep.editDiscardBtn': '破棄',
+    'keep.editConfirmKey': '確定（Ctrl+Enter）',
     'hint.modeTitle': '2 つの編集モード',
     'hint.modeKeep': '**キープ** —— 原文を正本とし、保存は差分ゼロ。.md の既定です。',
     'hint.modeRich': '**Milkdown** —— 自由な WYSIWYG。ただしファイルを書き換え、書式が変わることがあります。',

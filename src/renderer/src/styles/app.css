@@ -980,23 +980,6 @@ button:focus-visible,
   transition: none;
 }
 
-/* Command input (image-host). */
-.hm-cmd-input {
-  width: 100%;
-  padding: 9px 11px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--bg-editor);
-  color: var(--text);
-  font-family: var(--font-mono);
-  font-size: 12.5px;
-  outline: none;
-  transition: border-color 0.12s;
-}
-.hm-cmd-input:focus {
-  border-color: var(--accent);
-}
-
 /* Page-width popover: anchored above the status-bar button (the wrapper
    .block-switch is position:relative). */
 .hm-width-pop {
@@ -1005,34 +988,6 @@ button:focus-visible,
   right: 0;
   z-index: 200;
   min-width: 268px;
-  animation: menuFadeIn 0.12s var(--ease-out);
-}
-
-/* Image-host popover: position:fixed (set inline) so the top bar's
-   overflow:hidden can't clip it. */
-.hm-imghost {
-  position: relative;
-  display: inline-flex;
-}
-.icon-btn.hm-imghost-on {
-  position: relative;
-  color: var(--accent);
-}
-.icon-btn.hm-imghost-on::after {
-  content: '';
-  position: absolute;
-  top: 6px;
-  right: 6px;
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: var(--accent);
-}
-.hm-imghost-pop {
-  position: fixed;
-  z-index: 200;
-  width: 320px;
-  max-width: 86vw;
   animation: menuFadeIn 0.12s var(--ease-out);
 }
 
@@ -1884,6 +1839,13 @@ body.hm-full-width .editor-skeleton {
   font-weight: 700;
 }
 .hm-html-block img { max-width: 100%; }
+
+/* Rendered inline raw-HTML fragment (<span style>, <sub>, <mark>…) — merged from
+   its open/close pair so it renders as real inline formatting. Stay inline so it
+   sits in the text flow; the fragment carries its own colors/styling. */
+.hm-html-inline {
+  display: inline;
+}
 
 /* Image lightbox: double-click an image in the editor to view it enlarged.
    (Single click stays native — selecting the image and editing its caption.) */
@@ -3364,14 +3326,47 @@ body.dark .milkdown {
      `zoom` (not transform: scale) so it affects layout: scrollWidth shrinks and
      getBoundingClientRect stays correct for the filter popover / cell editor. */
   zoom: var(--editor-zoom, 1);
+  /* The app sets body { user-select: none }; re-enable text selection here so the
+     rendered preview supports drag-select + Ctrl/Cmd+C (keep-mode rich copy). */
+  user-select: text;
 }
 body.hm-full-width .km-doc {
   max-width: none;
+}
+/* But the hover affordances stay unselectable so a drag never grabs their text. */
+.km-doc .km-src-edit,
+.km-doc .km-filter-btn {
+  user-select: none;
 }
 .km-empty {
   color: var(--faint);
   padding: 40px 0;
   text-align: center;
+}
+
+/* Loading placeholder for large docs: shown for one frame before the (blocking)
+   innerHTML build so the user gets feedback instead of a frozen blank pane. */
+.km-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 80px 0;
+  color: var(--faint);
+  font-size: 0.95em;
+}
+.km-spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid var(--border, currentColor);
+  border-top-color: var(--accent, currentColor);
+  border-radius: 50%;
+  animation: km-spin 0.7s linear infinite;
+}
+@keyframes km-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 /* Each block wraps its rendered content + a hover-revealed "edit source" button.
@@ -3507,6 +3502,9 @@ body.hm-full-width .km-doc {
 .km-doc p { margin: 0.8em 0; line-height: 1.85; }
 .km-doc ul,
 .km-doc ol { margin: 0.8em 0; padding-left: 1.6em; line-height: 1.8; }
+/* Nested sublists hug their parent item instead of carrying the full block gap. */
+.km-doc li > ul,
+.km-doc li > ol { margin: 0.2em 0; }
 .km-doc li { margin: 0.2em 0; }
 .km-doc a {
   color: var(--accent);
@@ -3548,6 +3546,42 @@ body.hm-full-width .km-doc {
   background: none;
   border: none;
   padding: 0;
+}
+/* Keep-mode embeds: ```mermaid → diagram, $$…$$ → KaTeX. Centered like the rich
+   editor's mermaid preview; both edit through the block "edit source" button. */
+.km-doc .km-mermaid {
+  margin: 1.2em 0;
+  padding: 16px 18px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
+  display: flex;
+  justify-content: center;
+  overflow-x: auto;
+}
+.km-doc .km-mermaid svg {
+  max-width: 100%;
+  height: auto;
+}
+.km-doc .km-math {
+  margin: 1.2em 0;
+  padding: 4px 0;
+  overflow-x: auto;
+}
+.km-doc .km-math .katex-display {
+  margin: 0;
+}
+/* Mermaid draws node labels as HTML inside <foreignObject>, which inherits the
+   page typography. .km-doc's line-height:1.8 makes multi-line labels taller than
+   the box Mermaid sized for them (it measures at the body's default line-height),
+   so the text overflows its node and gets clipped. Reset the label typography to
+   Mermaid's own assumptions. Applied to the rich preview too, harmlessly, so a
+   diagram can never clip there either. */
+.hm-mermaid-preview foreignObject,
+.hm-mermaid-preview foreignObject *,
+.km-doc .km-mermaid foreignObject,
+.km-doc .km-mermaid foreignObject * {
+  line-height: normal;
 }
 .km-doc hr {
   border: none;
@@ -3628,19 +3662,55 @@ body.hm-full-width .km-doc {
   color: #fff;
   background: var(--accent);
 }
-.km-cell-input {
+/* Enlarged table-cell editor — a floating panel anchored to the cell (keep mode).
+   position:fixed so it stays put on scroll (it may hold unsaved edits). */
+.km-cell-pop {
+  position: fixed;
+  z-index: 1300;
+  width: 380px;
+  max-width: calc(100vw - 24px);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+}
+.km-cp-input {
   width: 100%;
-  font: inherit;
+  min-height: 120px;
+  max-height: 50vh;
+  resize: vertical;
+  font-family: var(--font-mono);
+  font-size: 13.5px;
+  line-height: 1.6;
   border: 2px solid var(--accent);
   border-radius: var(--radius-sm);
-  padding: 4px;
+  padding: 8px 10px;
   background: var(--bg-editor);
   color: var(--text);
 }
-textarea.km-cell-input {
-  min-height: 60px;
-  resize: vertical;
-  font-family: var(--font-mono);
+.km-cp-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.km-cp-actions button {
+  font: inherit;
+  font-size: 12px;
+  padding: 4px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  background: var(--bg-elevated);
+  color: var(--text);
+}
+.km-cp-actions button.ok {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent-strong);
 }
 
 /* Column filter dropdown — appended to <body>, so it's styled globally. */

@@ -1,0 +1,141 @@
+// Characterization tests for the shared path / filename / doc-classification
+// helpers. These guard cross-platform behavior (Windows vs POSIX) and the
+// workspace-sanitization that keeps the file watcher from targeting "/".
+import { describe, it, expect } from 'vitest'
+import {
+  isNewerVersion,
+  isAbsolutePath,
+  sanitizeWorkspace,
+  sanitizeWorkspaces,
+  baseName,
+  dirName,
+  joinPath,
+  isMarkdownName,
+  isPlainTextDoc,
+  isValidName,
+  isExistsError,
+  isHeavyDoc
+} from '../src/renderer/src/paths.js'
+
+describe('isNewerVersion', () => {
+  it('compares dotted versions component-wise', () => {
+    expect(isNewerVersion('0.1.5', '0.1.4')).toBe(true)
+    expect(isNewerVersion('1.0.0', '0.9.9')).toBe(true)
+    expect(isNewerVersion('0.1.4', '0.1.5')).toBe(false)
+  })
+  it('treats equal versions as not newer', () => {
+    expect(isNewerVersion('1.2.3', '1.2.3')).toBe(false)
+  })
+  it('handles differing segment counts', () => {
+    expect(isNewerVersion('1.2', '1.2.0')).toBe(false)
+    expect(isNewerVersion('1.2.1', '1.2')).toBe(true)
+  })
+})
+
+describe('isAbsolutePath', () => {
+  it('accepts POSIX, Windows drive and UNC paths', () => {
+    expect(isAbsolutePath('/home/x')).toBe(true)
+    expect(isAbsolutePath('C:\\Users\\x')).toBe(true)
+    expect(isAbsolutePath('C:/Users/x')).toBe(true)
+    expect(isAbsolutePath('\\\\server\\share')).toBe(true)
+  })
+  it('rejects relative paths and non-strings', () => {
+    expect(isAbsolutePath('.')).toBe(false)
+    expect(isAbsolutePath('foo/bar')).toBe(false)
+    expect(isAbsolutePath(null)).toBe(false)
+    expect(isAbsolutePath(undefined)).toBe(false)
+  })
+})
+
+describe('sanitizeWorkspace / sanitizeWorkspaces', () => {
+  it('keeps a workspace only when its rootPath is absolute', () => {
+    const abs = { rootPath: '/work', rootName: 'work' }
+    expect(sanitizeWorkspace(abs)).toBe(abs)
+    expect(sanitizeWorkspace({ rootPath: 'rel' })).toBe(null)
+    expect(sanitizeWorkspace(null)).toBe(null)
+  })
+  it('de-duplicates by rootPath and fills rootName from the path', () => {
+    const out = sanitizeWorkspaces([
+      { rootPath: '/a' },
+      { rootPath: '/a', rootName: 'dup' },
+      { rootPath: 'rel' }
+    ])
+    expect(out).toEqual([{ rootPath: '/a', rootName: 'a' }])
+  })
+  it('falls back to the legacy single workspace when no array is given', () => {
+    expect(sanitizeWorkspaces(undefined, { rootPath: '/old', rootName: 'old' })).toEqual([
+      { rootPath: '/old', rootName: 'old' }
+    ])
+  })
+})
+
+describe('baseName / dirName / joinPath', () => {
+  it('baseName takes the last segment across separators', () => {
+    expect(baseName('/a/b/c.md')).toBe('c.md')
+    expect(baseName('C:\\a\\b.md')).toBe('b.md')
+    expect(baseName('')).toBe('Untitled')
+  })
+  it('dirName drops the last segment', () => {
+    expect(dirName('/a/b/c.md')).toBe('/a/b')
+    expect(dirName('C:\\a\\b.md')).toBe('C:\\a')
+    expect(dirName('')).toBe('')
+  })
+  it('joinPath normalizes trailing separators and joins with /', () => {
+    expect(joinPath('/a/b', 'c.md')).toBe('/a/b/c.md')
+    expect(joinPath('/a/b/', 'c.md')).toBe('/a/b/c.md')
+    expect(joinPath('C:\\a\\', 'c.md')).toBe('C:\\a/c.md')
+  })
+})
+
+describe('markdown / plain-text classification', () => {
+  it('isMarkdownName matches .md/.markdown/.mdx case-insensitively', () => {
+    expect(isMarkdownName('a.md')).toBe(true)
+    expect(isMarkdownName('a.MARKDOWN')).toBe(true)
+    expect(isMarkdownName('a.mdx')).toBe(true)
+    expect(isMarkdownName('a.txt')).toBe(false)
+    expect(isMarkdownName('')).toBe(false)
+  })
+  it('isPlainTextDoc is true only for a pathed non-markdown tab', () => {
+    expect(isPlainTextDoc({ path: '/a.txt' })).toBe(true)
+    expect(isPlainTextDoc({ path: '/a.md' })).toBe(false)
+    expect(isPlainTextDoc({ path: null })).toBe(false) // untitled
+    expect(isPlainTextDoc(null)).toBe(false)
+  })
+})
+
+describe('isValidName', () => {
+  it('rejects separators, reserved chars and dot names', () => {
+    expect(isValidName('notes.md')).toBe(true)
+    expect(isValidName('a/b')).toBe(false)
+    expect(isValidName('a:b')).toBe(false)
+    expect(isValidName('a*?')).toBe(false)
+    expect(isValidName('.')).toBe(false)
+    expect(isValidName('..')).toBe(false)
+    expect(isValidName('')).toBe(false)
+  })
+})
+
+describe('isExistsError', () => {
+  it('detects EEXIST-style fs errors', () => {
+    expect(isExistsError({ message: 'EEXIST: file already exists' })).toBe(true)
+    expect(isExistsError({ message: 'ENOENT' })).toBe(false)
+    expect(isExistsError(null)).toBe(false)
+  })
+})
+
+describe('isHeavyDoc', () => {
+  it('is false for empty or small docs', () => {
+    expect(isHeavyDoc('')).toBe(false)
+    expect(isHeavyDoc('# hi\n\nsome text')).toBe(false)
+  })
+  it('is true for a long run of non-blank lines (>150)', () => {
+    expect(isHeavyDoc(Array(200).fill('x').join('\n'))).toBe(true)
+  })
+  it('a blank line resets the run', () => {
+    const chunk = (Array(100).fill('x').join('\n') + '\n\n')
+    expect(isHeavyDoc(chunk.repeat(3))).toBe(false)
+  })
+  it('is true past the total-size cap', () => {
+    expect(isHeavyDoc('a'.repeat(400001))).toBe(true)
+  })
+})

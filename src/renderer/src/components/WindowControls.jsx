@@ -18,14 +18,14 @@ export default function WindowControls({ t }) {
   return (
     <div className="win-controls drag-no">
       <button className="win-ctrl" title={t('tip.minimize')} onClick={() => window.api.windowMinimize()}>
-        <Icon name="win-min" size={14} strokeWidth={1.6} />
+        <Icon name="win-min" size={16} strokeWidth={1.6} />
       </button>
       <button
         className="win-ctrl"
         title={t(max ? 'tip.restore' : 'tip.maximize')}
         onClick={async () => setMax(!!(await window.api.windowToggleMaximize()))}
       >
-        <Icon name={max ? 'win-restore' : 'win-max'} size={13} strokeWidth={1.6} />
+        <Icon name={max ? 'win-restore' : 'win-max'} size={16} strokeWidth={1.6} />
       </button>
       <button className="win-ctrl close" title={t('tip.close')} onClick={() => window.api.windowClose()}>
         <Icon name="close" size={14} />

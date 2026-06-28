@@ -4,7 +4,7 @@
 // there is no preload, so this module provides the SAME interface backed by
 // Capacitor plugins. The renderer (App.jsx etc.) only knows the contract, so it
 // runs unchanged. Desktop-only capabilities (file watching, window controls,
-// native menus, PDF export, image-host exec) degrade to safe no-ops and are
+// native menus, PDF export) degrade to safe no-ops and are
 // also advertised via `capabilities` so the UI can hide what isn't available.
 //
 // File model (MVP): an app-private library under Documents/EasyMarkdown. Paths handed
@@ -276,7 +276,6 @@ const capabilities = {
   watch: false,
   windowControls: false,
   pdfExport: false, // no print-to-PDF save dialog on mobile
-  imageHostExec: false,
   nativeMenus: false,
   externalShell: true,
   revealInFolder: false, // no Finder/Explorer on mobile
@@ -326,9 +325,6 @@ export function makeCapacitorApi() {
         return { ok: false, error: e?.message || String(e) }
       }
     },
-
-    // image host (no Node subprocess on mobile)
-    uploadImage: async () => ({ ok: false, error: 'unsupported' }),
 
     // custom themes — none bundled on mobile yet
     themesList: async () => [],

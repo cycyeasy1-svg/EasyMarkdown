@@ -55,9 +55,54 @@ Windows 与 macOS 共用一份配置，在 macOS 上 `npm run dist` 即出 `.dmg
 
 > dev 模式在 macOS 上用 `osascript tell application "Electron"` 驱动时，可能误启动 `node_modules` 里的通用 Electron 壳（同名冲突，显示默认页）。验证请用打好的 **EasyMarkdown.app**（名字与 bundle id 唯一）。
 
-## 自动化测试：CDP 端到端验证
+## 自动化测试：单元测试（vitest）
 
-项目没有传统单测，而是用 **Chrome DevTools Protocol** 连进运行中的 Electron，真实派发鼠标/键盘事件并回读 DOM —— 测的是"用户真实体验"。这套方法定位了好几个隐蔽 bug。
+纯函数（不依赖 DOM / Electron 的逻辑）用 **vitest** 做单元测试。对没有设计书的存量代码，采用**特征测试（characterization test）**思路：把"当前正确运行的行为"本身当作规格锁定，目的是在频繁迭代中挡住回归。
+
+```bash
+npm test           # 一次性跑全部（vitest run）
+npm run test:watch # 监视模式（开发时用）
+```
+
+- 测试放在 `test/`（与 `src/` 同级），按被测模块命名（如 `test/keep-parser.test.js`）。
+- 默认运行环境是 `node`。需要 `localStorage` / `document` 的测试在文件首行加 `// @vitest-environment happy-dom`（见 `test/settings.test.js`）。
+- 配置在 `vitest.config.mjs`，镜像了 `electron.vite.config.mjs` 的 `define`（`__APP_VERSION__`）。
+- **只测纯函数**。当前覆盖：`keep-parser`（Markdown 解析 / 表格编辑）、`paths`（跨平台路径 / 版本 / 工作区净化）、`components/editor-images`（相对路径 → `file://`）、`main/helpers`（`isRestrictedRoot`/`isAbsolutePath`/`MD_RE` 等 watcher 安全函数）、`settings`/`find`/`blocks`。
+- **主进程纯函数已抽到 [src/main/helpers.js](../src/main/helpers.js)**（`index.js` 顶部 import 了 `electron`，测试无法直接 import index.js）。以后要单测新的主进程纯逻辑，先把它移到 helpers.js 再 import。
+- 新增 / 改动纯函数时，同步补 / 改对应用例。DOM、ProseMirror 命令、异步渲染（mermaid 等）不在单测范围内 —— 由下面的 CDP（将来迁 Playwright）E2E 覆盖。
+
+## 自动化测试：E2E（Playwright）
+
+端到端测试用 **Playwright 的 Electron 支持**(`_electron.launch()`)：自动拉起**构建后的** app、把 committed 的 fixture 当 tab 打开、断言真实渲染的 DOM、跑完自己关。
+
+```bash
+npm run test:e2e   # 先 electron-vite build，再 playwright test
+```
+
+- 配置 `playwright.config.mjs`(testDir `test/e2e`,匹配 `*.spec.js`);用例在 [test/e2e/](../test/e2e/),fixture 在 `test/e2e/fixtures/`(committed,确定性)。
+- **启动机制**在 [test/e2e/helpers.js](../test/e2e/helpers.js) 的 `launchApp()`:
+  - 启动**构建产物** `out/main/index.js`(主进程无 `ELECTRON_RENDERER_URL` 时走 `loadFile(out/renderer/index.html)`)——所以**必须先 `npm run build`**(`test:e2e` 脚本已带)。
+  - 每次启动传 `--user-data-dir=<临时目录>`:既隔离 session/localStorage,又绕开**单实例锁**(锁按 userData 分),不会被转发到正在跑的 dev 实例。
+  - **清掉 `ELECTRON_RUN_AS_NODE`**:某些 shell/CI(包括本仓库的自动化环境)设了它,会让 electron 退化成纯 Node(`import 'electron'` 拿不到 app、进程直接退出 → Playwright 报 "Process failed to launch")。
+  - teardown 用 `app.evaluate(({app}) => app.exit(0))` **强制退出**,绕过主进程"未保存变更"的关窗确认守卫(自动化下没人回 `app:confirm-close`,否则会挂起)。
+- fixture 作为启动参数传入 → `extractArgs` 把 .md 开成 tab。首次运行(全新 userData)还会自动开"使用说明"引导文档,所以**断言前先点 fixture 的 tab 激活它**。
+- **编辑器无关断言**:打开的 .md 在 **keep 模式**(`.km-*`,引擎是 `keep-parser.js`)渲染,而引导文档在 **Milkdown**(`.ProseMirror`)——所以用 `getByRole`/`getByText` 按语义断言,别绑定某一种编辑器的 class。
+- 用例分两类:
+  - **`smoke.spec.js`** —— 启动、开文件渲染标题、列表/表格块渲染。
+  - **`interactions.spec.js`** —— 真实编辑(港自 `scripts/etv.mjs`):
+    - keep 模式块"编辑源码"(点 `.km-src-edit` → `.km-src-editor` textarea → 改 → 点 `.km-src-actions .ok` 提交 → 重渲染);提交是 **Ctrl/Cmd+Enter 或点 OK**(Enter 是换行,Esc 取消)。
+    - keep 模式表格单元格编辑(双击 `.km-table td` → `.km-cell-pop .km-cp-input` → 改 → OK),端到端覆盖 `keep-parser.js` 的 `replaceCellInLine`。
+    - Milkdown 的 Ctrl+2 转标题 + 右键块菜单转换:先点状态栏 **"切换编辑模式"** 按钮(`button[title*="切换编辑模式"]`)把当前 tab 从 keep 切到 Milkdown(`.ProseMirror`);右键 → `.block-ctxmenu`(¶ + H1–H6 共 7 项)→ 点"标题 2"项,块转 H2。
+- **选区浮动工具栏没港**:它是 Crepe 自带气泡(`.milkdown-toolbar`,app 往里注入了 `.hm-heading-item` 标题按钮),只在**真实指针拖选**时出现,且在自动化下不可靠地布局/可点(etv 旧的 `.block-selbar` 已不存在);它的块转换走的是和 Ctrl+2/右键菜单同一条路径(Editor.jsx),已被覆盖,故有意不测。选区若要测,用**真实鼠标拖选**(`page.mouse.down/move/up`,trusted 事件能驱动 ProseMirror 选区;合成 CDP 拖拽不行)。
+- keep 模式相对图片→`file://` 已修并有 E2E(`images.md`),见下方"图片支持"。
+
+> **图片支持(keep 模式)**:`keep-parser.js` 的 `inline(text, baseDir)` 识别 `![alt](src)` 并渲染 `<img>`;相对路径用 `editor-images.js` 的 `resolveToFileUrl(baseDir, src)` 解析成显示用的 `file://`(源里仍保留相对路径,与 Milkdown 一致),`http(s)/data/file` 直通,`javascript:/vbscript:` 置空。`baseDir` 由 KeepEditor 从 `docPath`(`dirOf`)经 `renderDoc`/`renderBlockInner` 传入。单测见 `test/keep-parser.test.js`,E2E 见 `test/e2e/fixtures/images.md`。
+>
+> 历史背景(已修):此前 `inline()` 不识别图片语法,`![x](./a.png)` 在 keep 模式(打开 .md 的默认编辑器)被渲染成多余的字面 `!` + 普通超链接,不产生 `<img>` —— 是 E2E 骨架阶段发现的真实 bug。
+
+## 自动化测试：CDP 端到端验证（旧，逐步被 Playwright 取代）
+
+历史上 UI 操作层面用 **Chrome DevTools Protocol** 手动连进运行中的 Electron，真实派发鼠标/键盘事件并回读 DOM。这套方法定位了好几个隐蔽 bug，经验仍有价值(见下"关键经验")，但需手动起进程、依赖本地 fixture，正在迁移到上面的 Playwright。
 
 ### 工具
 

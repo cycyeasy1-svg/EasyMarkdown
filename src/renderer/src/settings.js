@@ -1,7 +1,7 @@
 // User preferences persisted to localStorage, separate from the session state
-// (open tabs, workspace…) in paths.js. Currently holds the editor page width and
-// the image-host upload command. Kept small and self-contained so the Settings
-// modal and App can share one source of truth.
+// (open tabs, workspace…) in paths.js. Holds the editor page width, font size
+// and zoom. Kept small and self-contained so the Settings modal and App can
+// share one source of truth.
 
 export const SETTINGS_KEY = 'easymarkdown.settings.v1'
 
@@ -58,12 +58,7 @@ export const DEFAULT_PAGE_WIDTH_PREF = 'full'
 export const DEFAULT_SETTINGS = {
   pageWidth: DEFAULT_PAGE_WIDTH_PREF,
   fontSize: DEFAULT_FONT_SIZE,
-  zoom: DEFAULT_ZOOM,
-  // Empty = no image host: pasted/uploaded images keep the default behavior
-  // (a local object URL). When set, it's run like Typora's "custom command":
-  // the image file path is appended as an argument and the command prints the
-  // resulting URL to stdout.
-  imageUploadCommand: ''
+  zoom: DEFAULT_ZOOM
 }
 
 function normalizeWidth(w) {
@@ -93,9 +88,7 @@ export function loadSettings() {
     return {
       pageWidth: normalizeWidth(raw.pageWidth ?? DEFAULT_PAGE_WIDTH_PREF),
       fontSize: normalizeFontSize(raw.fontSize ?? DEFAULT_FONT_SIZE),
-      zoom: normalizeZoom(raw.zoom ?? DEFAULT_ZOOM),
-      imageUploadCommand:
-        typeof raw.imageUploadCommand === 'string' ? raw.imageUploadCommand : ''
+      zoom: normalizeZoom(raw.zoom ?? DEFAULT_ZOOM)
     }
   } catch {
     return { ...DEFAULT_SETTINGS }

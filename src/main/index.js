@@ -2,17 +2,15 @@ import { app, BrowserWindow, ipcMain, dialog, Menu, shell, net } from 'electron'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { dirname, join, basename, extname, resolve, sep } from 'node:path'
 import fs from 'node:fs/promises'
-import { existsSync, statSync, realpathSync, constants as fsConstants } from 'node:fs'
-import { exec } from 'node:child_process'
-import { tmpdir } from 'node:os'
+import { existsSync, statSync, constants as fsConstants } from 'node:fs'
 import chokidar from 'chokidar'
+import { MD_EXTS, MD_RE, isAbsolutePath, isRestrictedRoot, imageNameParts } from './helpers.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
-// Supported Markdown file types — single source for the open-dialog filter and
-// the extension test used while scanning folders / launch args.
-const MD_EXTS = ['md', 'markdown', 'mdx', 'txt']
-const MD_RE = new RegExp(`\\.(${MD_EXTS.join('|')})$`, 'i')
+// MD_EXTS / MD_RE (Markdown file types), isAbsolutePath, isRestrictedRoot and
+// imageNameParts are pure — they live in ./helpers.js so the unit tests can
+// import them without an Electron runtime.
 
 // Print stylesheet for PDF export — a clean, warm reading layout.
 const PDF_CSS = `
@@ -428,18 +426,7 @@ ipcMain.handle('fs:openFolderTree', async (_e, dir) => ({
 // /dev/* device files and crash the watcher.
 const WATCH_IGNORE_RE =
   /(^|[\\/])(\.(git|obsidian)|node_modules)([\\/]|$)/
-// An absolute path: POSIX "/…", Windows "C:\…"/"C:/…", or a UNC "\\…".
-const isAbsolutePath = (p) => /^\//.test(p) || /^[a-zA-Z]:[\\/]/.test(p) || /^\\\\/.test(p)
-const isRestrictedRoot = (p) => {
-  const norm = (p || '').replace(/[\\/]+$/, '')
-  if (norm === '' || norm === '/' || norm === '.' || norm === '..') return true
-  // A relative path (e.g. ".") resolves against the process CWD — which is "/"
-  // when the app is launched by Finder/launchd, so watching it would recurse the
-  // whole filesystem (/dev, /System…) and crash. Only ever watch absolute paths.
-  if (!isAbsolutePath(norm)) return true
-  // macOS system/device trees that are unreadable and would crash a recursive watch.
-  return /^\/(dev|proc|System\/Volumes|private\/var\/(db|folders)|\.vol)(\/|$)/.test(norm)
-}
+// isAbsolutePath / isRestrictedRoot moved to ./helpers.js (imported above).
 
 // Watch a folder; notify renderer on changes (debounced lightly by chokidar)
 ipcMain.handle('watch:start', async (_e, dir) => {
@@ -460,9 +447,14 @@ ipcMain.handle('watch:start', async (_e, dir) => {
   // an unhandled rejection that crashes the process.
   w.on('error', (err) => console.error('watch:start error (ignored):', err?.message || err))
   let timer = null
+  // Coalesce bursts of fs events (git checkout, bulk writes, save-heavy flows) into
+  // a single renderer notification — each `watch:changed` makes the Sidebar reload
+  // every expanded dir, so a short window meant a flood of re-reads + tree flicker.
+  // 500ms collapses a burst to one refresh; the tree updating ~0.5s after an
+  // external change is imperceptible.
   const ping = () => {
     clearTimeout(timer)
-    timer = setTimeout(() => sendToRenderer('watch:changed', dir), 120)
+    timer = setTimeout(() => sendToRenderer('watch:changed', dir), 500)
   }
   w.on('add', ping).on('unlink', ping).on('addDir', ping).on('unlinkDir', ping)
   watchers.set(dir, w)
@@ -597,68 +589,9 @@ ipcMain.handle('themes:reveal', async () => {
   return shell.openPath(themesDir())
 })
 
-// ----------------------------- image host upload ---------------------------
-// Typora-style custom uploader: write the image bytes to a temp file, run the
-// user's command with the file path appended as an argument, and return the URL
-// it prints to stdout. PicGo-Core (`picgo upload`) and most uploaders print the
-// final URL on its own line; we take the last http(s) URL in the output.
-function runUploadCommand(command, file) {
-  return new Promise((resolve, reject) => {
-    const full = `${command} "${file}"`
-    exec(
-      full,
-      { timeout: 60000, maxBuffer: 16 * 1024 * 1024, windowsHide: true },
-      (err, stdout, stderr) => {
-        const out = `${stdout || ''}\n${stderr || ''}`
-        // Many uploaders exit non-zero but still print the URL; only treat it as a
-        // failure if there's no URL anywhere in the output.
-        if (err && !/https?:\/\//i.test(out)) {
-          reject(new Error((stderr || err.message || '').slice(0, 500)))
-          return
-        }
-        resolve(out)
-      }
-    )
-  })
-}
-
-function parseUploadedUrl(out) {
-  const lines = String(out)
-    .split(/\r?\n/)
-    .map((l) => l.trim())
-    .filter(Boolean)
-  // Prefer a line that is exactly a URL (the uploader's final output line).
-  const exact = lines.filter((l) => /^https?:\/\/\S+$/i.test(l))
-  if (exact.length) return exact[exact.length - 1]
-  // Fallback: the first URL found anywhere, trimmed of trailing punctuation.
-  const m = String(out).match(/https?:\/\/\S+/i)
-  return m ? m[0].replace(/[)\]>"',.]+$/, '') : null
-}
-
-ipcMain.handle('image:upload', async (_e, command, name, bytes) => {
-  if (!command || !String(command).trim()) return { ok: false, error: 'No upload command configured.' }
-  let dir
-  try {
-    dir = await fs.mkdtemp(join(tmpdir(), 'easymarkdown-img-'))
-    const safe = (name || 'image.png').replace(/[\\/:*?"<>|]/g, '_') || 'image.png'
-    const file = join(dir, safe)
-    await fs.writeFile(file, Buffer.from(bytes))
-    const out = await runUploadCommand(String(command).trim(), file)
-    const url = parseUploadedUrl(out)
-    if (url) return { ok: true, url }
-    return { ok: false, error: out.slice(-500) || 'No URL in command output.' }
-  } catch (e) {
-    return { ok: false, error: e?.message || String(e) }
-  } finally {
-    if (dir) fs.rm(dir, { recursive: true, force: true }).catch(() => {})
-  }
-})
-
 // Pick a non-clobbering filename for `name` inside `dir`.
 const uniqueImageFile = (dir, name) => {
-  const safe = (name || 'image.png').replace(/[\\/:*?"<>|]/g, '_') || 'image.png'
-  const ext = extname(safe) || '.png'
-  const stem = basename(safe, ext) || 'image'
+  const { stem, ext } = imageNameParts(name)
   let file = join(dir, `${stem}${ext}`)
   let n = 1
   while (existsSync(file)) file = join(dir, `${stem}-${n++}${ext}`)
@@ -671,9 +604,9 @@ const uniqueImageFile = (dir, name) => {
 const pasteImagesDir = () => join(app.getPath('userData'), 'paste-images')
 
 // Save a pasted/dropped image next to the document, in an `assets/` subfolder,
-// and return the relative path to insert into the Markdown (Typora-style). This
-// is the no-image-host path for a SAVED doc; without it, pasted images become
-// in-memory blob: URLs that vanish on reload.
+// and return the relative path to insert into the Markdown (Typora-style). The
+// path for a SAVED doc; without it, pasted images become in-memory blob: URLs
+// that vanish on reload.
 ipcMain.handle('image:save', async (_e, docPath, name, bytes) => {
   try {
     if (!docPath) return { ok: false, error: 'No document path.' }
@@ -717,7 +650,7 @@ ipcMain.handle('image:inlineForSave', async (_e, content, targetPath) => {
     // /tmp → /private/tmp), since the link's path and userData may differ.
     let pdir = pasteImagesDir()
     try {
-      pdir = realpathSync(pdir)
+      pdir = await fs.realpath(pdir)
     } catch {
       /* folder not created yet — nothing to relocate from it */
     }
@@ -749,7 +682,7 @@ ipcMain.handle('image:inlineForSave', async (_e, content, targetPath) => {
           const fsPath = fileURLToPath(url)
           let realFsPath = fsPath
           try {
-            realFsPath = realpathSync(fsPath)
+            realFsPath = await fs.realpath(fsPath)
           } catch {
             /* missing file — leave the link as-is */
           }

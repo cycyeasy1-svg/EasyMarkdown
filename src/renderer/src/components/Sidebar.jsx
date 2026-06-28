@@ -1,10 +1,15 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useRef, useState } from 'react'
 import { Icon } from './icons.jsx'
 import { useI18n } from '../i18n.jsx'
 import { baseName, dirName as parentDir, joinPath as join, isMarkdownName, isValidName, isExistsError } from '../paths.js'
 import { copyToClipboard } from '../ui.js'
 
-export default function Sidebar({ workspaces, activePath, openTabPaths, openTabPathsRaw, onOpenFile, onOpenRight, onExportPdf, onAddFolder, onRemoveFolder, onReorderFolder, refreshNonce }) {
+// Memoized: the parent (App) re-renders on every keystroke, but the file tree only
+// depends on the workspace roots, the open-file set, and the active path — none of
+// which change while typing. With stable props (App useCallbacks its handlers and
+// keys the open-path set by its contents), memo skips re-rendering the whole tree
+// on each content edit. See the openTabPaths memo + onSidebarOpenFile in App.jsx.
+function Sidebar({ workspaces, activePath, openTabPaths, openTabPathsRaw, onOpenFile, onOpenRight, onExportPdf, onAddFolder, onRemoveFolder, onReorderFolder, refreshNonce }) {
   const { t } = useI18n()
   const copyText = (text) => copyToClipboard(text, t('code.copied'))
   const [childrenMap, setChildrenMap] = useState({}) // path -> nodes[]
@@ -680,3 +685,5 @@ export default function Sidebar({ workspaces, activePath, openTabPaths, openTabP
     </div>
   )
 }
+
+export default memo(Sidebar)

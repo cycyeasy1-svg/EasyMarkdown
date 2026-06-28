@@ -40,9 +40,9 @@ src/renderer/src/
   App.jsx              shell: tabs, state, session, split, theme, lang, editor routing
   components/Editor.jsx  Crepe wrapper + block controls + enhancements
   components/{Sidebar,Tabs,Outline,CommandPalette,StatusBar,icons}.jsx
-  components/{Welcome,WindowControls,UpdateToast,RenameModal,ImageHostButton}.jsx  leaf views split out of App
+  components/{Welcome,WindowControls,UpdateToast,RenameModal}.jsx  leaf views split out of App
   components/editor-{html,images,copy,mermaid,tablebreak}.js  Editor helpers: HTML node view · img paths · rich-copy · mermaid widget · table-cell <br>
-  {paths,find,ui,settings,customThemes}.js  pure helpers: session · find · toast · prefs (page width / image host) · custom-theme injection
+  {paths,find,ui,settings,customThemes}.js  pure helpers: session · find · toast · prefs (page width / font size / zoom) · custom-theme injection
   {blocks,themes,i18n,onboarding}.{js,jsx}
   styles/app.css       all styles + theme variables
 build/                 icon.ico (Windows) + icon.icns (macOS) + installer.nsh (NSIS uninstall: keep user files)
@@ -128,17 +128,19 @@ docs/                  architecture / features / implementation-notes / developm
   remark stringify `break` handler emits `<br>` **only inside `tableCell`** (else
   default); a remark transform parses inline `<br>` back to a break. Don't let a
   cell break serialize to a newline — it corrupts the table.
-- **Image host** (`ImageHostButton` + `image:upload` IPC): a Typora-style custom
-  command. Renderer reads the file bytes and calls main, which writes a temp file,
-  runs `<command> "<file>"`, and returns the last http(s) URL it prints. Empty
-  command ⇒ paste/drop isn't intercepted (no dead blob: URLs).
+- **Pasted/dropped images persist locally** (`Editor.jsx` `persistImage` +
+  `image:save` / `image:savePaste` IPC): a saved doc writes the image into its
+  `./assets` folder and inserts a relative path (Typora-style); an unsaved doc
+  parks it in the global paste folder (relocated into `./assets` on first save);
+  any failure falls back to an inline base64 data URL. Never leaves dead `blob:`
+  URLs that vanish on reload.
 - **Unsaved scratch tabs persist**: the session stores untitled (pathless) tabs
   whose content is dirty under `untitled: [{title, content}]`, and the mount
   restore recreates them (with `savedContent: ''` so they stay marked unsaved).
   Saved files are still reopened from disk via `openPaths`. The onboarding/welcome
   doc is skipped if either `openPaths` or `untitled` is present.
 - **State**: session is `localStorage["easymarkdown.session.v1"]` (includes the selected
-  `customTheme`); prefs (page width, image-host command) are
+  `customTheme`); prefs (page width, font size, zoom) are
   `localStorage["easymarkdown.settings.v1"]` (`settings.js`); onboarding flag is
   `localStorage["easymarkdown.onboarded.v1"]`; dismissed update notice is
   `localStorage["easymarkdown.update.dismissed"]`. Themes are `body` classes
@@ -165,12 +167,37 @@ docs/                  architecture / features / implementation-notes / developm
 
 ## Testing
 
-No unit tests. Verification is done by running the packaged app and observing
-behavior (screenshots), plus the CDP e2e scripts in `scripts/` — see
-[`docs/development.md`](./docs/development.md). On macOS, when scripting the dev
-build, note that `osascript "tell application \"Electron\""` can launch the
-generic `node_modules` Electron bundle (a name collision); prefer testing the
-packaged **EasyMarkdown.app**, which has a unique name and bundle id.
+- **Unit tests (vitest)** cover the **pure** logic — run `npm test` (or
+  `npm run test:watch`). Tests live in `test/`; config is `vitest.config.mjs`.
+  They're written as **characterization tests** (lock current behavior, since
+  there's no design spec) over `keep-parser`, `paths`, `editor-images`,
+  `main/helpers`, `settings`, `find`, `blocks`. Default env is `node`; a test
+  needing `localStorage`/`document` opts into happy-dom via a
+  `// @vitest-environment happy-dom` first line. **Main-process pure functions
+  live in `src/main/helpers.js`** (not `index.js`, which imports `electron` and
+  so can't be imported by a test) — move new pure main logic there to unit-test it.
+  DOM / ProseMirror / async-render code is out of scope for unit tests.
+- **E2E (Playwright)** drives the **built** app via `_electron.launch()` — run
+  `npm run test:e2e` (it builds first, then runs). Specs/fixtures live in
+  `test/e2e/`; the launch harness is `test/e2e/helpers.js` (`launchApp`). Non-obvious
+  bits, all load-bearing: launch `out/main/index.js` with **no `ELECTRON_RENDERER_URL`**
+  (so main `loadFile`s the built renderer), a per-launch **`--user-data-dir`** temp
+  (isolates session + sidesteps the single-instance lock), **delete
+  `ELECTRON_RUN_AS_NODE`** from the env (else electron runs as plain Node and the
+  launch fails), and tear down with `app.exit(0)` (bypasses the unsaved-changes
+  close guard). Opened `.md` renders in the **keep** editor (`.km-*`,
+  `keep-parser.js`) while the onboarding doc is **Milkdown** (`.ProseMirror`) — so
+  assert by role/text, and activate a fixture's tab before asserting. Covers smoke
+  (boot, render, keep-mode relative image → `file://`) + interactions (keep-mode
+  block "edit source" and table-cell edits; Milkdown Ctrl+2 and right-click block
+  menu after the status-bar "切换编辑模式" toggle). Crepe's on-selection bubble
+  toolbar isn't asserted — it doesn't surface reliably under automation and its
+  conversion path is already covered.
+- **Legacy CDP scripts** in `scripts/` (manual `--remote-debugging-port=9222`) still
+  exist and are being superseded by the above — see [`docs/development.md`](./docs/development.md).
+  On macOS, `osascript "tell application \"Electron\""` can launch the generic
+  `node_modules` Electron bundle (a name collision); prefer the packaged
+  **EasyMarkdown.app**, which has a unique name and bundle id.
 
 ## When in doubt
 

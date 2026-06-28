@@ -11,6 +11,7 @@
 | [architecture.md](./architecture.md) | 技术栈、进程模型、目录结构、关键模块与数据流 |
 | [features.md](./features.md) | 每个功能的用法 + 实现方式（对应到具体文件） |
 | [implementation-notes.md](./implementation-notes.md) | 开发过程中踩的坑、关键 bug 的根因与修法、设计决策 |
+| [performance.md](./performance.md) | 性能优化：内存与渲染卡顿的根因、已做改动与待办方向 |
 | [development.md](./development.md) | 本地开发、构建、打包（Windows / macOS）、自动化测试方法 |
 | [mobile.md](./mobile.md) | 移动端（iOS / Android · Capacitor）方案、接口适配、打包发布 |
 | [mobile-usage.md](./mobile-usage.md) | 移动端**使用说明**(安装、界面、保存/导出等操作) |

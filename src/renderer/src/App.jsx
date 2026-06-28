@@ -18,7 +18,6 @@ import Welcome from './components/Welcome.jsx'
 import WindowControls from './components/WindowControls.jsx'
 import UpdateToast from './components/UpdateToast.jsx'
 import RenameModal from './components/RenameModal.jsx'
-import ImageHostButton from './components/ImageHostButton.jsx'
 import {
   loadSettings,
   saveSettings,
@@ -35,7 +34,7 @@ import logoUrl from './assets/logo.png'
 import { clearFindHighlights, findRangesInEl, paintFindHighlights, scrollRangeIntoView, matchIndices, blockIndexForLine } from './find.js'
 import {
   isNewerVersion, isAbsolutePath, sanitizeWorkspaces, baseName, dirName, joinPath,
-  isPlainTextDoc, isHeavyDoc, genId, LS, loadSession
+  isPlainTextDoc, isHeavyDoc, genId, LS, loadSession, MD_DOC_RE
 } from './paths.js'
 
 const ONBOARDED_KEY = 'easymarkdown.onboarded.v1'
@@ -43,10 +42,49 @@ const ONBOARDED_KEY = 'easymarkdown.onboarded.v1'
 const MODEHINT_KEY = 'easymarkdown.modehint.v1'
 const UPDATE_DISMISS_KEY = 'easymarkdown.update.dismissed'
 
+// Resolve a relative link path against a base directory (handles ./ and ../).
+function resolveRelPath(dir, rel) {
+  const base = (dir || '').replace(/\\/g, '/').replace(/\/+$/, '')
+  const parts = base ? base.split('/') : []
+  rel.replace(/\\/g, '/').split('/').forEach((seg) => {
+    if (seg === '' || seg === '.') return
+    if (seg === '..') parts.pop()
+    else parts.push(seg)
+  })
+  return parts.join('/')
+}
+
+const escapeRegExp = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+// Heading-anchor slug, Typora/GitHub-ish: trim, spaces→'-', drop punctuation.
+const slugifyAnchor = (s) =>
+  s.trim().toLowerCase().replace(/\s+/g, '-').replace(/[^\p{L}\p{N}_-]/gu, '')
+
+// Find the 1-based source line an in-doc anchor points at. Tries, in order:
+// a heading whose slug matches, an explicit id/name/{#id} anchor, then the first
+// line that literally contains the anchor. Returns 0 when nothing matches.
+function findAnchorLine(content, anchor) {
+  if (!content || !anchor) return 0
+  const lines = content.split('\n')
+  const want = anchor.toLowerCase()
+  const wantSlug = slugifyAnchor(anchor)
+  for (let i = 0; i < lines.length; i++) {
+    const m = lines[i].match(/^\s{0,3}#{1,6}\s+(.*?)\s*#*\s*$/)
+    if (m && (slugifyAnchor(m[1]) === wantSlug || m[1].trim().toLowerCase() === want)) return i + 1
+  }
+  const re = new RegExp(`(?:id|name)\\s*=\\s*["']?${escapeRegExp(anchor)}["']?`, 'i')
+  for (let i = 0; i < lines.length; i++) {
+    if (re.test(lines[i]) || lines[i].includes(`{#${anchor}}`)) return i + 1
+  }
+  for (let i = 0; i < lines.length; i++) {
+    if (lines[i].includes(anchor)) return i + 1
+  }
+  return 0
+}
+
 export default function App() {
   const session = useRef(loadSession()).current
   // Mobile (Capacitor) builds run the same renderer; a few affordances differ
-  // (drawer sidebar, no split/image-host buttons). Desktop is unaffected.
+  // (drawer sidebar, no split button). Desktop is unaffected.
   const isMobile = window.api.platform === 'ios' || window.api.platform === 'android'
   const [tabs, setTabs] = useState([])
   const [activeId, setActiveId] = useState(null)
@@ -110,7 +148,7 @@ export default function App() {
   // Mobile "save as": prompt for a filename before writing an untitled doc into
   // the local library (desktop uses the native save dialog instead).
   const [saveNameState, setSaveNameState] = useState(null)
-  // User preferences (page width, image-host command). Persisted separately from
+  // User preferences (page width, font size, zoom). Persisted separately from
   // the session; see settings.js.
   const [settings, setSettings] = useState(loadSettings)
   // Keep-mode table-filter results per tab id ({ shown, total } or null) — drives
@@ -122,6 +160,7 @@ export default function App() {
   const paneLeftRef = useRef(null) // sidebar <aside> (for resize-drag math)
   const sourceRef = useRef(null) // active source-mode <textarea>
   const scrollRatioRef = useRef(null) // pending scroll position to restore across a mode switch
+  const pendingSourceLineRef = useRef(null) // 0-based line to select after entering source mode
   const findInputRef = useRef(null)
   // Registry of each tab's editor API (by tab id). Several markdown editors can
   // be mounted at once (a tab stays mounted after its first activation), so a
@@ -174,7 +213,12 @@ export default function App() {
   const activePath = activeTab?.path || null
   // Native (OS-separator) paths of every open tab — used by the sidebar to expand
   // the tree to each open file (must match the tree's `node.path` format).
-  const openTabPathsRaw = useMemo(() => tabs.map((t) => t.path).filter(Boolean), [tabs])
+  // Keyed on the joined path list (not `tabs`) so the array identity stays stable
+  // while typing — a content edit doesn't change any path, so the memoized Sidebar
+  // skips re-rendering. Only opening/closing/renaming a tab moves this.
+  const openPathsKey = tabs.map((t) => t.path || '').join('\n')
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const openTabPathsRaw = useMemo(() => tabs.map((t) => t.path).filter(Boolean), [openPathsKey])
   // Same paths normalized to forward slashes — the sidebar marks these rows with a
   // dot. Normalized so Windows backslashes don't break the comparison.
   const openTabPaths = useMemo(
@@ -366,9 +410,19 @@ export default function App() {
     setSourceMode((v) => !v)
   }, [])
 
+  // From keep mode's "open source here": force global source mode on and remember
+  // the 0-based source line to select once the textarea mounts. We null the scroll
+  // ratio so the scroll-restore effect yields to our line-positioning effect.
+  const openSourceAtLine = useCallback((lineIdx) => {
+    pendingSourceLineRef.current = Number.isFinite(lineIdx) ? lineIdx : 0
+    scrollRatioRef.current = null
+    setSourceMode(true)
+  }, [])
+
   // Switch the active Markdown tab between keep mode (source-backed, default) and
-  // the Milkdown WYSIWYG editor. Only meaningful for `.md` docs that aren't heavy
-  // (heavy docs use the plain textarea) and not while global source mode is on.
+  // the Milkdown WYSIWYG editor. Skips plain-text (`.txt`) tabs. A heavy doc CAN be
+  // toggled — it just lands in the plain-source + "load rich" banner path instead of
+  // a freeze-prone Crepe render (heavyAsSource in the editor routing).
   const toggleEditorMode = useCallback(() => {
     const id = activeIdRef.current
     const tab = tabsRef.current.find((t) => t.id === id)
@@ -410,6 +464,34 @@ export default function App() {
       cancelAnimationFrame(raf)
       clearTimeout(t1)
       clearTimeout(t2)
+    }
+  }, [sourceMode])
+
+  // After "open source here" flips into source mode, select the target line and
+  // center it. Retried as the textarea mounts/grows over a few frames.
+  useEffect(() => {
+    if (!sourceMode) return
+    const line = pendingSourceLineRef.current
+    if (line == null) return
+    pendingSourceLineRef.current = null
+    const apply = () => {
+      const el = sourceRef.current
+      if (!el) return
+      const lines = el.value.split('\n')
+      const ln = Math.min(Math.max(0, line), lines.length - 1)
+      let off = 0
+      for (let k = 0; k < ln; k++) off += lines[k].length + 1
+      el.focus()
+      el.setSelectionRange(off, off + (lines[ln] || '').length)
+      const cs = getComputedStyle(el)
+      const lh = parseFloat(cs.lineHeight) || parseFloat(cs.fontSize) * 1.5 || 20
+      el.scrollTop = Math.max(0, ln * lh - el.clientHeight / 2)
+    }
+    const raf = requestAnimationFrame(apply)
+    const t1 = setTimeout(apply, 90)
+    return () => {
+      cancelAnimationFrame(raf)
+      clearTimeout(t1)
     }
   }, [sourceMode])
 
@@ -858,6 +940,12 @@ export default function App() {
     if (!dir) return
     addWorkspace(dir)
   }, [addWorkspace])
+
+  // Stable handler for the memoized Sidebar (an inline arrow would defeat memo).
+  const onSidebarOpenFile = useCallback(
+    (p) => { openPaths([p]); if (isMobile) setSidebarOpen(false) },
+    [openPaths, isMobile]
+  )
 
   // A stable key for the set of roots, so the watch/list effects only re-run when
   // the roots actually change (not on every array-identity churn).
@@ -1464,6 +1552,16 @@ export default function App() {
     setFind((f) => ({ ...f, matches: ranges.length, active: ranges.length ? 1 : 0 }))
   }, [])
 
+  // Live "highlight as you type" walks the whole editor DOM, so debounce it: clear
+  // instantly on empty (feels responsive), otherwise coalesce keystrokes. Enter /
+  // next / prev still call runFind/stepFind directly for an immediate jump.
+  const findDebounceRef = useRef(0)
+  const runFindDebounced = useCallback((q) => {
+    clearTimeout(findDebounceRef.current)
+    if (!q) { runFind(''); return }
+    findDebounceRef.current = setTimeout(() => runFind(q), 160)
+  }, [runFind])
+
   // Move to the next / previous match (wrapping around).
   const stepFind = useCallback((backwards = false) => {
     const items = findRangesRef.current
@@ -1547,6 +1645,88 @@ export default function App() {
     runLineJump(String(next), true)
   }, [runLineJump])
 
+  // Reveal an anchor (heading slug / explicit id / literal text) in a doc. The
+  // target may have just opened, so we retry until its block/textarea is mounted.
+  const jumpToAnchor = useCallback((anchor, targetPath) => {
+    const norm = (p) => (p || '').replace(/\\/g, '/')
+    const tab = targetPath
+      ? tabsRef.current.find((t) => norm(t.path) === norm(targetPath))
+      : tabsRef.current.find((t) => t.id === activeIdRef.current)
+    const content = tab?.content ?? ''
+    const line = findAnchorLine(content, anchor) // 1-based, 0 if not found
+    if (!line) return
+    let tries = 0
+    const attempt = () => {
+      // Wait until the target tab is the active/visible one, so we don't flash a
+      // block in the previously-shown doc before React commits the tab switch.
+      if (targetPath && tab && activeIdRef.current !== tab.id) {
+        if (tries++ < 16) setTimeout(attempt, 70)
+        return
+      }
+      if (sourceRef.current) {
+        const el = sourceRef.current
+        const lines = el.value.split('\n')
+        const ln = Math.min(Math.max(1, line), lines.length)
+        let off = 0
+        for (let k = 0; k < ln - 1; k++) off += lines[k].length + 1
+        el.focus()
+        el.setSelectionRange(off, off + (lines[ln - 1] || '').length)
+        const cs = getComputedStyle(el)
+        const lh = parseFloat(cs.lineHeight) || parseFloat(cs.fontSize) * 1.5 || 20
+        el.scrollTop = Math.max(0, (ln - 1) * lh - el.clientHeight / 2)
+        return
+      }
+      const { bi } = blockIndexForLine(content, line)
+      const root = richRoot()
+      const block =
+        root && bi >= 0
+          ? root.classList.contains('km-doc')
+            ? root.querySelector(`.km-block[data-bi="${bi}"]`)
+            : root.children[bi] || null
+          : null
+      if (block) {
+        flashBlock(block)
+        return
+      }
+      if (tries++ < 16) setTimeout(attempt, 70) // wait for the editor to mount/render
+    }
+    attempt()
+  }, [])
+
+  // ── in-app document links ──
+  // A keep-mode link like [POL-001](L2_xxx.md#POL-001) opens the target doc as a
+  // tab (or reuses it) and jumps to the anchor; a same-file / pure #anchor link
+  // just jumps. External http(s)/mailto links are handled in the editors.
+  const openDocLink = useCallback(
+    async (relPath, anchor, fromPath) => {
+      const base =
+        fromPath || tabsRef.current.find((t) => t.id === activeIdRef.current)?.path || ''
+      let targetPath = null
+      if (relPath) {
+        const p = relPath.replace(/\\/g, '/')
+        targetPath = isAbsolutePath(p) ? p : resolveRelPath(dirName(base), p)
+        // Only markdown opens in-app; extensionless links are treated as `.md`
+        // (wiki-style). Other file types are out of scope (ignored).
+        let openable = null
+        if (MD_DOC_RE.test(targetPath)) openable = targetPath
+        else if (!/\.[a-z0-9]+$/i.test(targetPath)) openable = targetPath + '.md'
+        if (!openable) return
+        targetPath = openable
+        const already = tabsRef.current.find(
+          (t) => (t.path || '').replace(/\\/g, '/') === targetPath.replace(/\\/g, '/')
+        )
+        await openPaths([targetPath])
+        // openPaths shows its own alert if the file is missing; bail on failure.
+        if (!already && !tabsRef.current.find(
+          (t) => (t.path || '').replace(/\\/g, '/') === targetPath.replace(/\\/g, '/')
+        ))
+          return
+      }
+      if (anchor) jumpToAnchor(anchor, targetPath)
+    },
+    [openPaths]
+  )
+
   const toggleFindMode = useCallback(() => {
     clearFindHighlights()
     findRangesRef.current = []
@@ -1558,6 +1738,7 @@ export default function App() {
   }, [])
 
   const closeFind = useCallback(() => {
+    clearTimeout(findDebounceRef.current)
     clearFindHighlights()
     findRangesRef.current = []
     activeIdxRef.current = -1
@@ -1663,13 +1844,6 @@ export default function App() {
             <Icon name="columns" size={16} />
           </button>
         )}
-        {!isMobile && (
-          <ImageHostButton
-            t={t}
-            command={settings.imageUploadCommand}
-            onChange={(cmd) => updateSettings({ imageUploadCommand: cmd })}
-          />
-        )}
         <button className="icon-btn drag-no" title="Command palette (Ctrl+P)" onClick={() => setPaletteOpen(true)}>
           <Icon name="command" size={16} />
         </button>
@@ -1693,7 +1867,7 @@ export default function App() {
                 activePath={activePath}
                 openTabPaths={openTabPaths}
                 openTabPathsRaw={openTabPathsRaw}
-                onOpenFile={(p) => { openPaths([p]); if (isMobile) setSidebarOpen(false) }}
+                onOpenFile={onSidebarOpenFile}
                 onOpenRight={openFileRight}
                 onExportPdf={exportPathToPdf}
                 onAddFolder={openFolder}
@@ -1730,7 +1904,7 @@ export default function App() {
                   const q = e.target.value
                   setFind((f) => ({ ...f, query: q }))
                   if (find.mode === 'line') runLineJump(q, false) // live: scroll to the line
-                  else runFind(q) // live: highlight as you type
+                  else runFindDebounced(q) // live: highlight as you type (debounced)
                 }}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') {
@@ -1837,6 +2011,7 @@ export default function App() {
                     onMouseDownCapture={onPaneFocus}
                   >
                     <KeepEditor
+                      inView={inView}
                       initialContent={tab.content}
                       docPath={tab.path}
                       onChange={(md, isInitial) => updateContent(tab.id, md, isInitial)}
@@ -1849,6 +2024,8 @@ export default function App() {
                           return { ...m, [tab.id]: info }
                         })
                       }
+                      onOpenSource={openSourceAtLine}
+                      onOpenDocLink={openDocLink}
                     />
                   </div>
                 )
@@ -1874,7 +2051,6 @@ export default function App() {
                       tabId={`${tab.id}:${tab.reloadNonce}`}
                       initialContent={tab.content}
                       docPath={tab.path}
-                      imageUploadCommand={settings.imageUploadCommand}
                       onChange={(md, isInitial) => updateContent(tab.id, md, isInitial)}
                       onReady={(api) => {
                         editorApis.current[tab.id] = api
@@ -1960,10 +2136,11 @@ export default function App() {
         sourceMode={sourceMode}
         onToggleSource={toggleSource}
         keepEligible={
-          !!activeTab &&
-          !isPlainTextDoc(activeTab) &&
-          !(activeTab.heavy && !richForced.has(activeTab.id)) &&
-          !sourceMode
+          // Heavy docs keep the toggle too: switching one to Milkdown lands in the
+          // safe plain-source + "load rich" banner path (heavyAsSource above), never
+          // the freeze-prone Crepe render — so there's no reason to hide the button
+          // (it just vanishing on big files / big-table docs was confusing).
+          !!activeTab && !isPlainTextDoc(activeTab) && !sourceMode
         }
         keepMode={!!activeTab && !milkdownForced.has(activeTab.id)}
         onToggleKeep={() => {

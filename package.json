@@ -1,7 +1,7 @@
 {
   "name": "horse",
   "productName": "EasyMarkdown",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "EasyMarkdown Markdown Editor",
   "author": "mini_md",
   "license": "MIT",
@@ -20,6 +20,9 @@
     "build": "electron-vite build",
     "preview": "electron-vite preview",
     "start": "electron-vite preview",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "electron-vite build && playwright test",
     "dist": "electron-vite build && node scripts/gen-readme.mjs && electron-builder",
     "dist:dir": "electron-vite build && node scripts/gen-readme.mjs && electron-builder --dir",
     "build:mobile": "vite build --config vite.mobile.config.mjs",
@@ -44,19 +47,24 @@
     "@capacitor/android": "^8.4.0",
     "@capacitor/cli": "^8.4.0",
     "@capacitor/ios": "^8.4.0",
+    "@playwright/test": "^1.61.1",
     "@vitejs/plugin-react": "^4.3.4",
     "electron": "^34.0.0",
     "electron-builder": "^25.1.8",
     "electron-vite": "^3.0.0",
+    "happy-dom": "^20.10.6",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "vite": "^6.0.7"
+    "vite": "^6.0.7",
+    "vitest": "^3.2.6"
   },
   "build": {
     "appId": "com.easymarkdown.app",
     "productName": "EasyMarkdown",
     "files": [
-      "out/**/*"
+      "out/**/*",
+      "package.json",
+      "!node_modules/**"
     ],
     "extraFiles": [
       {
@@ -106,8 +114,15 @@
     },
     "win": {
       "target": [
-        "nsis"
+        "nsis",
+        {
+          "target": "zip",
+          "arch": [
+            "x64"
+          ]
+        }
       ],
+      "artifactName": "${productName}-${version}-win-${arch}.${ext}",
       "icon": "build/icon.ico",
       "fileAssociations": [
         {

@@ -45,6 +45,47 @@ async function getMermaid() {
   return mermaidMod
 }
 
+// Reusable, promise-returning render for callers OUTSIDE ProseMirror (keep mode).
+// Shares the same theme-keyed LRU cache as the editor plugin, so a diagram already
+// drawn in the rich editor paints instantly here (and vice-versa). Concurrent
+// requests for the same diagram share one in-flight promise instead of re-running
+// Mermaid. Resolves to { svg } or { error }.
+const inflight = new Map()
+// Synchronous cache peek — lets a caller paint an already-rendered diagram with no
+// async flash (e.g. keep mode re-renders on every edit). null = not yet rendered.
+export function peekMermaidSvg(code, theme = curTheme()) {
+  return cacheGet(keyFor(theme, (code || '').trim())) || null
+}
+export async function getMermaidSvg(code, theme = curTheme()) {
+  const trimmed = (code || '').trim()
+  if (!trimmed) return { error: '' }
+  const k = keyFor(theme, trimmed)
+  const hit = cacheGet(k)
+  if (hit) return hit
+  if (inflight.has(k)) return inflight.get(k)
+  const p = (async () => {
+    const id = 'hm-mermaid-k' + ++seq
+    try {
+      const mermaid = await getMermaid()
+      mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', theme })
+      const { svg } = await mermaid.render(id, trimmed)
+      const r = { svg }
+      cacheSet(k, r)
+      return r
+    } catch (e) {
+      const r = { error: (e && e.message) || String(e) }
+      cacheSet(k, r)
+      return r
+    } finally {
+      document.getElementById(id)?.remove()
+      document.getElementById('d' + id)?.remove()
+      inflight.delete(k)
+    }
+  })()
+  inflight.set(k, p)
+  return p
+}
+
 const curTheme = () => (document.body.classList.contains('dark') ? 'dark' : 'default')
 const keyFor = (theme, code) => theme + '::' + code
 

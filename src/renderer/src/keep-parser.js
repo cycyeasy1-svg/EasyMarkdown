@@ -17,6 +17,8 @@
 // exclusion disagree, `i` stops advancing, and the parse loops forever →
 // `RangeError: Invalid array length`. (A real trap hit in the prototype.)
 
+import { isRelativePath, resolveToFileUrl } from './components/editor-images.js'
+
 // ── escaping ──
 export function escapeHtml(s) {
   return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
@@ -29,17 +31,73 @@ export function escapeAttr(s) {
     .replace(/>/g, '&gt;')
 }
 
-// Inline rendering: preserve <br>, render bold / italic / inline code / links,
-// everything else HTML-escaped. Display-only — never feeds back into the source.
-export function inline(text) {
+// Re-enable HTML character references after escaping. escapeHtml turned every `&`
+// into `&amp;`, which makes a source `&nbsp;` render as the literal text "&nbsp;"
+// instead of a space. Turn an escaped, *well-formed* entity (`&amp;nbsp;`,
+// `&amp;#160;`, `&amp;copy;`) back into a real reference so the browser decodes it,
+// while a bare `&` (no trailing `;`) stays `&amp;` and shows as a literal "&".
+// Safe: a decoded reference like `&lt;` renders as the character "<", never as a
+// tag — the browser does not re-parse entity text as HTML.
+function decodeEntityRefs(s) {
+  return s.replace(/&amp;(#x?[0-9a-f]+|[a-z][a-z0-9]*);/gi, '&$1;')
+}
+
+// Build a safe `href` from a link target that was ALREADY HTML-escaped (the whole
+// segment ran through escapeHtml first, so `&`→`&amp;`, `<`→`&lt;`). We must NOT
+// re-run escapeAttr — that would double-escape `&amp;` into `&amp;amp;`. We only
+// (1) neutralize `"` so the URL can't break out of the attribute, and (2) blank a
+// `javascript:`/`data:`/`vbscript:` scheme so a crafted link can't run code on
+// click (keep mode renders real <a> via innerHTML).
+function safeHref(escapedHref) {
+  const probe = escapedHref.replace(/&amp;/gi, '&').trim().toLowerCase()
+  if (/^(javascript|data|vbscript):/.test(probe)) return ''
+  return escapedHref.replace(/"/g, '&quot;')
+}
+
+// Build a display `src` for an image. The path arrives ALREADY HTML-escaped (the
+// segment ran through escapeHtml). A document-relative path is resolved against
+// the doc folder as a file:// URL (display-only, like Milkdown's image node view —
+// the source keeps the original relative path); http(s)/data/file URLs pass
+// through. A `javascript:`/`vbscript:` scheme is blanked; `data:` is allowed so
+// inline base64 images still render; `"` is neutralized so it can't break out.
+function safeImgSrc(escapedSrc, baseDir) {
+  const raw = escapedSrc.trim()
+  if (baseDir && isRelativePath(raw)) return resolveToFileUrl(baseDir, raw).replace(/"/g, '&quot;')
+  const probe = raw.replace(/&amp;/gi, '&').toLowerCase()
+  if (/^(javascript|vbscript):/.test(probe)) return ''
+  return raw.replace(/"/g, '&quot;')
+}
+
+// Inline rendering: preserve <br>, render bold / italic / inline code / images /
+// links, everything else HTML-escaped. Display-only — never feeds back into the
+// source. `baseDir` (the document's folder) resolves relative image paths.
+export function inline(text, baseDir) {
   const parts = String(text)
     .split(/<br\s*\/?>/i)
     .map((seg) => {
       let s = escapeHtml(seg)
-      s = s.replace(/`([^`]+)`/g, (m, c) => '<code>' + c + '</code>')
+      // Pull inline code out first (placeholders) so neither entity decoding nor
+      // the bold/italic passes touch a code span's literal contents — `` `&nbsp;` ``
+      // must stay literal, like in standard Markdown.
+      const codes = []
+      s = s.replace(/`([^`]+)`/g, (m, c) => {
+        codes.push(c)
+        return ' ' + (codes.length - 1) + ' '
+      })
+      s = decodeEntityRefs(s)
       s = s.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
       s = s.replace(/(?<!\*)\*([^*]+)\*(?!\*)/g, '<em>$1</em>')
-      s = s.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>')
+      // Images BEFORE links — otherwise the link regex grabs the `[alt](src)` part
+      // and leaves a stray `!`.
+      s = s.replace(
+        /!\[([^\]]*)\]\(([^)]+)\)/g,
+        (m, alt, src) => '<img src="' + safeImgSrc(src, baseDir) + '" alt="' + alt.replace(/"/g, '&quot;') + '">'
+      )
+      s = s.replace(
+        /\[([^\]]+)\]\(([^)]+)\)/g,
+        (m, label, href) => '<a href="' + safeHref(href) + '" target="_blank" rel="noopener">' + label + '</a>'
+      )
+      s = s.replace(/ (\d+) /g, (m, i) => '<code>' + codes[+i] + '</code>')
       return s
     })
   return parts.join('<br>')
@@ -84,13 +142,31 @@ export function parseDoc(lines) {
   let i = 0
   while (i < lines.length) {
     const line = lines[i]
-    // Fenced code block
+    // Fenced code block. Capture the info-string language so the renderer can turn
+    // a ```mermaid fence into a live diagram (and leave others as code).
     if (/^\s*```/.test(line)) {
       const start = i
+      const lang = line.replace(/^\s*```/, '').trim().split(/\s+/)[0].toLowerCase()
       i++
       while (i < lines.length && !/^\s*```/.test(lines[i])) i++
       if (i < lines.length) i++ // closing ```
-      out.push({ type: 'code', start, end: i - 1 })
+      out.push({ type: 'code', start, end: i - 1, lang })
+      continue
+    }
+    // Block math: a line starting with `$$`. Closes on the next line containing
+    // `$$` (covers both the single-line `$$ x $$` and the fenced multi-line form).
+    if (/^\s*\$\$/.test(line)) {
+      const start = i
+      const after = line.slice(line.indexOf('$$') + 2)
+      if (after.includes('$$')) {
+        out.push({ type: 'mathblock', start, end: i })
+        i++
+        continue
+      }
+      i++
+      while (i < lines.length && !lines[i].includes('$$')) i++
+      if (i < lines.length) i++ // closing $$ line
+      out.push({ type: 'mathblock', start, end: i - 1 })
       continue
     }
     // Heading
@@ -141,22 +217,38 @@ export function parseDoc(lines) {
       out.push({ type: 'quote', start, end: i - 1 })
       continue
     }
-    // List (contiguous; indented continuations stay in the block)
+    // List. Indented continuations stay in the block; a blank line keeps the
+    // list together only if a same-level item or an indented continuation
+    // follows (a "loose" list — still ONE list, so numbering stays continuous).
+    // Otherwise the blank line ends it. `end` excludes trailing blank lines.
     if (/^\s*([-*+]|\d+[.)])\s+/.test(line)) {
       const start = i
       const baseIndent = line.search(/\S/)
+      let lastContent = i
       i++
       while (i < lines.length) {
         const cur = lines[i]
-        if (cur.trim() === '') break // compact list — blank line ends it
+        if (cur.trim() === '') {
+          let j = i + 1
+          while (j < lines.length && lines[j].trim() === '') j++
+          const nxt = j < lines.length ? lines[j] : null
+          const nind = nxt ? nxt.search(/\S/) : -1
+          if (nxt && (nind > baseIndent || (nind === baseIndent && /^\s*([-*+]|\d+[.)])\s+/.test(nxt)))) {
+            i = j // loose list: skip the blank gap and keep going
+            continue
+          }
+          break // blank line ends the list
+        }
         const ind = cur.search(/\S/)
         if (ind > baseIndent || /^\s*([-*+]|\d+[.)])\s+/.test(cur)) {
+          lastContent = i
           i++
           continue
         }
         break
       }
-      out.push({ type: 'list', start, end: i - 1 })
+      out.push({ type: 'list', start, end: lastContent })
+      i = lastContent + 1
       continue
     }
     // Blank line
@@ -174,6 +266,7 @@ export function parseDoc(lines) {
         !/^\s*([-*+]|\d+[.)])\s+/.test(lines[i]) &&
         !/^\s*>\s?/.test(lines[i]) &&
         !/^\s*```/.test(lines[i]) &&
+        !/^\s*\$\$/.test(lines[i]) &&
         !(
           lines[i].includes('|') &&
           i + 1 < lines.length &&
@@ -280,20 +373,56 @@ export function buildTableRow(nCols, refLine) {
 }
 
 // ── render helpers (return HTML strings; pure) ──
-function renderList(b, viewLines) {
+function renderList(b, viewLines, baseDir) {
   const lines = viewLines.slice(b.start, b.end + 1)
-  const ordered = /^\s*\d+[.)]\s+/.test(lines[0] || '')
-  let html = ordered ? '<ol>' : '<ul>'
+  // Parse each line into a list item carrying its own indent depth and marker
+  // type (ordered vs bullet). Unmarked indented lines are continuations of the
+  // previous item (e.g. a wrapped paragraph), appended with a soft break.
+  const items = []
   for (const l of lines) {
-    const m = l.match(/^\s*([-*+]|\d+[.)])\s+(.*)$/)
-    if (m) html += '<li>' + inline(m[2]) + '</li>'
-    else html += '<li>' + inline(l.trim()) + '</li>'
+    if (l.trim() === '') continue // loose-list gaps carry no content
+    const m = l.match(/^(\s*)([-*+]|\d+[.)])\s+(.*)$/)
+    if (m) {
+      const num = m[2].match(/^\d+/)
+      items.push({ indent: m[1].length, ordered: !!num, start: num ? +num[0] : null, html: inline(m[3], baseDir) })
+    } else if (items.length) {
+      items[items.length - 1].html += '<br>' + inline(l.trim(), baseDir)
+    } else {
+      items.push({ indent: 0, ordered: false, html: inline(l.trim(), baseDir) })
+    }
   }
-  html += ordered ? '</ol>' : '</ul>'
+  // Build nested <ul>/<ol> from the indent levels. Each nesting level keeps the
+  // marker type of its first item, so a "1." parent with "-" children renders as
+  // an ordered list containing a bullet sublist (not one flat numbered list).
+  let html = ''
+  const stack = [] // open lists, innermost last: { indent, ordered }
+  const openList = (it) => {
+    stack.push({ indent: it.indent, ordered: it.ordered })
+    // Honor the first item's number (CommonMark: a list's start = its first
+    // item's marker). `<ol>` alone always restarts at 1, so "3. / 4." rendered
+    // as 1. / 2. — emit start="3" when it isn't the default.
+    const open = it.ordered
+      ? '<ol' + (it.start != null && it.start !== 1 ? ' start="' + it.start + '"' : '') + '>'
+      : '<ul>'
+    html += open + '<li>' + it.html
+  }
+  const closeList = () => {
+    const s = stack.pop()
+    html += '</li>' + (s.ordered ? '</ol>' : '</ul>')
+  }
+  for (const it of items) {
+    if (!stack.length || it.indent > stack[stack.length - 1].indent) {
+      openList(it) // first list, or a sublist nested inside the open <li>
+      continue
+    }
+    while (stack.length > 1 && it.indent < stack[stack.length - 1].indent) closeList()
+    html += '</li><li>' + it.html // sibling at the current level
+  }
+  while (stack.length) closeList()
   return html
 }
 
-function renderTable(b, tableIdx, filterState, forExport) {
+function renderTable(b, tableIdx, filterState, forExport, baseDir) {
   const headers = b.headers
   let html = '<div class="km-table-wrap"><table class="km-table" data-ti="' + tableIdx + '"><thead><tr>'
   headers.forEach((h, ci) => {
@@ -313,8 +442,10 @@ function renderTable(b, tableIdx, filterState, forExport) {
       b.headerLine +
       '" data-ci="' +
       ci +
+      '" data-raw="' +
+      escapeAttr(h) +
       '"><div class="km-th-flex"><span class="km-th-content">' +
-      inline(h) +
+      inline(h, baseDir) +
       '</span>' +
       filterBtn +
       '</div></th>'
@@ -332,7 +463,7 @@ function renderTable(b, tableIdx, filterState, forExport) {
         '" data-raw="' +
         escapeAttr(raw) +
         '">' +
-        inline(raw) +
+        inline(raw, baseDir) +
         '</td>'
     }
     html += '</tr>'
@@ -341,54 +472,91 @@ function renderTable(b, tableIdx, filterState, forExport) {
   return html
 }
 
+// Render ONE block's interior (the "edit source" button + its content HTML), i.e.
+// everything that goes *inside* the wrapping `<div class="km-block">`. Factored out
+// of renderDoc so KeepEditor can rebuild a single block in place (e.g. restoring a
+// block after a clean edit-cancel) without re-rendering — and re-serializing — the
+// whole document. Tables are never block-edited, so `tableIdx` only matters when
+// renderDoc drives the full loop; scoped single-block restores are non-table.
+//   opts.srcEditLabel · opts.forExport · opts.filterState · opts.tableIdx
+export function renderBlockInner(b, bi, viewLines, opts = {}) {
+  const forExport = !!opts.forExport
+  const srcEditLabel = opts.srcEditLabel || 'edit'
+  const filterState = opts.filterState || {}
+  const tableIdx = opts.tableIdx || 0
+  const baseDir = opts.baseDir
+  let inner = ''
+  if (b.type === 'heading') {
+    inner = '<h' + b.level + ' id="km-h-' + bi + '">' + inline(b.text, baseDir) + '</h' + b.level + '>'
+  } else if (b.type === 'paragraph') {
+    inner = '<p>' + viewLines.slice(b.start, b.end + 1).map((l) => inline(l, baseDir)).join('<br>') + '</p>'
+  } else if (b.type === 'code') {
+    const body = viewLines.slice(b.start + 1, b.end).join('\n')
+    // A ```mermaid fence renders as a live diagram (filled by KeepEditor after
+    // render); every other language stays a plain code block. The source still
+    // round-trips and edits through the block "edit source" affordance.
+    inner =
+      b.lang === 'mermaid'
+        ? '<div class="km-mermaid" data-code="' + escapeAttr(body) + '"></div>'
+        : '<pre><code>' + escapeHtml(body) + '</code></pre>'
+  } else if (b.type === 'mathblock') {
+    // Strip the $$ delimiters; KeepEditor renders the TeX with KaTeX after render.
+    const tex = viewLines
+      .slice(b.start, b.end + 1)
+      .join('\n')
+      .replace(/^\s*\$\$/, '')
+      .replace(/\$\$\s*$/, '')
+      .trim()
+    inner = '<div class="km-math" data-tex="' + escapeAttr(tex) + '"></div>'
+  } else if (b.type === 'hr') {
+    inner = '<hr>'
+  } else if (b.type === 'quote') {
+    inner =
+      '<blockquote>' +
+      inline(viewLines.slice(b.start, b.end + 1).map((l) => l.replace(/^\s*>\s?/, '')).join('<br>'), baseDir) +
+      '</blockquote>'
+  } else if (b.type === 'list') {
+    inner = renderList(b, viewLines, baseDir)
+  } else if (b.type === 'table') {
+    inner = renderTable(b, tableIdx, filterState, forExport, baseDir)
+  }
+  const editable = b.type !== 'table'
+  const btn =
+    editable && !forExport
+      ? '<button class="km-src-edit" data-bi="' +
+        bi +
+        '" type="button" title="' +
+        escapeAttr(srcEditLabel) +
+        '"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg><span>' +
+        escapeHtml(srcEditLabel) +
+        '</span></button>'
+      : ''
+  return btn + inner
+}
+
 // Render the whole document to HTML, plus return the parsed block map / viewLines
 // so the caller (KeepEditor) can map edits back to source.
 //   opts.srcEditLabel — label for the per-block "edit source" button
 //   opts.forExport    — omit edit affordances (buttons / filter ▼) for PDF
+//   opts.baseDir      — document folder, for resolving relative image paths
 export function renderDoc(rawLines, filterState = {}, opts = {}) {
   const forExport = !!opts.forExport
   const srcEditLabel = opts.srcEditLabel || 'edit'
+  const baseDir = opts.baseDir
   const viewLines = toViewLines(rawLines)
   const blocks = parseDoc(viewLines)
   let tableIdx = 0
   let html = ''
   blocks.forEach((b, bi) => {
-    let inner = ''
-    if (b.type === 'heading') {
-      inner = '<h' + b.level + ' id="km-h-' + bi + '">' + inline(b.text) + '</h' + b.level + '>'
-    } else if (b.type === 'paragraph') {
-      inner = '<p>' + viewLines.slice(b.start, b.end + 1).map(inline).join('<br>') + '</p>'
-    } else if (b.type === 'code') {
-      inner = '<pre><code>' + escapeHtml(viewLines.slice(b.start + 1, b.end).join('\n')) + '</code></pre>'
-    } else if (b.type === 'hr') {
-      inner = '<hr>'
-    } else if (b.type === 'quote') {
-      inner =
-        '<blockquote>' +
-        inline(viewLines.slice(b.start, b.end + 1).map((l) => l.replace(/^\s*>\s?/, '')).join('<br>')) +
-        '</blockquote>'
-    } else if (b.type === 'list') {
-      inner = renderList(b, viewLines)
-    } else if (b.type === 'table') {
-      inner = renderTable(b, tableIdx, filterState, forExport)
-      tableIdx++
-    }
-    const editable = b.type !== 'table'
-    html +=
-      '<div class="km-block" data-bi="' +
-      bi +
-      '">' +
-      (editable && !forExport
-        ? '<button class="km-src-edit" data-bi="' +
-          bi +
-          '" type="button" title="' +
-          escapeAttr(srcEditLabel) +
-          '"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg><span>' +
-          escapeHtml(srcEditLabel) +
-          '</span></button>'
-        : '') +
-      inner +
-      '</div>'
+    const innerHtml = renderBlockInner(b, bi, viewLines, {
+      forExport,
+      srcEditLabel,
+      filterState,
+      tableIdx,
+      baseDir
+    })
+    if (b.type === 'table') tableIdx++
+    html += '<div class="km-block" data-bi="' + bi + '">' + innerHtml + '</div>'
   })
   return { html: html || '<div class="km-empty"></div>', blocks, viewLines }
 }

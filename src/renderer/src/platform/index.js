@@ -15,7 +15,6 @@ const DESKTOP_CAPABILITIES = {
   watch: true,
   windowControls: true,
   pdfExport: true,
-  imageHostExec: true,
   nativeMenus: true,
   externalShell: true,
   revealInFolder: true,

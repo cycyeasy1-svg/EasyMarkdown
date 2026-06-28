@@ -28,7 +28,7 @@ const EN = `# EasyMarkdown — User Guide 📝
 - **Excel-style column filter** — click the **▼** on a column header, then check values or search to temporarily hide rows. Multiple columns combine with AND; the status bar shows \`Filtered X/Y\`. **Display only — it never touches the file or affects saving.**
 - **Zero-diff save** — no re-formatting, no whitespace/bullet/quote churn, line endings preserved (mixed LF/CRLF kept as-is). \`git diff\` shows exactly the edits you made and nothing else.
 
-Keep mode renders headings, paragraphs, lists, tables, code blocks, quotes and horizontal rules, with inline **bold**, *italic*, \`code\`, links and \`<br>\`. For slash commands, LaTeX math, Mermaid diagrams and inline image preview, switch to Milkdown mode.
+Keep mode renders headings, paragraphs, lists, tables, code blocks, quotes and horizontal rules, with inline **bold**, *italic*, \`code\`, links and \`<br>\`. A code block — including a \`\`\`mermaid one — stays shown as its source text in keep mode; that's expected, not a failure. For slash commands, LaTeX math, rendered Mermaid diagrams and inline image preview, switch to Milkdown mode.
 
 ## General features
 
@@ -78,7 +78,7 @@ const ZH = `# EasyMarkdown 使用说明 📝
 - **Excel 式列筛选** —— 点表头的 **▼**，勾选取值或搜索，临时隐藏不需要的行。多列之间为 AND；状态栏显示「筛选 X/Y」。**仅影响显示，绝不写入文件、不影响保存。**
 - **零差分保存** —— 不重排版，不动空白/符号/引用，行尾保留（LF/CRLF 混排原样保留）。\`git diff\` 里只出现你真正改动的那几处，别无其他。
 
-保持模式可渲染标题、段落、列表、表格、代码块、引用、分隔线，以及行内 **粗体**、*斜体*、\`代码\`、链接和 \`<br>\`。需要斜杠菜单、LaTeX 公式、Mermaid 图、行内图片预览时，切到 Milkdown 模式。
+保持模式可渲染标题、段落、列表、表格、代码块、引用、分隔线，以及行内 **粗体**、*斜体*、\`代码\`、链接和 \`<br>\`。代码块——包括 \`\`\`mermaid 块——在保持模式下保持源码原样显示，这是正常的，不是渲染失败。需要斜杠菜单、LaTeX 公式、渲染后的 Mermaid 图、行内图片预览时，切到 Milkdown 模式。
 
 ## 通用功能
 
@@ -128,7 +128,7 @@ const JA = `# EasyMarkdown 使い方ガイド 📝
 - **Excel 風の列フィルタ** —— 列ヘッダの **▼** をクリックし、値のチェックや検索で行を一時的に隠します。複数列は AND。ステータスバーに「絞り込み X/Y」と表示。**表示専用で、ファイルには一切触れず、保存にも影響しません。**
 - **差分ゼロ保存** —— 再整形なし、空白・記号・引用の揺れなし、改行コードも保持（LF/CRLF 混在もそのまま）。\`git diff\` には実際に編集した箇所だけが現れます。
 
-キープモードは見出し・段落・リスト・表・コードブロック・引用・水平線を描画し、インラインの **太字**・*斜体*・\`コード\`・リンク・\`<br>\` に対応します。スラッシュコマンド、LaTeX 数式、Mermaid 図、インライン画像プレビューが必要な場合は Milkdown モードに切り替えてください。
+キープモードは見出し・段落・リスト・表・コードブロック・引用・水平線を描画し、インラインの **太字**・*斜体*・\`コード\`・リンク・\`<br>\` に対応します。コードブロック（\`\`\`mermaid を含む）はキープモードではソースのまま表示されます。これは正常で、描画失敗ではありません。スラッシュコマンド、LaTeX 数式、描画された Mermaid 図、インライン画像プレビューが必要な場合は Milkdown モードに切り替えてください。
 
 ## 共通機能
 

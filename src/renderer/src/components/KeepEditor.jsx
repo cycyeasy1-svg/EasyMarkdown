@@ -2,12 +2,21 @@ import { useEffect, useRef } from 'react'
 import { useI18n } from '../i18n.jsx'
 import {
   renderDoc,
+  renderBlockInner,
   inline,
   replaceCellInLine,
   insertColumnInLine,
   removeColumnInLine,
   buildTableRow
 } from '../keep-parser.js'
+import { inlineRichStyles } from './editor-copy.js'
+import { dirOf } from './editor-images.js'
+import { getMermaidSvg, peekMermaidSvg } from './editor-mermaid.js'
+
+// Wrapper style for rich-text copy (mirrors the Crepe editor's onCopy payload) so
+// pasted output keeps a sensible default font in apps that ignore external CSS.
+const COPY_WRAP =
+  'font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;font-size:15px;line-height:1.7;color:#24292f;'
 
 /**
  * Keep mode (source-backed editing) — the default editor for `.md`.
@@ -30,10 +39,26 @@ import {
  *     PDF export calls getDocHTML, and setBlock is a no-op (no block model here).
  *   - Remount (key includes reloadNonce) re-reads initialContent on external edits.
  */
-export default function KeepEditor({ initialContent, onChange, onReady, onOutline, onFilterChange }) {
+export default function KeepEditor({
+  inView = true,
+  initialContent,
+  docPath,
+  onChange,
+  onReady,
+  onOutline,
+  onFilterChange,
+  onOpenSource,
+  onOpenDocLink
+}) {
   const { t, lang } = useI18n()
   const tRef = useRef(t)
   tRef.current = t
+  const onOpenSourceRef = useRef(onOpenSource)
+  onOpenSourceRef.current = onOpenSource
+  const onOpenDocLinkRef = useRef(onOpenDocLink)
+  onOpenDocLinkRef.current = onOpenDocLink
+  const docPathRef = useRef(docPath)
+  docPathRef.current = docPath
 
   const hostRef = useRef(null)
   // Mutable doc state held in refs (this component drives the DOM directly).
@@ -49,10 +74,16 @@ export default function KeepEditor({ initialContent, onChange, onReady, onOutlin
   onFilterChangeRef.current = onFilterChange
 
   // Live edit handles so blur/outside-click can commit/close the right one.
-  const activeEditRef = useRef(null) // { td, raw } during a cell edit
+  const activeCellPopRef = useRef(null) // { pop, raw, lineIdx, colIdx } during a cell edit
+  const activeBlockEditRef = useRef(null) // { ta, b, originalRaw } during a block source edit
+  const activeConfirmRef = useRef(null) // the open "save changes?" modal (custom, not window.confirm)
   const activePopRef = useRef(null) // the open filter dropdown element
   const activePopBtnRef = useRef(null) // the ▼ button that opened it (for toggle)
   const activeMenuRef = useRef(null) // the open table context menu element
+  // Tear down every body-appended popover (cell pop / filter pop / table menu /
+  // confirm modal). Set inside the mount effect; called when the pane leaves view
+  // so a floating edit bar never lingers over another tab's document.
+  const closeFloatingRef = useRef(null)
 
   useEffect(() => {
     const host = hostRef.current
@@ -75,39 +106,194 @@ export default function KeepEditor({ initialContent, onChange, onReady, onOutlin
       onOutlineRef.current(heads)
     }
 
-    // Full re-render from rawLines (re-parse → innerHTML → re-apply filters).
+    // Docs above this many lines build tens of thousands of DOM nodes in one
+    // synchronous innerHTML — enough to stall the main thread for a visible beat.
+    // For those we paint a "loading…" placeholder and yield a frame first.
+    const LARGE_DOC_LINES = 1200
+    let afterPaintRaf = 0 // pending requestAnimationFrame id (cancelled on re-render/destroy)
+    let embedObserver = null // IntersectionObserver: render mermaid/math only when near view
+    let katexPromise = null // lazily-loaded KaTeX module (one import per session)
+    const cancelAfterPaint = () => {
+      if (afterPaintRaf) {
+        cancelAnimationFrame(afterPaintRaf)
+        afterPaintRaf = 0
+      }
+    }
+
+    // Full re-render from rawLines (re-parse → innerHTML). The layout-measuring and
+    // embed work is pushed PAST first paint (finishRender) so the document is
+    // visible/scrollable immediately and the main thread is free for input (the
+    // :hover highlight, caret) instead of stalling on a whole-doc reflow.
     const rerender = () => {
       if (destroyed) return
       const { html, blocks, viewLines } = renderDoc(rawLinesRef.current, filterStateRef.current, {
-        srcEditLabel: tRef.current('keep.editSource')
+        srcEditLabel: tRef.current('keep.editSource'),
+        baseDir: dirOf(docPathRef.current)
       })
       // tag blocks with their index so the outline can reference them
       blocks.forEach((b, i) => {
         b.bi = i
       })
-      host.innerHTML = html
       blocksRef.current = blocks
       viewLinesRef.current = viewLines
-      // Tag multi-line blocks so the edit button pins to the top-right; single-line
-      // blocks keep it vertically centered. Primary signal is the source line span;
-      // a fontSize-based height check also catches a long single line that wraps.
-      blocks.forEach((b, bi) => {
+
+      const paint = () => {
+        if (destroyed) return
+        host.innerHTML = html
+        pushOutline()
+        cancelAfterPaint()
+        afterPaintRaf = requestAnimationFrame(finishRender)
+      }
+
+      cancelAfterPaint()
+      if (blocks.length && rawLinesRef.current.length > LARGE_DOC_LINES) {
+        // Show the placeholder, then yield two frames so it actually paints before
+        // the blocking innerHTML build (one frame to commit, one to let it display).
+        host.innerHTML =
+          '<div class="km-loading"><span class="km-spinner"></span>' +
+          escapeHtmlLocal(tRef.current('keep.loading')) +
+          '</div>'
+        afterPaintRaf = requestAnimationFrame(() => {
+          afterPaintRaf = requestAnimationFrame(paint)
+        })
+      } else {
+        paint()
+      }
+    }
+
+    // Post-paint batch: the layout-dependent + lazy work that needn't block the
+    // first paint. Runs one frame after innerHTML so the doc is already on screen.
+    const finishRender = () => {
+      if (destroyed) return
+      applyMultilineFlags()
+      Object.keys(filterStateRef.current).forEach((ti) => applyFilter(parseInt(ti)))
+      reportFilter()
+      if (embedObserver) embedObserver.disconnect() // drop stale observations from the old DOM
+      observeEmbeds()
+    }
+
+    // Tag multi-line blocks so the edit button pins to the top-right; single-line
+    // blocks keep it vertically centered. Primary signal is the source line span; a
+    // height check also catches a long single line that wraps. Two phases — read all
+    // layout first, THEN write all classes — so writes don't force a reflow on the
+    // next read. The font size is uniform across the writing area, so read it ONCE
+    // (not getComputedStyle per block — that per-block style recalc was a chunk of
+    // the startup stall on docs with many short blocks).
+    const applyMultilineFlags = () => {
+      const elByBi = new Map()
+      host.querySelectorAll('.km-block').forEach((el) => {
+        const bi = el.getAttribute('data-bi')
+        if (bi != null) elByBi.set(Number(bi), el)
+      })
+      const baseFs = parseFloat(getComputedStyle(host).fontSize) || 16
+      const pending = []
+      blocksRef.current.forEach((b, bi) => {
         if (b.type === 'table') return
-        const bl = host.querySelector('.km-block[data-bi="' + bi + '"]')
+        const bl = elByBi.get(bi)
         if (!bl) return
         let multi = b.end > b.start
         if (!multi) {
           const content = Array.from(bl.children).find((c) => !c.classList.contains('km-src-edit'))
-          if (content) {
-            const fs = parseFloat(getComputedStyle(content).fontSize) || 16
-            multi = content.offsetHeight > fs * 2.2
-          }
+          if (content) multi = content.offsetHeight > baseFs * 2.2
         }
-        bl.classList.toggle('km-multiline', multi)
+        pending.push([bl, multi])
       })
-      Object.keys(filterStateRef.current).forEach((ti) => applyFilter(parseInt(ti)))
-      pushOutline()
-      reportFilter()
+      pending.forEach(([bl, multi]) => bl.classList.toggle('km-multiline', multi))
+    }
+    // Single-block variant for scoped restores (one getComputedStyle is fine).
+    const applyMultilineForBlock = (bl, b) => {
+      if (!bl || b.type === 'table') return
+      let multi = b.end > b.start
+      if (!multi) {
+        const content = Array.from(bl.children).find((c) => !c.classList.contains('km-src-edit'))
+        if (content) {
+          const fs = parseFloat(getComputedStyle(bl).fontSize) || 16
+          multi = content.offsetHeight > fs * 2.2
+        }
+      }
+      bl.classList.toggle('km-multiline', multi)
+    }
+
+    // ── embeds (mermaid / KaTeX), rendered only when scrolled near view ──
+    // renderDoc leaves placeholders; ```mermaid → diagram (async, cached, shared
+    // with the rich editor) and $$…$$ → KaTeX. Rendering every diagram on mount was
+    // a heavy synchronous chunk on diagram-heavy docs, so an IntersectionObserver
+    // defers each one until it's about to scroll into view. `host.contains(el)`
+    // guards a late async result whose element a newer re-render already replaced.
+    const renderMermaidEl = (el) => {
+      const T = tRef.current
+      const code = el.getAttribute('data-code') || ''
+      const cached = peekMermaidSvg(code)
+      if (cached && cached.svg) {
+        el.innerHTML = cached.svg
+        return
+      }
+      el.classList.add('hm-mermaid-hint')
+      el.textContent = T('mermaid.rendering')
+      getMermaidSvg(code).then((res) => {
+        if (destroyed || !host.contains(el)) return
+        el.classList.remove('hm-mermaid-hint')
+        if (res && res.svg) {
+          el.innerHTML = res.svg
+        } else {
+          el.classList.add('hm-mermaid-error')
+          el.textContent = T('mermaid.error') + ' ' + ((res && res.error) || '')
+        }
+      })
+    }
+    const getKatex = () => {
+      if (!katexPromise) {
+        // KaTeX styles ship with the Crepe theme, which only loads when the rich
+        // editor mounts — a keep-only session needs the stylesheet pulled in here.
+        import('katex/dist/katex.min.css').catch(() => {})
+        katexPromise = import('katex')
+          .then((m) => m.default || m)
+          .catch(() => null)
+      }
+      return katexPromise
+    }
+    const renderMathEl = (el) => {
+      getKatex().then((katex) => {
+        if (!katex || destroyed || !host.contains(el)) return
+        const tex = el.getAttribute('data-tex') || ''
+        try {
+          katex.render(tex, el, { displayMode: true, throwOnError: false })
+        } catch (e) {
+          el.classList.add('hm-mermaid-error')
+          el.textContent = String((e && e.message) || e)
+        }
+      })
+    }
+    const ensureEmbedObserver = () => {
+      if (!embedObserver) {
+        embedObserver = new IntersectionObserver(
+          (entries, obs) => {
+            entries.forEach((e) => {
+              if (!e.isIntersecting) return
+              obs.unobserve(e.target)
+              if (e.target.classList.contains('km-mermaid')) renderMermaidEl(e.target)
+              else renderMathEl(e.target)
+            })
+          },
+          { root: host.closest('.editor-scroll') || null, rootMargin: '400px' }
+        )
+      }
+      return embedObserver
+    }
+    const observeEmbed = (el) => {
+      // An already-rendered (cache hit) diagram paints immediately — no need to wait
+      // for it to scroll into view or to flash the "rendering…" hint.
+      if (el.classList.contains('km-mermaid')) {
+        const cached = peekMermaidSvg(el.getAttribute('data-code') || '')
+        if (cached && cached.svg) {
+          el.innerHTML = cached.svg
+          return
+        }
+      }
+      ensureEmbedObserver().observe(el)
+    }
+    const observeEmbeds = (root) => {
+      ;(root || host).querySelectorAll('.km-mermaid, .km-math').forEach(observeEmbed)
     }
 
     // Tell the parent how many rows survive the active filters (status bar). Only
@@ -130,91 +316,80 @@ export default function KeepEditor({ initialContent, onChange, onReady, onOutlin
       onFilterChangeRef.current(anyActive ? { shown, total } : null)
     }
 
-    // ── table cell editing: rewrite only that one cell on that one raw line ──
-    const startCellEdit = (td) => {
-      if (activeEditRef.current) return
-      const raw = td.getAttribute('data-raw') || ''
-      const multi = raw.includes('<br>')
-      const input = document.createElement(multi ? 'textarea' : 'input')
-      input.className = 'km-cell-input'
-      input.value = multi ? raw.replace(/<br\s*\/?>/gi, '\n') : raw
-      td.innerHTML = ''
-      td.appendChild(input)
-      input.focus()
-      input.select?.()
-      activeEditRef.current = { td, raw }
-      input.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter' && !e.shiftKey && !multi) {
-          e.preventDefault()
-          commitCellEdit()
-        } else if (e.key === 'Escape') {
-          e.preventDefault()
-          cancelCellEdit()
-        }
-      })
-      input.addEventListener('blur', () =>
-        setTimeout(() => {
-          if (activeEditRef.current && activeEditRef.current.td === td) commitCellEdit()
-        }, 120)
+    // ── table cell editing: an enlarged floating editor anchored to the cell ──
+    // Rewrites only that one cell on that one raw line on commit. The popover is
+    // position:fixed but re-anchored to the cell on scroll/resize so it tracks the
+    // cell (instead of drifting over other content) — a roomy textarea for long
+    // cells, replacing the cramped single-line input that lived inside the <td>.
+    const closeCellPop = () => {
+      if (activeCellPopRef.current) {
+        activeCellPopRef.current.pop.remove()
+        activeCellPopRef.current = null
+      }
+    }
+    // Re-place the open editor under its cell; hide it while the cell is scrolled
+    // out of the editor's viewport so it never floats over unrelated content.
+    const repositionCellPop = () => {
+      const cur = activeCellPopRef.current
+      if (!cur) return
+      const { pop, td } = cur
+      const r = td.getBoundingClientRect()
+      const pw = pop.offsetWidth || 360
+      const ph = pop.offsetHeight || 160
+      const left = Math.max(8, Math.min(r.left, window.innerWidth - pw - 8))
+      let top = r.bottom + 6
+      if (top + ph > window.innerHeight - 8) top = Math.max(8, r.top - ph - 6)
+      pop.style.left = left + 'px'
+      pop.style.top = top + 'px'
+      const sc = host.closest('.editor-scroll')
+      if (sc) {
+        const sr = sc.getBoundingClientRect()
+        pop.style.visibility = r.bottom < sr.top || r.top > sr.bottom ? 'hidden' : 'visible'
+      }
+    }
+    const commitCellPop = () => {
+      const cur = activeCellPopRef.current
+      if (!cur) return
+      const ta = cur.pop.querySelector('textarea')
+      const val = ta ? ta.value.replace(/\n/g, '<br>') : cur.raw
+      const td = cur.td
+      closeCellPop()
+      if (val === cur.raw) return
+      rawLinesRef.current[cur.lineIdx] = replaceCellInLine(
+        rawLinesRef.current[cur.lineIdx],
+        cur.colIdx,
+        val
       )
-    }
-    const cancelCellEdit = () => {
-      const cur = activeEditRef.current
-      if (!cur) return
-      activeEditRef.current = null
-      cur.td.innerHTML = inline(cur.raw)
-    }
-    const commitCellEdit = () => {
-      const cur = activeEditRef.current
-      if (!cur) return
-      const { td, raw } = cur
-      const input = td.querySelector('.km-cell-input')
-      activeEditRef.current = null
-      if (!input) {
-        td.innerHTML = inline(raw)
-        return
-      }
-      let val = input.value
-      if (input.tagName === 'TEXTAREA') val = val.replace(/\n/g, '<br>')
-      if (val === raw) {
-        td.innerHTML = inline(raw)
-        return
-      }
-      const lineIdx = parseInt(td.getAttribute('data-line'))
-      const colIdx = parseInt(td.getAttribute('data-ci'))
-      rawLinesRef.current[lineIdx] = replaceCellInLine(rawLinesRef.current[lineIdx], colIdx, val)
+      // Keep the \r-stripped view in sync for this one line (block source edits read it).
+      const rl = rawLinesRef.current[cur.lineIdx]
+      viewLinesRef.current[cur.lineIdx] = rl.endsWith('\r') ? rl.slice(0, -1) : rl
       emitChange()
-      rerender()
+      // Scoped DOM update: a cell edit changes exactly one cell and shifts no line or
+      // block index, so repaint just this <td>/<th> instead of rebuilding the whole
+      // document. (A full rerender of a 2000-row table for one cell was seconds of
+      // jank.) A header cell keeps its filter ▼, so patch only its content span.
+      if (td && host.contains(td)) {
+        td.setAttribute('data-raw', val)
+        if (td.tagName === 'TH') {
+          const span = td.querySelector('.km-th-content')
+          if (span) span.innerHTML = inline(val)
+        } else {
+          td.innerHTML = inline(val)
+        }
+      } else {
+        rerender() // cell somehow detached — fall back to a full re-render
+      }
     }
-
-    // ── block "edit source": swap a non-table block's raw lines via a textarea ──
-    const startBlockEdit = (bi) => {
-      const b = blocksRef.current[bi]
-      if (!b) return
-      const blockDiv = host.querySelector('.km-block[data-bi="' + bi + '"]')
-      if (!blockDiv) return
-      const raw = viewLinesRef.current.slice(b.start, b.end + 1).join('\n')
-      const ta = document.createElement('textarea')
-      ta.className = 'km-src-editor'
-      ta.value = raw
-      ta.rows = Math.min(20, raw.split('\n').length + 1)
-      const act = document.createElement('div')
-      act.className = 'km-src-actions'
-      const ok = document.createElement('button')
-      ok.type = 'button'
-      ok.className = 'ok'
-      ok.textContent = tRef.current('edit.confirm')
-      const cancel = document.createElement('button')
-      cancel.type = 'button'
-      cancel.textContent = tRef.current('edit.cancel')
-      act.appendChild(ok)
-      act.appendChild(cancel)
-      blockDiv.innerHTML = ''
-      blockDiv.appendChild(ta)
-      blockDiv.appendChild(act)
-      ta.focus()
-      cancel.onclick = () => rerender()
-      ok.onclick = () => {
+    // ── one edit bar at a time ──
+    // Close the open block source editor, optionally committing it. Cancel and
+    // commit both re-render (cancel must rebuild the block whose innerHTML we
+    // replaced with the textarea); only commit rewrites rawLines first.
+    const closeBlockEdit = (commit) => {
+      const cur = activeBlockEditRef.current
+      if (!cur) return
+      activeBlockEditRef.current = null
+      if (commit) {
+        const { ta, b } = cur
         // Inherit this block's original EOL style (\r presence) so untouched
         // bytes never shift; every replacement line follows the same convention.
         const eol = (rawLinesRef.current[b.start] || '').endsWith('\r') ? '\r' : ''
@@ -223,9 +398,234 @@ export default function KeepEditor({ initialContent, onChange, onReady, onOutlin
           .map((l) => (l.endsWith('\r') ? l.slice(0, -1) : l) + eol)
         rawLinesRef.current.splice(b.start, b.end - b.start + 1, ...newLines)
         emitChange()
+        rerender() // line count may change → indices shift → rebuild the document
+        return
+      }
+      // Clean cancel: nothing changed. Restore just THIS block's DOM (its innerHTML
+      // was swapped for the textarea) instead of re-rendering — and re-serializing —
+      // the whole document. (Block edits are only on non-table blocks; a no-op cancel
+      // on a huge-table doc was the reported 2–3s stall.)
+      const b = cur.b
+      const bi = b.bi != null ? b.bi : blocksRef.current.indexOf(b)
+      const blockDiv = bi >= 0 ? host.querySelector('.km-block[data-bi="' + bi + '"]') : null
+      if (blockDiv) {
+        blockDiv.innerHTML = renderBlockInner(b, bi, viewLinesRef.current, {
+          srcEditLabel: tRef.current('keep.editSource'),
+          filterState: filterStateRef.current,
+          baseDir: dirOf(docPathRef.current)
+        })
+        applyMultilineForBlock(blockDiv, b)
+        observeEmbeds(blockDiv) // a restored ```mermaid / $$ block re-arms its embed
+      } else {
         rerender()
       }
     }
+    // Custom "save changes?" modal — deliberately NOT window.confirm. A native
+    // dialog leaves the webContents unable to receive keyboard input after it
+    // returns, so a textarea opened right after it is dead until reload. This is
+    // plain DOM (same channel as the cell pop / context menu), styled like
+    // RenameModal. Save = primary (Enter), Esc / click-away = cancel (keep editing).
+    const closeConfirm = () => {
+      if (activeConfirmRef.current) {
+        activeConfirmRef.current.remove()
+        activeConfirmRef.current = null
+      }
+    }
+    const showConfirm = (message, { onSave, onDiscard }) => {
+      closeConfirm()
+      const T = tRef.current
+      const wrap = document.createElement('div')
+      const backdrop = document.createElement('div')
+      backdrop.className = 'menu-backdrop'
+      backdrop.style.zIndex = '1400' // above the cell pop / table menu (1300)
+      const box = document.createElement('div')
+      box.className = 'hm-rename-modal'
+      box.style.zIndex = '1401'
+      // .hm-rename-modal centers via `transform: translateX(-50%)`, but its default
+      // `menuFadeIn` animation also sets `transform: scale(...)`, which overrides the
+      // centering for the animation's duration then snaps back → a sideways jump.
+      // Use an opacity-only fade so the centering transform is never clobbered.
+      box.style.animation = 'fadeIn 0.12s var(--ease-out)'
+      box.setAttribute('role', 'dialog')
+      box.setAttribute('aria-modal', 'true')
+      const title = document.createElement('div')
+      title.className = 'hm-rename-title'
+      title.textContent = message
+      const actions = document.createElement('div')
+      actions.className = 'hm-rename-actions'
+      const discard = document.createElement('button')
+      discard.type = 'button'
+      discard.textContent = T('keep.editDiscardBtn')
+      const cancel = document.createElement('button')
+      cancel.type = 'button'
+      cancel.textContent = T('edit.cancel')
+      const save = document.createElement('button')
+      save.type = 'button'
+      save.className = 'primary'
+      save.textContent = T('keep.editSaveBtn')
+      // Order: save (primary) → discard → cancel.
+      actions.append(save, discard, cancel)
+      box.append(title, actions)
+      wrap.append(backdrop, box)
+      document.body.appendChild(wrap)
+      activeConfirmRef.current = wrap
+      const done = (fn) => () => {
+        closeConfirm()
+        fn?.()
+      }
+      backdrop.onclick = done(null) // click-away = cancel (do nothing, keep editing)
+      cancel.onclick = done(null)
+      discard.onclick = done(onDiscard)
+      save.onclick = done(onSave)
+      // preventScroll: a plain focus() would scrollIntoView the button, scrolling
+      // the editor behind it and toggling a scrollbar → the centered modal jumps.
+      save.focus({ preventScroll: true })
+    }
+    // Enforce "one edit bar": close whatever editor is open, then build the new
+    // one. A clean editor closes silently; a dirty one prompts (save / discard /
+    // cancel). Closing re-renders the doc (except a clean cell pop), so the build
+    // re-resolves any DOM it captured — see the open helpers.
+    const openAfterClose = (build) => {
+      const cell = activeCellPopRef.current
+      const blk = activeBlockEditRef.current
+      if (!cell && !blk) return build()
+      const msg = tRef.current('confirm.keepEditSave')
+      if (cell) {
+        const ta = cell.pop.querySelector('textarea')
+        const val = ta ? ta.value.replace(/\n/g, '<br>') : cell.raw
+        if (val === cell.raw) {
+          closeCellPop() // clean: no re-render, captured td still valid
+          return build()
+        }
+        return showConfirm(msg, {
+          onSave: () => {
+            commitCellPop()
+            build()
+          },
+          onDiscard: () => {
+            closeCellPop()
+            build()
+          }
+        })
+      }
+      if (blk.ta.value === blk.originalRaw) {
+        closeBlockEdit(false) // clean discard still re-renders to restore the block
+        return build()
+      }
+      return showConfirm(msg, {
+        onSave: () => {
+          closeBlockEdit(true)
+          build()
+        },
+        onDiscard: () => {
+          closeBlockEdit(false)
+          build()
+        }
+      })
+    }
+
+    const openCellPop = (td) =>
+      openAfterClose(() => {
+        if (destroyed) return
+        // A commit re-rendered the doc → the original cell is detached; re-resolve.
+        // Match both <td> (body) and <th> (header) — headers are editable too.
+        if (!host.contains(td)) {
+          const lineAttr = td.getAttribute('data-line')
+          const ciAttr = td.getAttribute('data-ci')
+          const sel =
+            'td[data-line="' + lineAttr + '"][data-ci="' + ciAttr + '"],' +
+            'th[data-line="' + lineAttr + '"][data-ci="' + ciAttr + '"]'
+          td = host.querySelector(sel)
+          if (!td) return
+        }
+        const T = tRef.current
+        const raw = td.getAttribute('data-raw') || ''
+        const lineIdx = parseInt(td.getAttribute('data-line'))
+        const colIdx = parseInt(td.getAttribute('data-ci'))
+        const pop = document.createElement('div')
+        pop.className = 'km-cell-pop'
+        const ta = document.createElement('textarea')
+        ta.className = 'km-cp-input'
+        ta.value = raw.replace(/<br\s*\/?>/gi, '\n')
+        const act = document.createElement('div')
+        act.className = 'km-cp-actions'
+        const ok = document.createElement('button')
+        ok.type = 'button'
+        ok.className = 'ok'
+        ok.textContent = T('keep.editConfirmKey')
+        const cancel = document.createElement('button')
+        cancel.type = 'button'
+        cancel.textContent = T('edit.cancel')
+        // Confirm first, cancel after — same button order as the block source editor.
+        act.appendChild(ok)
+        act.appendChild(cancel)
+        pop.appendChild(ta)
+        pop.appendChild(act)
+        document.body.appendChild(pop)
+        activeCellPopRef.current = { pop, td, raw, lineIdx, colIdx }
+        repositionCellPop() // anchor below the cell, flip/clamp to stay on screen
+        ta.focus()
+        ta.select()
+        // Ctrl/Cmd+Enter commits; a plain Enter inserts a newline (cells can be
+        // multi-line, serialized back as <br>). Esc cancels.
+        ta.addEventListener('keydown', (e) => {
+          if (e.key === 'Escape') {
+            e.preventDefault()
+            closeCellPop()
+          } else if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+            e.preventDefault()
+            commitCellPop()
+          }
+        })
+        cancel.onclick = () => closeCellPop()
+        ok.onclick = () => commitCellPop()
+      })
+
+    // ── block "edit source": swap a non-table block's raw lines via a textarea ──
+    const startBlockEdit = (bi) =>
+      openAfterClose(() => {
+        // only one edit bar at a time; openAfterClose re-renders on a save, so
+        // resolve the block fresh here (not before the close).
+        if (destroyed) return
+        const b = blocksRef.current[bi]
+        if (!b) return
+        const blockDiv = host.querySelector('.km-block[data-bi="' + bi + '"]')
+        if (!blockDiv) return
+        const raw = viewLinesRef.current.slice(b.start, b.end + 1).join('\n')
+        const ta = document.createElement('textarea')
+        ta.className = 'km-src-editor'
+        ta.value = raw
+        ta.rows = Math.min(20, raw.split('\n').length + 1)
+        const act = document.createElement('div')
+        act.className = 'km-src-actions'
+        const ok = document.createElement('button')
+        ok.type = 'button'
+        ok.className = 'ok'
+        ok.textContent = tRef.current('keep.editConfirmKey')
+        const cancel = document.createElement('button')
+        cancel.type = 'button'
+        cancel.textContent = tRef.current('edit.cancel')
+        act.appendChild(ok)
+        act.appendChild(cancel)
+        blockDiv.innerHTML = ''
+        blockDiv.appendChild(ta)
+        blockDiv.appendChild(act)
+        ta.focus()
+        activeBlockEditRef.current = { ta, b, originalRaw: raw }
+        // Ctrl/Cmd+Enter commits; a plain Enter stays a newline (block source is
+        // multi-line). Esc cancels.
+        ta.addEventListener('keydown', (e) => {
+          if (e.key === 'Escape') {
+            e.preventDefault()
+            closeBlockEdit(false)
+          } else if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+            e.preventDefault()
+            closeBlockEdit(true)
+          }
+        })
+        cancel.onclick = () => closeBlockEdit(false)
+        ok.onclick = () => closeBlockEdit(true)
+      })
 
     // ── structural table edits: add / remove rows & columns ──
     // Each rewrites only lines within the table's range, then re-parses. The
@@ -283,28 +683,9 @@ export default function KeepEditor({ initialContent, onChange, onReady, onOutlin
         activeMenuRef.current = null
       }
     }
-    const openTableMenu = (x, y, ti, ri, ci, isHeader) => {
+    // Build a context menu from an items array ({label, fn, disabled} | 'sep').
+    const openMenu = (x, y, items) => {
       closeMenu()
-      const T = tRef.current
-      const b = getTable(ti)
-      const items = []
-      if (isHeader) {
-        items.push({ label: T('keep.rowInsertFirst'), fn: () => doInsertRow(ti, ri, 'first') })
-      } else {
-        items.push({ label: T('keep.rowInsertAbove'), fn: () => doInsertRow(ti, ri, 'above') })
-        items.push({ label: T('keep.rowInsertBelow'), fn: () => doInsertRow(ti, ri, 'below') })
-      }
-      items.push('sep')
-      items.push({ label: T('keep.colInsertLeft'), fn: () => doInsertColumn(ti, ci) })
-      items.push({ label: T('keep.colInsertRight'), fn: () => doInsertColumn(ti, ci + 1) })
-      items.push('sep')
-      if (!isHeader) items.push({ label: T('keep.rowDelete'), fn: () => doDeleteRow(ti, ri) })
-      items.push({
-        label: T('keep.colDelete'),
-        fn: () => doDeleteColumn(ti, ci),
-        disabled: !b || b.headers.length <= 1
-      })
-
       const menu = document.createElement('div')
       menu.className = 'km-table-menu'
       items.forEach((it) => {
@@ -331,6 +712,140 @@ export default function KeepEditor({ initialContent, onChange, onReady, onOutlin
       menu.style.left = Math.min(x, window.innerWidth - mw - 8) + 'px'
       menu.style.top = Math.min(y, window.innerHeight - mh - 8) + 'px'
       activeMenuRef.current = menu
+    }
+    // Table-specific row/column entries, appended to a menu's items array.
+    const buildTableItems = (items, ti, ri, ci, isHeader) => {
+      const T = tRef.current
+      const b = getTable(ti)
+      if (isHeader) {
+        items.push({ label: T('keep.rowInsertFirst'), fn: () => doInsertRow(ti, ri, 'first') })
+      } else {
+        items.push({ label: T('keep.rowInsertAbove'), fn: () => doInsertRow(ti, ri, 'above') })
+        items.push({ label: T('keep.rowInsertBelow'), fn: () => doInsertRow(ti, ri, 'below') })
+      }
+      items.push('sep')
+      items.push({ label: T('keep.colInsertLeft'), fn: () => doInsertColumn(ti, ci) })
+      items.push({ label: T('keep.colInsertRight'), fn: () => doInsertColumn(ti, ci + 1) })
+      items.push('sep')
+      if (!isHeader) items.push({ label: T('keep.rowDelete'), fn: () => doDeleteRow(ti, ri) })
+      items.push({
+        label: T('keep.colDelete'),
+        fn: () => doDeleteColumn(ti, ci),
+        disabled: !b || b.headers.length <= 1
+      })
+    }
+
+    // ── rich-text copy & "open source here" (general right-click / Ctrl+C) ──
+    // The single source of truth is rawLines; "open source here" hands the parent
+    // a 0-based source line so it can flip global source mode and place the caret.
+    const lineForBlock = (block) => {
+      if (!block) return 0
+      const bi = parseInt(block.getAttribute('data-bi'))
+      const b = blocksRef.current[bi]
+      return b ? b.start : 0
+    }
+    const blockOfNode = (node) => {
+      const el = node && (node.nodeType === 1 ? node : node.parentElement)
+      return el && host.contains(el) ? el.closest('.km-block') : null
+    }
+    const openSourceAt = (lineIdx) => {
+      closeMenu()
+      onOpenSourceRef.current?.(lineIdx)
+    }
+    // Low-level: put a rich (html) + plain payload on the clipboard.
+    const writeClipboard = (html, plain) => {
+      const text = plain || ''
+      try {
+        navigator.clipboard
+          .write([
+            new ClipboardItem({
+              'text/html': new Blob([html], { type: 'text/html' }),
+              'text/plain': new Blob([text], { type: 'text/plain' })
+            })
+          ])
+          .catch(() => navigator.clipboard.writeText(text).catch(() => {}))
+      } catch {
+        navigator.clipboard?.writeText?.(text).catch(() => {})
+      }
+    }
+    // Clone a node, drop editor-only chrome, inline styles → { html, text }.
+    const richHtml = (node) => {
+      const wrap = document.createElement('div')
+      wrap.appendChild(node)
+      wrap.querySelectorAll('.km-src-edit, .km-filter-btn, button').forEach((el) => el.remove())
+      inlineRichStyles(wrap)
+      return { html: `<div style="${COPY_WRAP}">${wrap.innerHTML}</div>`, text: wrap.textContent || '' }
+    }
+    const writeRich = (node, plain) => {
+      const r = richHtml(node)
+      writeClipboard(r.html, plain != null ? plain : r.text)
+    }
+    const copyElement = (el) => writeRich(el.cloneNode(true))
+    const copySelection = (sel) => {
+      try {
+        writeRich(sel.getRangeAt(0).cloneContents(), sel.toString())
+      } catch {
+        /* nothing meaningful selected */
+      }
+    }
+    // ── table copy: cell / row / column / whole table ──
+    // Plain text is TSV so it lands in a spreadsheet grid; the HTML carries a real
+    // <table> so Excel/Word paste keeps the grid (not one crammed cell).
+    const cellPlain = (c) => {
+      if (!c) return ''
+      const cl = c.cloneNode(true)
+      cl.querySelectorAll('.km-filter-btn').forEach((el) => el.remove())
+      cl.querySelectorAll('br').forEach((br) => br.replaceWith(' '))
+      return (cl.textContent || '').trim()
+    }
+    const wrapRows = (rows) => {
+      // rows: array of <tr> clones → a standalone <table> for rich paste.
+      const t = document.createElement('table')
+      const tb = document.createElement('tbody')
+      rows.forEach((tr) => tb.appendChild(tr))
+      t.appendChild(tb)
+      return t
+    }
+    const copyTable = (table) => {
+      const rows = [...table.querySelectorAll('tr')]
+      const tsv = rows.map((tr) => [...tr.children].map(cellPlain).join('\t')).join('\n')
+      writeRich(table.cloneNode(true), tsv)
+    }
+    const copyRow = (tr) => {
+      const tsv = [...tr.children].map(cellPlain).join('\t')
+      writeRich(wrapRows([tr.cloneNode(true)]), tsv)
+    }
+    const copyColumn = (table, ci) => {
+      const rows = [...table.querySelectorAll('tr')]
+      const tsv = rows.map((tr) => cellPlain(tr.children[ci])).join('\n')
+      const colRows = rows
+        .map((tr) => tr.children[ci])
+        .filter(Boolean)
+        .map((c) => {
+          const tr = document.createElement('tr')
+          tr.appendChild(c.cloneNode(true))
+          return tr
+        })
+      writeRich(wrapRows(colRows), tsv)
+    }
+    // Ctrl/Cmd+C over a drag selection → rich HTML, not just plain text.
+    const onCopy = (e) => {
+      if (activeCellPopRef.current) return // editing a cell: let the textarea copy
+      const sel = window.getSelection()
+      if (!sel || sel.isCollapsed || !host.contains(sel.anchorNode)) return
+      try {
+        const wrap = document.createElement('div')
+        wrap.appendChild(sel.getRangeAt(0).cloneContents())
+        wrap.querySelectorAll('.km-src-edit, .km-filter-btn, button').forEach((el) => el.remove())
+        inlineRichStyles(wrap)
+        const plain = sel.toString()
+        if (!wrap.innerHTML.trim() && !plain) return
+        e.clipboardData.setData('text/html', `<div style="${COPY_WRAP}">${wrap.innerHTML}</div>`)
+        e.clipboardData.setData('text/plain', plain)
+        e.preventDefault()
+      } catch {
+        /* fall back to default copy */
+      }
     }
 
     // ── Excel-style column filter (display only — never touches rawLines) ──
@@ -368,10 +883,11 @@ export default function KeepEditor({ initialContent, onChange, onReady, onOutlin
         escapeHtmlLocal(tRef.current('keep.selectNone')) +
         '</a></div>' +
         '<div class="km-fp-list"></div>' +
-        '<div class="km-fp-actions"><button type="button" class="cancel">' +
-        escapeHtmlLocal(tRef.current('edit.cancel')) +
-        '</button><button type="button" class="ok">' +
+        // Confirm first, cancel after — matches the cell / block source editors.
+        '<div class="km-fp-actions"><button type="button" class="ok">' +
         escapeHtmlLocal(tRef.current('edit.confirm')) +
+        '</button><button type="button" class="cancel">' +
+        escapeHtmlLocal(tRef.current('edit.cancel')) +
         '</button></div>'
       const list = pop.querySelector('.km-fp-list')
       const sorted = [...values].sort((a, b) => a.localeCompare(b, 'ja'))
@@ -414,7 +930,14 @@ export default function KeepEditor({ initialContent, onChange, onReady, onOutlin
         if (ex.size > 0) filterStateRef.current[ti][ci] = ex
         else delete filterStateRef.current[ti][ci]
         closePop()
-        rerender()
+        // A filter only toggles row visibility — it never touches rawLines or block
+        // structure. Apply it directly instead of a full re-render (rebuilding a
+        // huge table just to hide a few rows was needless seconds of work), and sync
+        // the ▼ button's active state since renderTable didn't re-run to set it.
+        applyFilter(ti)
+        reportFilter()
+        const cols = filterStateRef.current[ti]
+        btn.classList.toggle('active', !!(cols && cols[ci] && cols[ci].size > 0))
       }
       document.body.appendChild(pop)
       const r = btn.getBoundingClientRect()
@@ -439,11 +962,35 @@ export default function KeepEditor({ initialContent, onChange, onReady, onOutlin
       })
     }
 
+    // Classify a clicked link: external → system browser; in-app doc link or
+    // pure #anchor → hand the (path, anchor, fromPath) to the parent so it opens
+    // the markdown tab and jumps. Other schemes (file:, etc.) open externally.
+    const activateLink = (href) => {
+      if (/^(https?:|mailto:)/i.test(href)) {
+        window.api?.openExternal?.(href)
+        return
+      }
+      const hashIdx = href.indexOf('#')
+      const rawPath = hashIdx >= 0 ? href.slice(0, hashIdx) : href
+      const anchor = hashIdx >= 0 ? safeDecode(href.slice(hashIdx + 1)) : ''
+      const path = safeDecode(rawPath)
+      if (/^[a-z][a-z\d+.-]*:/i.test(path)) {
+        // a non-http scheme with a path (file:, vscode:, …) — let the OS handle it
+        window.api?.openExternal?.(href)
+        return
+      }
+      onOpenDocLinkRef.current?.(path, anchor, docPathRef.current)
+    }
+
     // ── event delegation on the host container ──
+    let linkTimerRef = null // pending single-click link-open (cancelled by dblclick)
     const onDblClick = (e) => {
-      const td = e.target.closest('td')
-      if (td && host.contains(td)) {
-        startCellEdit(td)
+      clearTimeout(linkTimerRef) // a double-click is an edit, not a link navigation
+      // Edit any table cell — body (<td>) or header (<th>). The filter ▼ lives in
+      // the header; a double-click on it is a filter toggle, not a cell edit.
+      const cell = e.target.closest('td, th')
+      if (cell && host.contains(cell) && !e.target.closest('.km-filter-btn')) {
+        openCellPop(cell)
         return
       }
       // Double-clicking the highlighted area of an editable (non-table) block
@@ -456,6 +1003,20 @@ export default function KeepEditor({ initialContent, onChange, onReady, onOutlin
       }
     }
     const onClick = (e) => {
+      // A plain click on a link opens it (keep mode is a read-only preview). The
+      // open is deferred briefly and cancelled by a following dblclick, so
+      // double-clicking a cell/block that contains a link still enters edit. Skip
+      // when a drag selection is active (don't navigate on select-ends-on-link).
+      const a = e.target.closest('a')
+      if (a && host.contains(a) && !e.shiftKey && (window.getSelection()?.isCollapsed ?? true)) {
+        const href = a.getAttribute('href')
+        if (href && href !== '#') {
+          e.preventDefault()
+          clearTimeout(linkTimerRef)
+          linkTimerRef = setTimeout(() => activateLink(href), 230)
+          return
+        }
+      }
       const se = e.target.closest('.km-src-edit')
       if (se) {
         startBlockEdit(parseInt(se.getAttribute('data-bi')))
@@ -469,21 +1030,54 @@ export default function KeepEditor({ initialContent, onChange, onReady, onOutlin
         else openFilterPop(fb)
       }
     }
-    // Right-click on a table cell → row/column add-remove menu.
+    // Right-click anywhere in the document → context menu. A drag selection wins
+    // (copy selection / open source at its start); else a table cell shows copy +
+    // open-source + its row/column ops; else a plain block shows copy + open-source.
     const onContextMenu = (e) => {
-      const cell = e.target.closest('td, th')
-      if (!cell || !host.contains(cell)) return
-      const table = cell.closest('table.km-table')
-      if (!table) return
+      const T = tRef.current
+      const sel = window.getSelection()
+      const hasSel =
+        sel && !sel.isCollapsed && host.contains(sel.anchorNode) && host.contains(sel.focusNode)
+      const items = []
+      if (hasSel) {
+        const line = lineForBlock(blockOfNode(sel.getRangeAt(0).startContainer))
+        items.push({ label: T('keep.copySel'), fn: () => copySelection(sel) })
+        items.push({ label: T('keep.openSource'), fn: () => openSourceAt(line) })
+      } else {
+        const cell = e.target.closest('td, th')
+        if (cell && host.contains(cell)) {
+          const table = cell.closest('table.km-table')
+          if (!table) return
+          const ti = parseInt(table.getAttribute('data-ti'))
+          const ci = parseInt(cell.getAttribute('data-ci'))
+          const isHeader = cell.tagName === 'TH'
+          const tr = cell.closest('tr')
+          const ri = isHeader ? -1 : parseInt(tr.getAttribute('data-ri'))
+          const line = parseInt(cell.getAttribute('data-line'))
+          items.push({ label: T('keep.copyCell'), fn: () => copyElement(cell) })
+          items.push({ label: T('keep.copyRow'), fn: () => copyRow(tr) })
+          items.push({ label: T('keep.copyCol'), fn: () => copyColumn(table, ci) })
+          items.push({ label: T('keep.copyTable'), fn: () => copyTable(table) })
+          if (Number.isFinite(line))
+            items.push({ label: T('keep.openSource'), fn: () => openSourceAt(line) })
+          items.push('sep')
+          buildTableItems(items, ti, ri, ci, isHeader)
+        } else {
+          const block = e.target.closest('.km-block')
+          if (!block || !host.contains(block)) return
+          const line = lineForBlock(block)
+          items.push({ label: T('keep.copy'), fn: () => copyElement(block) })
+          items.push({ label: T('keep.openSource'), fn: () => openSourceAt(line) })
+        }
+      }
+      if (!items.length) return
       e.preventDefault()
-      const ti = parseInt(table.getAttribute('data-ti'))
-      const ci = parseInt(cell.getAttribute('data-ci'))
-      const isHeader = cell.tagName === 'TH'
-      const tr = cell.closest('tr')
-      const ri = isHeader ? -1 : parseInt(tr.getAttribute('data-ri'))
-      openTableMenu(e.clientX, e.clientY, ti, ri, ci, isHeader)
+      openMenu(e.clientX, e.clientY, items)
     }
-    // Close the filter dropdown / table menu on an outside click.
+    // Close the filter dropdown / context menu on an outside click. A cell editor
+    // is NOT auto-committed here: it stays open like a block source editor and is
+    // only closed via its own buttons/Esc, or with a save prompt when another
+    // editor opens (openAfterClose) — one consistent "one edit bar" rule.
     const onDocDown = (e) => {
       if (
         activePopRef.current &&
@@ -495,38 +1089,100 @@ export default function KeepEditor({ initialContent, onChange, onReady, onOutlin
       if (activeMenuRef.current && !activeMenuRef.current.contains(e.target)) closeMenu()
     }
     const onEsc = (e) => {
-      if (e.key === 'Escape' && activeMenuRef.current) closeMenu()
+      if (e.key !== 'Escape') return
+      if (activeConfirmRef.current) closeConfirm() // Esc on the modal = cancel
+      else if (activeMenuRef.current) closeMenu()
+    }
+    // Scrolling abandons an open right-click menu (its anchor moved away). The
+    // cell editor stays open on purpose (it may hold unsaved edits) and is
+    // re-anchored to its cell so it tracks the cell instead of drifting.
+    const onScroll = () => {
+      closeMenu()
+      repositionCellPop()
+    }
+    const onResize = () => repositionCellPop()
+
+    // Close every body-level popover at once (a cell editor included — its unsaved
+    // edits are dropped, which beats it floating over an unrelated document).
+    closeFloatingRef.current = () => {
+      closePop()
+      closeMenu()
+      closeConfirm()
+      closeCellPop()
     }
 
     host.addEventListener('dblclick', onDblClick)
     host.addEventListener('click', onClick)
     host.addEventListener('contextmenu', onContextMenu)
+    host.addEventListener('copy', onCopy)
     document.addEventListener('click', onDocDown)
     document.addEventListener('keydown', onEsc)
+    window.addEventListener('scroll', onScroll, true)
+    window.addEventListener('resize', onResize)
 
     rerender()
 
     onReady?.({
       getMarkdown: () => rawLinesRef.current.join('\n'),
-      // PDF export: a clean snapshot without the edit affordances / filter ▼.
-      getDocHTML: () =>
-        renderDoc(rawLinesRef.current, {}, { forExport: true }).html,
+      // PDF export: a clean snapshot without the edit affordances / filter ▼. The
+      // export render leaves mermaid/math as empty placeholders (they fill async in
+      // the live DOM), so copy each already-rendered diagram/formula across by index
+      // — both come from the same rawLines, so the Nth placeholder matches.
+      getDocHTML: () => {
+        const tmp = document.createElement('div')
+        tmp.innerHTML = renderDoc(rawLinesRef.current, {}, { forExport: true, baseDir: dirOf(docPathRef.current) }).html
+        // Embeds now render lazily (only when scrolled near view), so the live host
+        // may not hold a diagram the export needs. Fill mermaid from the shared
+        // session cache first (covers anything ever rendered), then copy the live
+        // DOM by index for whatever the cache misses / for math.
+        tmp.querySelectorAll('.km-mermaid').forEach((el) => {
+          const c = peekMermaidSvg(el.getAttribute('data-code') || '')
+          if (c && c.svg) el.innerHTML = c.svg
+        })
+        const inject = (sel) => {
+          const live = [...host.querySelectorAll(sel)]
+          ;[...tmp.querySelectorAll(sel)].forEach((el, i) => {
+            if (live[i] && live[i].innerHTML) el.innerHTML = live[i].innerHTML
+          })
+        }
+        inject('.km-mermaid')
+        inject('.km-math')
+        return tmp.innerHTML
+      },
       setBlock: () => {} // no block model in keep mode
     })
 
     return () => {
       destroyed = true
+      cancelAfterPaint()
+      if (embedObserver) embedObserver.disconnect()
+      clearTimeout(linkTimerRef)
       closePop()
       closeMenu()
+      closeConfirm()
+      closeCellPop()
+      activeBlockEditRef.current = null // drop block-edit tracking (host is torn down)
       onFilterChangeRef.current?.(null) // drop this tab's filter badge on unmount
       host.removeEventListener('dblclick', onDblClick)
       host.removeEventListener('click', onClick)
       host.removeEventListener('contextmenu', onContextMenu)
+      host.removeEventListener('copy', onCopy)
       document.removeEventListener('click', onDocDown)
       document.removeEventListener('keydown', onEsc)
+      window.removeEventListener('scroll', onScroll, true)
+      window.removeEventListener('resize', onResize)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // When this tab's pane leaves view (sidebar file click, tab switch, split
+  // close), the wrapper goes display:none — but the floating popovers are
+  // appended to document.body, so they'd keep showing over the next document.
+  // Tear them down here. (A still-open block source editor lives inside the
+  // hidden host, so it's hidden with the wrapper; no need to touch it.)
+  useEffect(() => {
+    if (!inView) closeFloatingRef.current?.()
+  }, [inView])
 
   // Hot-swap the static "edit source" labels when the UI language changes. The
   // doc HTML is rendered once on mount (rerender lives in a []-deps effect), so
@@ -544,6 +1200,15 @@ export default function KeepEditor({ initialContent, onChange, onReady, onOutlin
   }, [lang])
 
   return <div className="km-doc" ref={hostRef} />
+}
+
+// Decode a URL component, tolerating malformed escapes (return the input as-is).
+function safeDecode(s) {
+  try {
+    return decodeURIComponent(s)
+  } catch {
+    return s
+  }
 }
 
 // Tiny local escapers (avoid importing if tree-shaking matters; mirror parser).

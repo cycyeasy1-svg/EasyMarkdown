@@ -47,13 +47,8 @@ const api = {
   openExternal: (url) => ipcRenderer.invoke('shell:openExternal', url),
   showInFolder: (path) => ipcRenderer.invoke('shell:showInFolder', path),
 
-  // image host: write the bytes to a temp file, run the user's upload command on
-  // it, and return the URL it prints. Returns { ok, url } or { ok:false, error }.
-  uploadImage: (command, name, bytes) =>
-    ipcRenderer.invoke('image:upload', command, name, bytes),
-
-  // save a pasted/dropped image into the document's assets/ folder (no image
-  // host); returns { ok, path } with a relative path to insert into Markdown.
+  // save a pasted/dropped image into the document's assets/ folder; returns
+  // { ok, path } with a relative path to insert into Markdown.
   saveImage: (docPath, name, bytes) =>
     ipcRenderer.invoke('image:save', docPath, name, bytes),
   // save an image pasted into an UNSAVED doc to the global paste folder; returns
@@ -104,7 +99,6 @@ const api = {
     watch: true,
     windowControls: true,
     pdfExport: true,
-    imageHostExec: true,
     nativeMenus: true,
     externalShell: true,
     revealInFolder: true,
