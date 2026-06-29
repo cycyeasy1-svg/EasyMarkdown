@@ -1,0 +1,591 @@
+/* Keep-mode webview styles. The .km-* rules are ported from the app's
+   src/renderer/src/styles/app.css; the design-token variables (--text, --accent,
+   …) are remapped here to VSCode theme variables so the editor follows the
+   active color theme (light / dark / high-contrast). */
+
+:root {
+  --text: var(--vscode-editor-foreground, #24292f);
+  --text-strong: var(--vscode-editor-foreground, #1f2328);
+  --muted: var(--vscode-descriptionForeground, #57606a);
+  --faint: var(--vscode-disabledForeground, #8c959f);
+  --border: var(--vscode-panel-border, #d0d7de);
+  --border-soft: var(--vscode-widget-border, rgba(140, 149, 159, 0.25));
+  --bg: var(--vscode-editor-background, #ffffff);
+  --bg-editor: var(--vscode-input-background, var(--vscode-editor-background, #ffffff));
+  --bg-elevated: var(--vscode-editorWidget-background, var(--vscode-editor-background, #ffffff));
+  --hover: var(--vscode-list-hoverBackground, rgba(140, 149, 159, 0.12));
+  --hover-elevated: var(--vscode-list-hoverBackground, rgba(140, 149, 159, 0.16));
+  --active: var(--vscode-list-activeSelectionBackground, rgba(140, 149, 159, 0.2));
+  --accent: var(--vscode-focusBorder, #0969da);
+  --accent-strong: var(--vscode-button-background, #0860ca);
+  --accent-soft: var(--vscode-textBlockQuote-background, rgba(9, 105, 218, 0.08));
+  --code-bg: var(--vscode-textCodeBlock-background, rgba(140, 149, 159, 0.12));
+  --code-border: var(--vscode-panel-border, rgba(140, 149, 159, 0.25));
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.08);
+  --shadow-lg: 0 8px 28px rgba(0, 0, 0, 0.18);
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --font-write: var(--vscode-font-family, -apple-system, "Segoe UI", Roboto, sans-serif);
+  --font-mono: var(--vscode-editor-font-family, Consolas, Monaco, monospace);
+  --editor-max-width: 860px;
+  --editor-font-size: 15px;
+  --editor-zoom: 1;
+  /* No app top bar / status bar in the webview — the table height cap is just the
+     viewport minus a small margin. */
+  --topbar-h: 0px;
+  --status-h: 0px;
+}
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  background: var(--bg);
+  color: var(--text);
+}
+
+.editor-scroll {
+  height: 100vh;
+  overflow-y: auto;
+  overflow-anchor: none;
+  position: relative;
+}
+
+/* ── keep-mode content (ported from app.css) ── */
+.km-doc {
+  max-width: var(--editor-max-width, 800px);
+  margin: 0 auto;
+  padding: 16px 60px 60vh;
+  font-size: var(--editor-font-size, 16px);
+  line-height: 1.8;
+  color: var(--text);
+  font-family: var(--font-write);
+  zoom: var(--editor-zoom, 1);
+}
+.km-doc .km-src-edit,
+.km-doc .km-filter-btn {
+  user-select: none;
+}
+.km-empty {
+  color: var(--faint);
+  padding: 40px 0;
+  text-align: center;
+}
+
+.km-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 80px 0;
+  color: var(--faint);
+  font-size: 0.95em;
+}
+.km-spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid var(--border, currentColor);
+  border-top-color: var(--accent, currentColor);
+  border-radius: 50%;
+  animation: km-spin 0.7s linear infinite;
+}
+@keyframes km-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.km-block {
+  position: relative;
+  margin-left: -14px;
+  margin-right: -14px;
+  padding-left: 14px;
+  padding-right: 14px;
+  border-radius: var(--radius-md);
+  transition: background 0.12s var(--ease-out);
+}
+.km-block:has(> .km-src-edit):hover {
+  background: var(--hover);
+}
+.km-block > *:first-child {
+  margin-top: 0;
+}
+.km-doc > .km-block:first-child > :nth-child(2) {
+  margin-top: 0;
+}
+.km-src-edit {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  opacity: 0;
+  transition: opacity 0.15s var(--ease-out);
+  font-size: 11px;
+  padding: 3px 9px;
+  border: 1px solid var(--border);
+  background: var(--bg-elevated);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-sm);
+  cursor: pointer;
+  white-space: nowrap;
+  color: var(--muted);
+  z-index: 3;
+}
+.km-block.km-multiline > .km-src-edit {
+  top: 6px;
+  transform: none;
+}
+.km-src-edit svg {
+  flex: none;
+  opacity: 0.85;
+}
+.km-block:hover > .km-src-edit {
+  opacity: 1;
+}
+.km-src-edit:hover {
+  color: var(--text);
+  background: var(--hover-elevated);
+  border-color: var(--accent);
+}
+.km-src-editor {
+  width: 100%;
+  font-family: var(--font-mono);
+  font-size: 13.5px;
+  border: 2px solid var(--accent);
+  border-radius: var(--radius-md);
+  padding: 10px 12px;
+  resize: vertical;
+  line-height: 1.6;
+  background: var(--bg-editor);
+  color: var(--text);
+}
+.km-src-actions {
+  margin: 6px 0;
+  display: flex;
+  gap: 8px;
+}
+.km-src-actions button {
+  font: inherit;
+  font-size: 12px;
+  padding: 4px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  background: var(--bg-elevated);
+  color: var(--text);
+}
+.km-src-actions button.ok {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent-strong);
+}
+
+.km-doc h1,
+.km-doc h2,
+.km-doc h3,
+.km-doc h4,
+.km-doc h5,
+.km-doc h6 {
+  font-weight: 700;
+  line-height: 1.3;
+  margin: 1.8em 0 0.6em;
+  color: var(--text-strong);
+}
+.km-doc h1 {
+  font-size: 2.25em;
+  letter-spacing: -0.03em;
+  border-bottom: 1px solid var(--border-soft);
+  padding-bottom: 0.3em;
+}
+.km-doc h2 {
+  font-size: 1.75em;
+  letter-spacing: -0.02em;
+}
+.km-doc h3 { font-size: 1.4em; font-weight: 600; }
+.km-doc h4 { font-size: 1.2em; font-weight: 600; }
+.km-doc h5,
+.km-doc h6 {
+  font-size: 1em;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.km-doc p { margin: 0.8em 0; line-height: 1.85; }
+.km-doc ul,
+.km-doc ol { margin: 0.8em 0; padding-left: 1.6em; line-height: 1.8; }
+.km-doc li > ul,
+.km-doc li > ol { margin: 0.2em 0; }
+.km-doc li { margin: 0.2em 0; }
+.km-doc a {
+  color: var(--accent);
+  text-decoration: none;
+  border-bottom: 1px solid var(--accent-soft);
+}
+.km-doc a:hover { border-color: var(--accent); }
+.km-doc blockquote {
+  margin: 1.5em 0;
+  padding: 0.5em 1.5em;
+  border-left: 4px solid var(--accent);
+  background: var(--accent-soft);
+  color: var(--text);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+}
+.km-doc pre {
+  background: var(--code-bg);
+  border: 1px solid var(--code-border);
+  border-radius: var(--radius-md);
+  padding: 16px 18px;
+  margin: 1.5em 0;
+  overflow-x: auto;
+  line-height: 1.6;
+}
+.km-doc pre code {
+  font-family: var(--font-mono);
+  font-size: 0.92em;
+  color: var(--text);
+}
+.km-doc code {
+  background: var(--code-bg);
+  border: 1px solid var(--code-border);
+  border-radius: var(--radius-sm);
+  padding: 1px 5px;
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+}
+.km-doc pre code {
+  background: none;
+  border: none;
+  padding: 0;
+}
+.km-doc .km-mermaid {
+  margin: 1.2em 0;
+  padding: 16px 18px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
+  display: flex;
+  justify-content: center;
+  overflow-x: auto;
+}
+.km-doc .km-mermaid svg {
+  max-width: 100%;
+  height: auto;
+}
+.km-doc .km-math {
+  margin: 1.2em 0;
+  padding: 4px 0;
+  overflow-x: auto;
+}
+.km-doc .km-math .katex-display {
+  margin: 0;
+}
+.km-doc .km-mermaid foreignObject,
+.km-doc .km-mermaid foreignObject * {
+  line-height: normal;
+}
+.hm-mermaid-hint {
+  color: var(--faint);
+  font-size: 0.9em;
+}
+.hm-mermaid-error {
+  color: var(--vscode-errorForeground, #cf222e);
+  font-size: 0.9em;
+  white-space: pre-wrap;
+}
+.km-doc hr {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 2em 0;
+}
+
+.km-table-wrap {
+  max-height: calc(100vh - var(--topbar-h) - var(--status-h) - 40px);
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  margin: 1.2em 0;
+}
+.km-table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 0.92em;
+}
+.km-table th,
+.km-table td {
+  border: 1px solid var(--border);
+  padding: 7px 10px;
+  text-align: left;
+  vertical-align: top;
+}
+.km-table th {
+  background: var(--hover-elevated, var(--border-soft));
+  color: var(--text-strong);
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  box-shadow: inset 0 1px 0 var(--border), inset 0 -1px 0 var(--border);
+  white-space: nowrap;
+  font-weight: 600;
+}
+.km-table td {
+  cursor: cell;
+}
+.km-table td:hover {
+  background: var(--hover);
+}
+.km-table tr.km-filtered {
+  display: none;
+}
+.km-th-flex {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  justify-content: space-between;
+}
+.km-filter-btn {
+  border: none;
+  background: none;
+  cursor: pointer;
+  font-size: 10px;
+  color: var(--muted);
+  padding: 2px 4px;
+  border-radius: var(--radius-sm);
+  line-height: 1;
+}
+.km-filter-btn:hover {
+  background: var(--active);
+  color: var(--text);
+}
+.km-filter-btn.active {
+  color: #fff;
+  background: var(--accent);
+}
+.km-cell-pop {
+  position: fixed;
+  z-index: 1300;
+  width: 380px;
+  max-width: calc(100vw - 24px);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+}
+.km-cp-input {
+  width: 100%;
+  min-height: 120px;
+  max-height: 50vh;
+  resize: vertical;
+  font-family: var(--font-mono);
+  font-size: 13.5px;
+  line-height: 1.6;
+  border: 2px solid var(--accent);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  background: var(--bg-editor);
+  color: var(--text);
+}
+.km-cp-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.km-cp-actions button {
+  font: inherit;
+  font-size: 12px;
+  padding: 4px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  background: var(--bg-elevated);
+  color: var(--text);
+}
+.km-cp-actions button.ok {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent-strong);
+}
+
+.km-filter-pop {
+  position: fixed;
+  z-index: 1200;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  width: 240px;
+  padding: 8px;
+  font-size: 13px;
+  color: var(--text);
+}
+.km-filter-pop .km-fp-search {
+  width: 100%;
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  margin-bottom: 6px;
+  font: inherit;
+  background: var(--bg-editor);
+  color: var(--text);
+}
+.km-filter-pop .km-fp-tools {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 6px;
+  font-size: 12px;
+}
+.km-filter-pop .km-fp-tools a {
+  color: var(--accent);
+  cursor: pointer;
+  text-decoration: underline;
+}
+.km-filter-pop .km-fp-list {
+  max-height: 220px;
+  overflow: auto;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  padding: 4px;
+}
+.km-filter-pop label {
+  display: flex;
+  gap: 6px;
+  align-items: flex-start;
+  padding: 3px 4px;
+  cursor: pointer;
+  line-height: 1.3;
+}
+.km-filter-pop label:hover {
+  background: var(--hover);
+}
+.km-filter-pop .km-fp-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 8px;
+}
+.km-filter-pop .km-fp-actions button {
+  font: inherit;
+  font-size: 12px;
+  padding: 4px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  background: var(--bg-elevated);
+  color: var(--text);
+}
+.km-filter-pop .km-fp-actions button.ok {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent-strong);
+}
+
+.km-table-menu {
+  position: fixed;
+  z-index: 1300;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  padding: 4px;
+  min-width: 168px;
+  font-size: 13px;
+  color: var(--text);
+}
+.km-table-menu .km-tm-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  font-size: 13px;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+}
+.km-table-menu .km-tm-item:hover {
+  background: var(--hover);
+}
+.km-table-menu .km-tm-item.disabled {
+  color: var(--muted);
+  cursor: default;
+}
+.km-table-menu .km-tm-item.disabled:hover {
+  background: transparent;
+}
+.km-table-menu .km-tm-sep {
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--border-soft);
+}
+
+/* ── confirm modal (ported from .hm-rename-* / .menu-backdrop) ── */
+.menu-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 190;
+}
+.hm-rename-modal {
+  position: fixed;
+  left: 50%;
+  top: 32%;
+  transform: translateX(-50%);
+  width: 380px;
+  max-width: 86vw;
+  padding: 16px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  animation: menuFadeIn 0.12s var(--ease-out);
+}
+.hm-rename-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
+  margin-bottom: 10px;
+}
+.hm-rename-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 14px;
+}
+.hm-rename-actions button {
+  padding: 6px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  background: var(--hover);
+  color: var(--text);
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+.hm-rename-actions button:hover {
+  background: var(--active);
+}
+.hm-rename-actions button.primary {
+  background: var(--accent);
+  color: #fff;
+}
+.hm-rename-actions button.primary:hover {
+  background: var(--accent-strong);
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes menuFadeIn {
+  from { opacity: 0; transform: translateX(-50%) scale(0.98); }
+  to { opacity: 1; transform: translateX(-50%) scale(1); }
+}

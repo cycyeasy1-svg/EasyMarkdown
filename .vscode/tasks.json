@@ -1,0 +1,13 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "type": "npm",
+      "script": "build",
+      "path": "packages/vscode-extension",
+      "label": "build keep extension",
+      "problemMatcher": [],
+      "detail": "Build the EasyMarkdown Keep VSCode extension bundles"
+    }
+  ]
+}
