@@ -29,6 +29,12 @@ import { tableBreakKeymap, tableCellBreakHandler, brToBreakRemarkPlugin } from '
 import { attachMdPasteHandler } from './editor-md-paste.js'
 import remarkFrontmatter from 'remark-frontmatter'
 import { frontmatterSchema, renderFrontmatterNodeView, remarkFrontmatterAnywhere } from './editor-frontmatter.js'
+import {
+  highlightFeatures,
+  highlightStringifyHandler,
+  applyHighlightInView,
+  HIGHLIGHT_COLORS
+} from './editor-highlight.js'
 
 // Every mounted rich editor registers itself here. A rich-text tab stays mounted
 // after its first activation, so several editors (and several Crepe selection
@@ -266,7 +272,13 @@ export default function Editor({
       // inline <br> back into a break (see editor-tablebreak.js).
       ctx.update(remarkStringifyOptionsCtx, (opts) => ({
         ...opts,
-        handlers: { ...(opts?.handlers || {}), break: tableCellBreakHandler }
+        // break → <br> inside a table cell; highlight → ==text== (yellow) or
+        // <mark class="hm-hl-…"> (red/blue). See editor-tablebreak / editor-highlight.
+        handlers: {
+          ...(opts?.handlers || {}),
+          break: tableCellBreakHandler,
+          highlight: highlightStringifyHandler
+        }
       }))
       ctx.update(remarkPluginsCtx, (plugins) => [
         ...plugins,
@@ -297,6 +309,10 @@ export default function Editor({
     // YAML front matter (`---` block at the top) — a block node rendered as a
     // structured key/value card (see editor-frontmatter.js).
     crepe.editor.use(frontmatterSchema)
+    // Issue #14: ==highlight== mark (yellow via ==, red/blue via <mark class>) +
+    // Mod-Alt-H shortcut. Pass the whole array — editor.use() registers only its
+    // first arg, so spreading would drop every feature after the first.
+    crepe.editor.use(highlightFeatures)
     crepeRef.current = crepe
 
     // Convert the block the cursor sits in to a given block id (paragraph/h1…h6).
@@ -485,8 +501,28 @@ export default function Editor({
           setCtxMenu({ x: e.clientX, y: e.clientY })
         }
 
+        // Reflect whether the selection is highlighted onto every injected
+        // highlight toolbar button (so it shows an active state, like bold does).
+        const updateHighlightActive = () => {
+          const v = viewRef.current
+          let active = false
+          if (v && v.hasFocus()) {
+            const { from, $from, empty, to } = v.state.selection
+            const type = v.state.schema.marks.highlight
+            if (type) {
+              active = empty
+                ? ($from.storedMarks || []).some((m) => m.type === type)
+                : v.state.doc.rangeHasMark(from, to, type)
+            }
+          }
+          document
+            .querySelectorAll('.milkdown-toolbar .hm-highlight-item')
+            .forEach((b) => b.classList.toggle('active', active))
+        }
+
         const onSelChange = () => {
           const v = viewRef.current
+          updateHighlightActive()
           if (!v || !v.hasFocus()) return
           reportActiveBlock()
           scheduleLevel()
@@ -804,6 +840,48 @@ export default function Editor({
           toolbar.appendChild(item)
         }
 
+        // Highlight color picker (issue #14): hover the highlighter reveals
+        // yellow / red / blue swatches. Same selection-toolbar injection as the
+        // heading button, and routes to the focused editor's view.
+        const injectHighlightButton = (toolbar) => {
+          if (toolbar.querySelector('.hm-highlight-item')) return
+          const item = document.createElement('div')
+          item.className = 'toolbar-item hm-highlight-item'
+          item.setAttribute('role', 'button')
+          item.title = tRef.current('tb.highlight')
+          item.innerHTML =
+            '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 17l-1 4 4-1L19 8l-3-3z"/><path d="M14 5l3 3"/><rect x="3" y="20" width="18" height="2" rx="1" fill="currentColor" stroke="none"/></svg>'
+          const pop = document.createElement('div')
+          pop.className = 'hm-highlight-pop'
+          const inner = document.createElement('div')
+          inner.className = 'hm-highlight-pop-inner'
+          for (const color of HIGHLIGHT_COLORS) {
+            const sw = document.createElement('button')
+            sw.type = 'button'
+            sw.className = 'hm-hl-swatch hm-hl-' + color
+            sw.title = tRef.current('tb.highlightColor.' + color)
+            sw.addEventListener('mousedown', (e) => {
+              e.preventDefault()
+              e.stopPropagation()
+            })
+            sw.addEventListener('click', (e) => {
+              e.preventDefault()
+              e.stopPropagation()
+              const target =
+                [...liveEditors].find((ed) => ed.getView()?.hasFocus()) ||
+                [...liveEditors].find((ed) => ed.host.contains(toolbar)) ||
+                self
+              const v = target.getView?.()
+              if (v) applyHighlightInView(v, color)
+            })
+            inner.appendChild(sw)
+          }
+          pop.appendChild(inner)
+          item.appendChild(pop)
+          item.addEventListener('mousedown', (e) => e.preventDefault()) // keep selection
+          toolbar.appendChild(item)
+        }
+
         // Inject synchronously (no requestAnimationFrame — it's throttled when
         // the window is occluded, which would skip injection). The scan is cheap
         // and injectHeadingButton early-returns once the button is present.
@@ -822,7 +900,7 @@ export default function Editor({
             tRef.current('tb.link')
           ]
           toolbar
-            .querySelectorAll('.toolbar-item:not(.hm-heading-item)')
+            .querySelectorAll('.toolbar-item:not(.hm-heading-item):not(.hm-highlight-item)')
             .forEach((btn, i) => {
               if (tips[i] && btn.title !== tips[i]) btn.title = tips[i]
             })
@@ -830,8 +908,10 @@ export default function Editor({
         const scanToolbars = () => {
           document.querySelectorAll('.milkdown-toolbar').forEach((tb) => {
             injectHeadingButton(tb)
+            injectHighlightButton(tb)
             addToolbarTitles(tb)
           })
+          updateHighlightActive()
         }
         scanToolbars()
         // The toolbar is created on selection, so we only need to re-scan when
