@@ -3563,7 +3563,9 @@ body.dark .milkdown {
   margin: 0 auto;
   padding: 16px 60px 60vh;
   font-size: var(--editor-font-size, 16px);
-  line-height: 1.8;
+  /* Line height + paragraph spacing follow the same status-bar layout sliders as
+     the rich editor (CSS vars set on the document root). */
+  line-height: var(--editor-line-height, 1.8);
   color: var(--text);
   font-family: var(--font-write);
   /* Overall zoom (Excel-style): magnifies the whole document — text, table cell
@@ -3797,9 +3799,9 @@ body.hm-full-width .km-doc {
   text-transform: uppercase;
   letter-spacing: 0.05em;
 }
-.km-doc p { margin: 0.8em 0; line-height: 1.85; }
+.km-doc p { margin: var(--editor-para-spacing, 0.8em) 0; line-height: inherit; }
 .km-doc ul,
-.km-doc ol { margin: 0.8em 0; padding-left: 1.6em; line-height: 1.8; }
+.km-doc ol { margin: 0.8em 0; padding-left: 1.6em; line-height: inherit; }
 /* Nested sublists hug their parent item instead of carrying the full block gap. */
 .km-doc li > ul,
 .km-doc li > ol { margin: 0.2em 0; }
