@@ -107,7 +107,6 @@ async function main() {
     await ctrlKey(send, '2', 'Digit2', 50) // Ctrl+2 → Heading 2
     await sleep(250)
     report.test1_keyboard_h2 = await ev(() => {
-      const el = document.elementFromPoint(arguments[0] ?? 0, 0)
       return null
     })
     // Re-evaluate using the captured text to find what it became.

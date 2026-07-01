@@ -92,3 +92,17 @@ export const loadSession = () => {
     return {}
   }
 }
+
+// Build the persistable tab slices of a session snapshot from the live tabs.
+//   • openPaths — every saved tab's path (reopened from disk on restart).
+//   • untitled  — unsaved scratch/new tabs (no path) kept ONLY when they're
+//     DIRTY and non-blank, carrying just {title, content}. So a restart restores
+//     real unsaved work but never resurrects the untouched welcome doc or an
+//     empty new tab (content === savedContent, or whitespace-only → dropped).
+// Pure so the data-loss contract is unit-testable; see App.jsx persistence effect.
+export const buildSessionTabs = (tabs) => ({
+  openPaths: (tabs || []).map((t) => t.path).filter(Boolean),
+  untitled: (tabs || [])
+    .filter((t) => !t.path && t.content !== t.savedContent && (t.content || '').trim())
+    .map((t) => ({ title: t.title, content: t.content }))
+})

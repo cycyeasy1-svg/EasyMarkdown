@@ -130,6 +130,36 @@ describe('parseDoc', () => {
     expect(parseDoc(['---'])[0].type).toBe('hr')
     expect(parseDoc(['- a', '- b'])[0]).toMatchObject({ type: 'list', start: 0, end: 1 })
   })
+  it('keeps a bullet list as a single block (only numbered lists split)', () => {
+    const blocks = parseDoc(['- a', '- b', '- c'])
+    expect(blocks).toEqual([{ type: 'list', start: 0, end: 2 }])
+  })
+  it('splits a numbered list into one block per top-level item (番号 granularity)', () => {
+    const blocks = parseDoc(['1. first', '   - detail', '2. second', '3. third'])
+    expect(blocks).toEqual([
+      { type: 'list', start: 0, end: 1 },
+      { type: 'list', start: 2, end: 2 },
+      { type: 'list', start: 3, end: 3 }
+    ])
+  })
+  it('breaks an indented table inside a list item out as its own table block', () => {
+    const blocks = parseDoc([
+      '1. step',
+      '   text',
+      '   | a | b |',
+      '   | - | - |',
+      '   | 1 | 2 |',
+      '   trailing'
+    ])
+    expect(blocks.map((b) => b.type)).toEqual(['list', 'table', 'list'])
+    const t = blocks[1]
+    expect(t).toMatchObject({ type: 'table', headerLine: 2, sepLine: 3 })
+    expect(t.headers).toEqual(['a', 'b'])
+    expect(t.dataRows).toEqual([{ lineIdx: 4, cells: ['1', '2'] }])
+    // the list segments straddle the table: text before, trailing after
+    expect(blocks[0]).toMatchObject({ start: 0, end: 1 })
+    expect(blocks[2]).toMatchObject({ start: 5, end: 5 })
+  })
   it('never hangs on a lone non-block line (always advances)', () => {
     expect(parseDoc(['just text'])).toEqual([{ type: 'paragraph', start: 0, end: 0 }])
   })

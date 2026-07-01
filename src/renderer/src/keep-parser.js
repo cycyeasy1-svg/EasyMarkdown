@@ -142,6 +142,14 @@ export function toViewLines(rawLines) {
 // dataRows[{lineIdx, cells}] so cells map back to exact source lines.
 export function parseDoc(lines) {
   const out = []
+  // Emit a 'list' sub-block for the line range [s,e], trimming blank lines off
+  // both ends (so a segment never starts/ends on a loose-list gap). Used to split
+  // a list run into per-numbered-item blocks and around any nested table.
+  const pushListSeg = (s, e) => {
+    while (e >= s && lines[e].trim() === '') e--
+    while (s <= e && lines[s].trim() === '') s++
+    if (s <= e) out.push({ type: 'list', start: s, end: e })
+  }
   let i = 0
   while (i < lines.length) {
     const line = lines[i]
@@ -184,7 +192,7 @@ export function parseDoc(lines) {
       line.includes('|') &&
       i + 1 < lines.length &&
       lines[i + 1].includes('|') &&
-      /^[\s|:\-]+$/.test(lines[i + 1]) &&
+      /^[\s|:-]+$/.test(lines[i + 1]) &&
       lines[i + 1].includes('-')
     ) {
       const start = i
@@ -250,7 +258,57 @@ export function parseDoc(lines) {
         }
         break
       }
-      out.push({ type: 'list', start, end: lastContent })
+      // Segment the list run instead of emitting one block, so a long numbered
+      // list (each step a separate edit target) and any indented table inside a
+      // list item render the way the source reads:
+      //   • a NESTED TABLE breaks out as its own `table` block — it then gets the
+      //     real grid + cell editing + filters + structural edits (table mode),
+      //     while the surrounding item text stays source-editable (block mode).
+      //   • a new top-level NUMBERED item (番号) starts its own `list` block, so
+      //     editing one step doesn't open the whole list as one textarea.
+      // Bullet (-/*/+) runs are NOT split — they stay one block (unchanged).
+      const runEnd = lastContent
+      let segStart = start
+      let p = start
+      while (p <= runEnd) {
+        // Nested table: a `|`-row followed by a `---` separator (both possibly
+        // indented). Flush the list text before it, emit a table block, resume.
+        if (
+          lines[p].includes('|') &&
+          p + 1 <= runEnd &&
+          /^[\s|:-]+$/.test(lines[p + 1]) &&
+          lines[p + 1].includes('-')
+        ) {
+          pushListSeg(segStart, p - 1)
+          const headerLine = p
+          const sepLine = p + 1
+          const dataRows = []
+          let q = p + 2
+          while (q <= runEnd && lines[q].includes('|') && lines[q].trim() !== '') {
+            dataRows.push({ lineIdx: q, cells: splitRow(lines[q]) })
+            q++
+          }
+          out.push({
+            type: 'table',
+            start: headerLine,
+            end: q - 1,
+            headerLine,
+            sepLine,
+            headers: splitRow(lines[headerLine]),
+            dataRows
+          })
+          p = q
+          segStart = q
+          continue
+        }
+        // A new top-level numbered item begins its own block (番号 granularity).
+        if (p > segStart && lines[p].search(/\S/) === baseIndent && /^\s*\d+[.)]\s+/.test(lines[p])) {
+          pushListSeg(segStart, p - 1)
+          segStart = p
+        }
+        p++
+      }
+      pushListSeg(segStart, runEnd)
       i = lastContent + 1
       continue
     }
@@ -273,7 +331,7 @@ export function parseDoc(lines) {
         !(
           lines[i].includes('|') &&
           i + 1 < lines.length &&
-          /^[\s|:\-]+$/.test(lines[i + 1] || '') &&
+          /^[\s|:-]+$/.test(lines[i + 1] || '') &&
           (lines[i + 1] || '').includes('-')
         )
       ) {
@@ -368,11 +426,34 @@ export function removeColumnInLine(line, colIdx) {
 // style (leading/trailing pipe + \r) so the new line blends into the table.
 export function buildTableRow(nCols, refLine) {
   const eol = String(refLine).endsWith('\r') ? '\r' : ''
-  const t = (eol ? refLine.slice(0, -1) : refLine).trim()
+  const noEol = eol ? refLine.slice(0, -1) : refLine
+  // Keep the reference row's leading indentation so a row inserted into a nested
+  // (indented, in-list) table stays indented — else it'd drop to column 0 and the
+  // list run would no longer cover it, splitting the table on the next parse.
+  const indent = (noEol.match(/^\s*/) || [''])[0]
+  const t = noEol.trim()
   const lead = t.startsWith('|')
   const trail = t.endsWith('|')
   const inner = Array(Math.max(1, nCols)).fill('  ').join('|')
-  return (lead ? '|' : '') + inner + (trail ? '|' : '') + eol
+  return indent + (lead ? '|' : '') + inner + (trail ? '|' : '') + eol
+}
+
+// ── block-edit write-back: replace a non-table block's raw line range [start,end]
+// with new source text, leaving every line OUTSIDE that range byte-identical. The
+// new text (the view-text from the block's "edit source" textarea, split on '\n')
+// inherits the block's original EOL style — the trailing-\r presence of its first
+// raw line — so untouched bytes never shift across a CRLF/LF boundary and the
+// "zero diff" guarantee holds outside the edited block. Returns a NEW rawLines
+// array; the input is not mutated. Mirrors the splice in KeepEditor's block
+// "edit source" commit (the single source of truth stays rawLines).
+export function replaceBlockLines(rawLines, start, end, newText) {
+  const eol = String(rawLines[start] || '').endsWith('\r') ? '\r' : ''
+  const newLines = String(newText)
+    .split('\n')
+    .map((l) => (l.endsWith('\r') ? l.slice(0, -1) : l) + eol)
+  const out = rawLines.slice()
+  out.splice(start, end - start + 1, ...newLines)
+  return out
 }
 
 // ── render helpers (return HTML strings; pure) ──
@@ -549,6 +630,29 @@ export function renderBlockInner(b, bi, viewLines, opts = {}) {
   return btn + inner
 }
 
+// Render the `[from, to)` slice of an already-parsed block list to wrapped HTML
+// (`<div class="km-block">…</div>` per block). Factored out of renderDoc so
+// KeepEditor can paint a large document in chunks across idle frames instead of
+// in one blocking innerHTML. `startTableIdx` is the running table counter at
+// `from` — tables key their filter state by index, so the count must continue
+// unbroken across chunks; the returned `tableIdx` threads into the next slice.
+// `opts` mirrors renderBlockInner's (srcEditLabel / collapseLabel / forExport /
+// filterState / baseDir); `tableIdx` is supplied per block here, not by the caller.
+export function renderBlockRange(blocks, viewLines, from, to, startTableIdx = 0, opts = {}) {
+  let tableIdx = startTableIdx
+  let html = ''
+  for (let bi = from; bi < to; bi++) {
+    const b = blocks[bi]
+    const innerHtml = renderBlockInner(b, bi, viewLines, { ...opts, tableIdx })
+    if (b.type === 'table') tableIdx++
+    // Heading blocks carry their level so KeepEditor can compute the section range
+    // (every following block until the next heading of the same or higher level).
+    const hlevel = b.type === 'heading' ? ' data-hlevel="' + b.level + '"' : ''
+    html += '<div class="km-block"' + hlevel + ' data-bi="' + bi + '">' + innerHtml + '</div>'
+  }
+  return { html, tableIdx }
+}
+
 // Render the whole document to HTML, plus return the parsed block map / viewLines
 // so the caller (KeepEditor) can map edits back to source.
 //   opts.srcEditLabel — label for the per-block "edit source" button
@@ -556,28 +660,14 @@ export function renderBlockInner(b, bi, viewLines, opts = {}) {
 //   opts.forExport    — omit edit affordances (buttons / filter ▼) for PDF
 //   opts.baseDir      — document folder, for resolving relative image paths
 export function renderDoc(rawLines, filterState = {}, opts = {}) {
-  const forExport = !!opts.forExport
-  const srcEditLabel = opts.srcEditLabel || 'edit'
-  const collapseLabel = opts.collapseLabel
-  const baseDir = opts.baseDir
   const viewLines = toViewLines(rawLines)
   const blocks = parseDoc(viewLines)
-  let tableIdx = 0
-  let html = ''
-  blocks.forEach((b, bi) => {
-    const innerHtml = renderBlockInner(b, bi, viewLines, {
-      forExport,
-      srcEditLabel,
-      collapseLabel,
-      filterState,
-      tableIdx,
-      baseDir
-    })
-    if (b.type === 'table') tableIdx++
-    // Heading blocks carry their level so KeepEditor can compute the section range
-    // (every following block until the next heading of the same or higher level).
-    const hlevel = b.type === 'heading' ? ' data-hlevel="' + b.level + '"' : ''
-    html += '<div class="km-block"' + hlevel + ' data-bi="' + bi + '">' + innerHtml + '</div>'
+  const { html } = renderBlockRange(blocks, viewLines, 0, blocks.length, 0, {
+    forExport: !!opts.forExport,
+    srcEditLabel: opts.srcEditLabel || 'edit',
+    collapseLabel: opts.collapseLabel,
+    filterState,
+    baseDir: opts.baseDir
   })
   return { html: html || '<div class="km-empty"></div>', blocks, viewLines }
 }

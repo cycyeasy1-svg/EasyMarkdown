@@ -14,7 +14,8 @@ import {
   isPlainTextDoc,
   isValidName,
   isExistsError,
-  isHeavyDoc
+  isHeavyDoc,
+  buildSessionTabs
 } from '../src/renderer/src/paths.js'
 
 describe('isNewerVersion', () => {
@@ -137,5 +138,36 @@ describe('isHeavyDoc', () => {
   })
   it('is true past the total-size cap', () => {
     expect(isHeavyDoc('a'.repeat(400001))).toBe(true)
+  })
+})
+
+describe('buildSessionTabs (what survives a restart)', () => {
+  const saved = { path: '/docs/a.md', title: 'a.md', content: 'x', savedContent: 'x' }
+  const dirtyScratch = { path: null, title: 'Untitled', content: 'draft', savedContent: '' }
+
+  it('openPaths lists every saved tab path, in order, dropping pathless tabs', () => {
+    const tabs = [saved, dirtyScratch, { path: '/docs/b.md', title: 'b.md', content: '', savedContent: '' }]
+    expect(buildSessionTabs(tabs).openPaths).toEqual(['/docs/a.md', '/docs/b.md'])
+  })
+  it('keeps a dirty, non-blank scratch tab as {title, content} only', () => {
+    expect(buildSessionTabs([dirtyScratch]).untitled).toEqual([{ title: 'Untitled', content: 'draft' }])
+  })
+  it('drops a scratch tab whose content equals its saved baseline (not dirty)', () => {
+    const clean = { path: null, title: 'Untitled', content: 'same', savedContent: 'same' }
+    expect(buildSessionTabs([clean]).untitled).toEqual([])
+  })
+  it('drops a whitespace-only scratch tab (no real work to keep)', () => {
+    const blank = { path: null, title: 'Untitled', content: '   \n\t', savedContent: '' }
+    expect(buildSessionTabs([blank]).untitled).toEqual([])
+  })
+  it('never persists a saved file as an untitled scratch (it reopens from disk)', () => {
+    const editedSaved = { path: '/docs/a.md', title: 'a.md', content: 'new', savedContent: 'old' }
+    const { openPaths, untitled } = buildSessionTabs([editedSaved])
+    expect(openPaths).toEqual(['/docs/a.md'])
+    expect(untitled).toEqual([])
+  })
+  it('tolerates missing/empty input', () => {
+    expect(buildSessionTabs(undefined)).toEqual({ openPaths: [], untitled: [] })
+    expect(buildSessionTabs([])).toEqual({ openPaths: [], untitled: [] })
   })
 })

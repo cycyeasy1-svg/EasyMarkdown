@@ -157,8 +157,17 @@ docs/                  architecture / features / implementation-notes / developm
   (`CSS.highlights` + `Highlight`), not `window.find` — it searches only the
   editor body (rich `view.dom` / source `<textarea>`), never UI text, and paints
   ranges without mutating the DOM. See the find helpers in `App.jsx`.
-- **File watcher must stay crash-proof.** chokidar recursively watching a tree
-  with permission-protected paths throws a flood of `EACCES`/`EAGAIN`/`EBUSY`
+- **Folder watching is lazy, not recursive.** The sidebar is a lazy tree (only
+  expanded dirs are shown), so `watch:start` watches a **single directory one level
+  deep** (`depth: 0`); the renderer (`Sidebar`) watches each dir as it's loaded and
+  unwatches when a root is removed — see the watch sync effect keyed on
+  `childrenMap`. The old recursive `depth: 12` watch of whole roots was a startup
+  killer: a workspace with hundreds of nested folders made chokidar stat the entire
+  tree (×N roots) on launch, saturating the main-process event loop so the
+  renderer's own IPC (reading the active doc) stalled for seconds. Keep watching
+  shallow + lazy; a change in a collapsed folder is picked up fresh on expand.
+- **File watcher must stay crash-proof.** chokidar watching a directory that
+  contains permission-protected paths throws a flood of `EACCES`/`EAGAIN`/`EBUSY`
   that, left unhandled, `abort()`s the whole main process on launch. The trap:
   a **relative** workspace path like `"."` resolves against the process CWD, which
   is `/` under Finder/launchd → it watches `/dev`, `/System/Volumes`, … (works in
@@ -175,6 +184,15 @@ docs/                  architecture / features / implementation-notes / developm
 
 ## Testing
 
+- **Lint (ESLint 9, flat config)** — run `npm run lint` (`npm run lint:fix` to
+  auto-fix). Config is `eslint.config.mjs`, scoped per runtime context: renderer
+  (browser globals + React/JSX, the two classic `react-hooks` rules), main /
+  preload / scripts / configs (Node), tests (Node + happy-dom), and `website/`
+  (plain browser script). Pinned to ESLint **9** (eslint-plugin-react has no v10
+  peer support yet). Deliberately a low-noise baseline — high-signal rules only,
+  not the full React-Compiler `react-hooks` v7 set; warnings don't fail the run.
+  `out/`, `dist/`, `build/`, and the standalone `packages/vscode-extension/`
+  sub-package are ignored.
 - **Unit tests (vitest)** cover the **pure** logic — run `npm test` (or
   `npm run test:watch`). Tests live in `test/`; config is `vitest.config.mjs`.
   They're written as **characterization tests** (lock current behavior, since

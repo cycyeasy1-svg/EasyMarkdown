@@ -37,7 +37,7 @@ import logoUrl from './assets/logo.png'
 import { clearFindHighlights, findRangesInEl, paintFindHighlights, scrollRangeIntoView, matchIndices, blockIndexForLine } from './find.js'
 import {
   isNewerVersion, isAbsolutePath, sanitizeWorkspaces, baseName, dirName, joinPath,
-  isPlainTextDoc, isHeavyDoc, genId, LS, loadSession, MD_DOC_RE
+  isPlainTextDoc, isHeavyDoc, genId, LS, loadSession, buildSessionTabs, MD_DOC_RE
 } from './paths.js'
 
 const ONBOARDED_KEY = 'easymarkdown.onboarded.v1'
@@ -243,6 +243,12 @@ export default function App() {
   // handlers that must not capture a stale `tabs` closure.
   const tabsRef = useRef(tabs)
   tabsRef.current = tabs
+
+  // Set as soon as the user explicitly opens a file (a non-silent openPaths —
+  // e.g. a double-clicked file at launch arriving via `open-paths`). Session
+  // restore reads this to avoid clobbering that just-opened tab by forcing the
+  // *previous* session's active tab back to the front. See the restore effect.
+  const explicitOpenRef = useRef(false)
 
   // Drop editor APIs for tabs that have closed.
   useEffect(() => {
@@ -505,8 +511,46 @@ export default function App() {
   }, [sourceMode])
 
   // --------------------------- open files --------------------------
+  // Read a session-restore PLACEHOLDER tab's file from disk and fill its content
+  // (bumping reloadNonce so a placeholder that already mounted empty re-reads it).
+  // Restored tabs start as empty `loading` placeholders and are filled lazily —
+  // on activation (the effect below) or when openPaths/export touches them — so a
+  // restart with many tabs reads only the file(s) you actually look at, never all
+  // N up front. A file that went missing since last session is dropped quietly,
+  // matching the old restore. No-op if the tab is already loaded or gone.
+  const fillTab = useCallback(async (id) => {
+    const tab = tabsRef.current.find((t) => t.id === id)
+    if (!tab || !tab.loading) return
+    try {
+      const { content, mtimeMs } = await window.api.readFile(tab.path)
+      const patch = (t) =>
+        t.id === id
+          ? {
+              ...t,
+              content,
+              savedContent: content,
+              mtimeMs,
+              heavy: isHeavyDoc(content),
+              loading: false,
+              reloadNonce: t.reloadNonce + 1
+            }
+          : t
+      tabsRef.current = tabsRef.current.map(patch)
+      setTabs((prev) => prev.map(patch))
+    } catch {
+      const norm = (tab.path || '').replace(/\\/g, '/')
+      tabsRef.current = tabsRef.current.filter((t) => t.id !== id)
+      setTabs((prev) => prev.filter((t) => t.id !== id))
+      setRecents((prev) => prev.filter((r) => (r.path || '').replace(/\\/g, '/') !== norm))
+    }
+  }, [])
+
   const openPaths = useCallback(async (paths, silent = false) => {
-    if (!paths || !paths.length) return
+    if (!paths || !paths.length) return null
+    // An explicit open (anything but the silent session restore) means the user
+    // wants *this* file in front — record it synchronously so the restore effect
+    // won't activate the previous session's tab on top of it.
+    if (!silent) explicitOpenRef.current = true
     let lastId = null
     const seen = new Set()
     const remember = (fp) => {
@@ -525,6 +569,10 @@ export default function App() {
       // Synchronous check against the live tab list (no setState race).
       const existing = tabsRef.current.find((t) => (t.path || '').replace(/\\/g, '/') === norm)
       if (existing) {
+        // A lazy restore placeholder counts as "already open" but has no content
+        // yet — load it now so callers that read it next (PDF export, the editor)
+        // see the real document, not an empty buffer.
+        if (existing.loading) await fillTab(existing.id)
         lastId = existing.id
         remember(path)
         continue
@@ -572,7 +620,8 @@ export default function App() {
       setActiveId(lastId)
       setHome(false)
     }
-  }, [])
+    return lastId
+  }, [fillTab])
 
   const newTab = useCallback(() => {
     const id = genId()
@@ -824,9 +873,10 @@ export default function App() {
                   content: written,
                   savedContent: written,
                   mtimeMs,
-                  reloadNonce: t.reloadNonce + 1
+                  reloadNonce: t.reloadNonce + 1,
+                  conflict: null
                 }
-              : { ...t, path: targetPath, title: baseName(targetPath), savedContent: t.content, mtimeMs }
+              : { ...t, path: targetPath, title: baseName(targetPath), savedContent: t.content, mtimeMs, conflict: null }
             : t
         )
       )
@@ -987,29 +1037,11 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rootsKey])
 
-  // Watch every root. chokidar's initial recursive crawl is heavy, so we DEFER it
-  // past first paint and stagger the roots — starting all watchers at once on
-  // launch saturated the main process and made the UI stutter for a while.
-  useEffect(() => {
-    const roots = workspaces.map((w) => w.rootPath)
-    let cancelled = false
-    const started = []
-    const schedule = (fn) =>
-      window.requestIdleCallback ? window.requestIdleCallback(fn, { timeout: 600 }) : setTimeout(fn, 80)
-    const startNext = (i) => {
-      if (cancelled || i >= roots.length) return
-      window.api.watchStart(roots[i])
-      started.push(roots[i])
-      schedule(() => startNext(i + 1))
-    }
-    schedule(() => startNext(0))
-    return () => {
-      cancelled = true
-      started.forEach((r) => window.api.watchStop(r))
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rootsKey])
-
+  // Folder watching is LAZY and lives in the Sidebar: it shallow-watches each
+  // directory as it's loaded/expanded (Sidebar.loadDir → watchStart), instead of
+  // recursively crawling whole roots here. Recursively watching workspaces with
+  // hundreds of nested folders was the startup-jank culprit — the crawl saturated
+  // the main process so reading the active doc stalled. We just react to changes:
   useEffect(() => {
     const off = window.api.onWatchChanged(() => {
       setRefreshNonce((n) => n + 1) // cheap: Sidebar only reloads already-open dirs
@@ -1026,31 +1058,35 @@ export default function App() {
   // --------- auto-reload open files edited by external programs ----------
   const watchedRef = useRef(new Set())
 
-  // Keep a per-file watcher in sync with the set of open file paths.
+  // Keep a per-file watcher in sync with the set of open file paths. Skip sleeping
+  // restore placeholders (loading, not yet read) — watching all N up front defeats
+  // the lazy restore; each gets its watcher when it's woken and filled.
   useEffect(() => {
-    const want = new Set(tabs.map((t) => t.path).filter(Boolean))
+    const want = new Set(tabs.filter((t) => !t.loading).map((t) => t.path).filter(Boolean))
     for (const p of want) if (!watchedRef.current.has(p)) window.api.watchFile(p)
     for (const p of watchedRef.current) if (!want.has(p)) window.api.unwatchFile(p)
     watchedRef.current = want
   }, [tabs])
 
-  const reloadTabFromDisk = useCallback(async (id, path) => {
+  const reloadTabFromDisk = useCallback(async (id, path, force = false) => {
     try {
       const { content, mtimeMs } = await window.api.readFile(path)
       setTabs((prev) =>
         prev.map((t) => {
           if (t.id !== id) return t
           // Bail if the user has started editing since the change fired —
-          // never clobber unsaved work.
-          if (t.content !== t.savedContent) return t
-          if (t.content === content) return { ...t, mtimeMs }
+          // never clobber unsaved work (unless this is a forced conflict reload,
+          // where the user explicitly chose to discard local edits).
+          if (!force && t.content !== t.savedContent) return t
+          if (t.content === content) return { ...t, mtimeMs, conflict: null }
           return {
             ...t,
             content,
             savedContent: content,
             mtimeMs,
             reloadNonce: t.reloadNonce + 1,
-            heavy: isHeavyDoc(content)
+            heavy: isHeavyDoc(content),
+            conflict: null
           }
         })
       )
@@ -1066,12 +1102,38 @@ export default function App() {
       if (!tab) return
       // Ignore the echo from our own save (same or older mtime).
       if (tab.mtimeMs && mtimeMs && mtimeMs <= tab.mtimeMs) return
-      // Don't overwrite unsaved local edits.
-      if (tab.content !== tab.savedContent) return
+      // Clean tab → reload silently. Dirty tab → don't clobber unsaved edits;
+      // flag a conflict so the user can choose reload-from-disk or keep-local.
+      if (tab.content !== tab.savedContent) {
+        setTabs((prev) =>
+          prev.map((t) => (t.id === tab.id ? { ...t, conflict: { mtimeMs } } : t))
+        )
+        return
+      }
       reloadTabFromDisk(tab.id, tab.path)
     })
     return off
   }, [reloadTabFromDisk])
+
+  // Resolve an external-edit conflict on a dirty tab. 'reload' discards local
+  // edits and loads the disk version; 'keep' keeps the local edits (a later save
+  // overwrites disk) — we adopt the disk mtime so the same change won't re-fire.
+  const resolveConflict = useCallback(
+    (id, choice) => {
+      const tab = tabsRef.current.find((t) => t.id === id)
+      if (!tab) return
+      if (choice === 'reload') {
+        reloadTabFromDisk(id, tab.path, true)
+        return
+      }
+      setTabs((prev) =>
+        prev.map((t) =>
+          t.id === id ? { ...t, conflict: null, mtimeMs: tab.conflict?.mtimeMs ?? t.mtimeMs } : t
+        )
+      )
+    },
+    [reloadTabFromDisk]
+  )
 
   // --------------------------- outline jump ------------------------
   const jumpToHeading = useCallback((index) => {
@@ -1083,6 +1145,9 @@ export default function App() {
     // content is actually visible instead of hidden behind the drawer.
     if (isMobile) setSidebarOpen(false)
     const doJump = () => {
+      // Keep mode streams its DOM in chunks after open — make sure the whole doc is
+      // painted before we index headings, or a jump to a far one finds nothing.
+      Object.values(editorApis.current).forEach((api) => api?.ensureRendered?.())
       const host = editorHostRef.current
       let hs = host
         ? host.querySelectorAll(
@@ -1114,7 +1179,7 @@ export default function App() {
     requestAnimationFrame(() => {
       if (!doJump()) requestAnimationFrame(doJump)
     })
-  }, [])
+  }, [isMobile])
 
   // Outline scrollspy: highlight the heading you're currently viewing (the last
   // one scrolled past the top), mirroring how the file tree marks the open file.
@@ -1302,7 +1367,7 @@ export default function App() {
       offClose?.()
       window.removeEventListener('mm:openFolder', onOpenFolderEvt)
     }
-  }, [openPaths, openFolder, addWorkspace])
+  }, [openPaths, openFolder, addWorkspace, flushSession])
 
   // --- Drop OS files/folders onto the window to open them ---
   // A markdown (or any) file dragged from the Finder/Explorer onto the app
@@ -1411,25 +1476,58 @@ export default function App() {
       })
       return created
     }
-    // Restore silently: skip files that were deleted/moved since last session
-    // without popping an error for each one.
     if (paths.length) {
-      openPaths(paths, true).then(() => {
-        addUntitled()
-        if (session.activePath) {
-          setTabs((prev) => {
-            const t = prev.find((x) => x.path === session.activePath)
-            if (t) setActiveId(t.id)
-            return prev
-          })
-        }
-      })
+      // Restore strategy (was: read all N files sequentially, THEN activate the
+      // last one — so the UI froze until every tab finished loading and focus
+      // jumped to the wrong tab). Now, browser-style "sleeping tabs":
+      //   1. Create lightweight PLACEHOLDER tabs for every path synchronously, in
+      //      the saved order — the tab bar appears instantly and order is kept.
+      //   2. Activate the previously-active tab (unless a double-clicked launch
+      //      file already grabbed focus via `open-paths` → explicitOpenRef).
+      //   3. Read ONLY the active tab from disk (the activation effect below); the
+      //      rest stay asleep (empty `loading` placeholders) and are read the
+      //      moment the user visits them. A restart with 20 tabs reads 1 file.
+      const priorityPath =
+        session.activePath && paths.includes(session.activePath) ? session.activePath : paths[0]
+      const placeholders = paths.map((p) => ({
+        id: genId(),
+        path: p,
+        title: baseName(p),
+        content: '',
+        savedContent: '',
+        mtimeMs: null,
+        reloadNonce: 0,
+        heavy: false,
+        loading: true // not yet read from disk; filled lazily on activation
+      }))
+      tabsRef.current = [...tabsRef.current, ...placeholders]
+      setTabs((prev) => [...prev, ...placeholders])
+      const priorityTab = placeholders.find((t) => t.path === priorityPath)
+      if (priorityTab && !explicitOpenRef.current) {
+        setActiveId(priorityTab.id)
+        setHome(false)
+      }
+      addUntitled()
+      // No eager loading: the active placeholder is filled by the activation
+      // effect below; the rest stay asleep until the user visits them.
     } else {
       const created = addUntitled()
       if (created && created.length) setActiveId(created[0].id)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // Lazily wake a sleeping restored tab: whenever a `loading` placeholder becomes
+  // visible — the active tab (initial priority tab, a tab the user clicks, or a
+  // double-clicked launch file) OR the split pane's tab — read its file from disk
+  // then. fillTab no-ops on already-loaded tabs, so this is safe to fire on every
+  // activation/split change.
+  useEffect(() => {
+    for (const id of [activeId, splitId]) {
+      const tab = id != null && tabsRef.current.find((t) => t.id === id)
+      if (tab && tab.loading) fillTab(tab.id)
+    }
+  }, [activeId, splitId, fillTab])
 
   // --------------------------- persistence -------------------------
   useEffect(() => {
@@ -1445,14 +1543,10 @@ export default function App() {
       sidebarOpen,
       sidebarMode,
       sidebarWidth,
-      openPaths: tabs.map((t) => t.path).filter(Boolean),
-      // Persist unsaved scratch/new tabs (no path, with edited content) so they
-      // survive a restart — closing the app no longer silently loses them. Only
-      // dirty tabs are stored, so the untouched welcome doc / empty new tabs
-      // don't keep coming back. Saved files are reopened from disk instead.
-      untitled: tabs
-        .filter((t) => !t.path && t.content !== t.savedContent && (t.content || '').trim())
-        .map((t) => ({ title: t.title, content: t.content })),
+      // openPaths (saved tabs, reopened from disk) + untitled (dirty, non-blank
+      // scratch tabs, so the untouched welcome doc / empty new tabs don't keep
+      // coming back). Pure + unit-tested — see buildSessionTabs in paths.js.
+      ...buildSessionTabs(tabs),
       activePath
     }
     sessionRef.current = data
@@ -1598,6 +1692,9 @@ export default function App() {
       setFind((f) => ({ ...f, matches: hits.length, active: 0 }))
       return
     }
+    // Keep mode paints in chunks after open; flush the rest so find sees the whole
+    // document, not just the first painted chunk.
+    if (q) Object.values(editorApis.current).forEach((api) => api?.ensureRendered?.())
     const root = richRoot()
     const ranges = q ? findRangesInEl(root, q) : []
     findRangesRef.current = ranges
@@ -1682,6 +1779,7 @@ export default function App() {
     const { bi, total } = blockIndexForLine(content, Number.isFinite(n) ? n : 1)
     if (!str || !Number.isFinite(n)) { lineBiRef.current = -1; setFind((f) => ({ ...f, matches: total, active: 0 })); return }
     lineBiRef.current = bi
+    Object.values(editorApis.current).forEach((api) => api?.ensureRendered?.()) // flush keep chunks
     const root = richRoot()
     let block = null
     if (root && bi >= 0) {
@@ -1734,6 +1832,7 @@ export default function App() {
         return
       }
       const { bi } = blockIndexForLine(content, line)
+      Object.values(editorApis.current).forEach((api) => api?.ensureRendered?.()) // flush keep chunks
       const root = richRoot()
       const block =
         root && bi >= 0
@@ -1781,7 +1880,7 @@ export default function App() {
       }
       if (anchor) jumpToAnchor(anchor, targetPath)
     },
-    [openPaths]
+    [openPaths, jumpToAnchor]
   )
 
   const toggleFindMode = useCallback(() => {
@@ -2242,6 +2341,31 @@ export default function App() {
               <Icon name="close" size={15} />
             </button>
           )}
+        </div>
+      )}
+
+      {activeTab?.conflict && (
+        <div className="hm-conflict" role="alertdialog" aria-label={t('conflict.title')}>
+          <div className="hm-conflict-body">
+            <div className="hm-conflict-title">{t('conflict.title')}</div>
+            <div className="hm-conflict-msg">
+              {t('conflict.msg', { name: activeTab.title })}
+            </div>
+          </div>
+          <div className="hm-conflict-actions">
+            <button
+              className="hm-conflict-btn"
+              onClick={() => resolveConflict(activeTab.id, 'keep')}
+            >
+              {t('conflict.keep')}
+            </button>
+            <button
+              className="hm-conflict-btn primary"
+              onClick={() => resolveConflict(activeTab.id, 'reload')}
+            >
+              {t('conflict.reload')}
+            </button>
+          </div>
         </div>
       )}
 

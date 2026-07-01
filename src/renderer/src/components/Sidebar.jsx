@@ -78,6 +78,37 @@ function Sidebar({ workspaces, activePath, openTabPaths, openTabPathsRaw, onOpen
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refreshNonce])
 
+  // Lazy folder watching: watch exactly the directories the tree has actually
+  // loaded (each root + every folder the user expanded or that was revealed for an
+  // open tab), one level deep each (see main `watch:start`). This replaces the old
+  // recursive whole-root crawl that made launch janky on big workspaces — we only
+  // watch what's visible, and pick up changes in collapsed folders when they're
+  // expanded (loadDir re-reads then). Watches follow childrenMap; dirs that leave
+  // the workspace (root removed) are dropped.
+  const watchedDirsRef = useRef(new Set())
+  useEffect(() => {
+    const norm = (p) => p.replace(/\\/g, '/')
+    const rootPaths = roots.map((w) => norm(w.rootPath))
+    const inWorkspace = (d) => {
+      const nd = norm(d)
+      return rootPaths.some((r) => nd === r || nd.startsWith(r + '/'))
+    }
+    const want = new Set(Object.keys(childrenMap).filter(inWorkspace))
+    for (const d of want) if (!watchedDirsRef.current.has(d)) window.api.watchStart(d)
+    for (const d of watchedDirsRef.current) if (!want.has(d)) window.api.watchStop(d)
+    watchedDirsRef.current = want
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [childrenMap, rootsKey])
+
+  // Drop every dir watch when the sidebar unmounts (e.g. toggled closed).
+  useEffect(
+    () => () => {
+      watchedDirsRef.current.forEach((d) => window.api.watchStop(d))
+      watchedDirsRef.current = new Set()
+    },
+    []
+  )
+
   // Expand the ancestor folders of the given files so they're revealed in the
   // tree. Additive — only ever adds to `expanded`, never collapses what the user
   // opened. Loads each ancestor dir (so its children render) before expanding.

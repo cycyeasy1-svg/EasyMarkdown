@@ -4,7 +4,7 @@ import { dirname, join, basename, extname, resolve, sep } from 'node:path'
 import fs from 'node:fs/promises'
 import { existsSync, statSync, constants as fsConstants } from 'node:fs'
 import chokidar from 'chokidar'
-import { MD_EXTS, MD_RE, isAbsolutePath, isRestrictedRoot, imageNameParts } from './helpers.js'
+import { MD_EXTS, MD_RE, isRestrictedRoot, imageNameParts } from './helpers.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -428,16 +428,25 @@ const WATCH_IGNORE_RE =
   /(^|[\\/])(\.(git|obsidian)|node_modules)([\\/]|$)/
 // isAbsolutePath / isRestrictedRoot moved to ./helpers.js (imported above).
 
-// Watch a folder; notify renderer on changes (debounced lightly by chokidar)
+// Watch a SINGLE directory, one level deep (NOT the whole subtree). The sidebar
+// is a lazy tree — it only ever shows the directories the user has expanded — so
+// the renderer watches each loaded dir on its own (see Sidebar.loadDir) instead of
+// asking us to recursively crawl the root. That crawl was the startup killer:
+// `depth: 12` over a workspace with hundreds of nested folders made chokidar stat
+// the entire tree (×N roots) on launch, saturating the single main-process event
+// loop so the renderer's own IPC (reading the active doc) stalled for seconds.
+// depth:0 = one readdir + one dir watch per expanded folder; a change deep in a
+// collapsed folder isn't watched (it's not visible) and is picked up fresh when
+// the user expands it.
 ipcMain.handle('watch:start', async (_e, dir) => {
   if (watchers.has(dir)) return true
-  // Don't recursively watch the filesystem root or restricted system trees —
-  // they contain device/permission-protected files that make the watch throw.
+  // Don't watch the filesystem root or restricted system trees — they contain
+  // device/permission-protected files that make the watch throw.
   if (isRestrictedRoot(dir)) return false
   const w = chokidar.watch(dir, {
     ignored: (p) => WATCH_IGNORE_RE.test(p) || isRestrictedRoot(p),
     ignoreInitial: true,
-    depth: 12,
+    depth: 0,
     // Don't follow symlinks (they can point into restricted trees) and don't let
     // permission errors bubble up as fatal.
     followSymlinks: false,

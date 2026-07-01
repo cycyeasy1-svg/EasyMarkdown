@@ -20,8 +20,35 @@ import {
 } from '../../../src/renderer/src/keep-parser.js'
 import { inlineRichStyles } from '../../../src/renderer/src/components/editor-copy.js'
 import { isRelativePath } from '../../../src/renderer/src/components/editor-images.js'
+import { enhanceKeepTables } from '../../../src/renderer/src/components/editor-tablescroll.js'
 import { getMermaidSvg, peekMermaidSvg } from './mermaid-core.js'
 import { makeT } from './i18n.js'
+// Layout controls share the app's pure settings module directly (apply* set CSS
+// vars on the document root + the full-width body class; presets/bounds match).
+// We persist via the host's globalState instead of localStorage.
+import {
+  applyPageWidth,
+  applyFontSize,
+  applyZoom,
+  applyLineHeight,
+  applyParagraphSpacing,
+  DEFAULT_SETTINGS,
+  PAGE_WIDTH_PRESETS,
+  PAGE_WIDTH_MIN,
+  PAGE_WIDTH_MAX,
+  FONT_SIZE_PRESETS,
+  FONT_SIZE_MIN,
+  FONT_SIZE_MAX,
+  ZOOM_PRESETS,
+  ZOOM_MIN,
+  ZOOM_MAX,
+  LINE_HEIGHT_PRESETS,
+  LINE_HEIGHT_MIN,
+  LINE_HEIGHT_MAX,
+  PARA_SPACING_PRESETS,
+  PARA_SPACING_MIN,
+  PARA_SPACING_MAX
+} from '../../../src/renderer/src/settings.js'
 import './keep.css'
 import 'katex/dist/katex.min.css'
 
@@ -39,6 +66,9 @@ let filterState = {} // tableIdx -> { colIdx: Set(excluded values) }
 let baseUri = '' // webview URI of the document folder, for relative images
 let t = makeT('en')
 let ready = false
+let layout = { ...DEFAULT_SETTINGS } // page width / font size / zoom / line-height / para spacing
+const collapsed = new Set() // collapsed heading-section keys ("level:text"), survives re-render
+let tableScroll = null // wide-table top-scrollbar + floating-header handle (editor-tablescroll)
 
 const stripCR = (l) => (l.endsWith('\r') ? l.slice(0, -1) : l)
 const escapeHtmlLocal = (s) =>
@@ -52,6 +82,10 @@ window.addEventListener('message', (e) => {
   if (msg.type === 'init') {
     baseUri = (msg.baseUri || '').replace(/\/+$/, '')
     t = makeT(msg.lang || 'en')
+    if (msg.layout) layout = { ...DEFAULT_SETTINGS, ...msg.layout }
+    applyLayout(layout)
+    ensureSourceButton()
+    ensureLayoutButton()
     setText(msg.text || '')
   } else if (msg.type === 'update') {
     // External edit / undo / redo — reset the mirror and re-render. Any open edit
@@ -118,7 +152,10 @@ const cancelAfterPaint = () => {
 }
 
 function rerender() {
-  const r = renderDoc(lines, filterState, { srcEditLabel: t('keep.editSource') })
+  const r = renderDoc(lines, filterState, {
+    srcEditLabel: t('keep.editSource'),
+    collapseLabel: t('keep.toggleSection')
+  })
   r.blocks.forEach((b, i) => {
     b.bi = i
   })
@@ -148,9 +185,64 @@ function rerender() {
 
 function finishRender() {
   applyMultilineFlags()
+  applyCollapsed()
   Object.keys(filterState).forEach((ti) => applyFilter(parseInt(ti)))
   if (embedObserver) embedObserver.disconnect()
   observeEmbeds()
+  // Wide-table affordances (in-flow top scrollbar + viewport-fixed floating header)
+  // live partly outside the block flow (the float is appended to <body>), so rebuild
+  // them once the document is painted and tear the old ones down first.
+  tableScroll?.destroy()
+  tableScroll = enhanceKeepTables(host, host.closest('.editor-scroll'), {
+    onFilterClick: (clonedBtn) => openFilterPop(clonedBtn),
+    onHeaderEdit: (clonedTh) => {
+      // Resolve the clicked clone to the REAL <th> (same data-line/data-ci → same
+      // source line) and edit that, anchoring the popup under the visible clone.
+      const real = host.querySelector(
+        'th[data-line="' +
+          clonedTh.getAttribute('data-line') +
+          '"][data-ci="' +
+          clonedTh.getAttribute('data-ci') +
+          '"]'
+      )
+      if (real) openCellPop(real, clonedTh)
+    }
+  })
+}
+
+// ── heading section collapse / expand (display-only; never touches the source) ──
+// A heading block carries `data-hlevel`. Collapsing one hides every following
+// block until the next heading of the same or higher level. `collapsed` (a Set of
+// section keys) survives the full re-render an edit triggers; the live
+// `km-collapsed` class on heading blocks is what visibility is derived from.
+function sectionKey(headEl) {
+  const lvl = headEl.getAttribute('data-hlevel') || ''
+  const h = headEl.querySelector('h1,h2,h3,h4,h5,h6')
+  return lvl + ':' + (h ? (h.textContent || '').trim() : '')
+}
+function refreshVisibility() {
+  const stack = []
+  host.querySelectorAll('.km-block').forEach((el) => {
+    const isHeading = el.hasAttribute('data-hlevel')
+    const lvl = isHeading ? parseInt(el.getAttribute('data-hlevel')) : null
+    if (isHeading) while (stack.length && stack[stack.length - 1] >= lvl) stack.pop()
+    el.classList.toggle('km-section-hidden', stack.length > 0)
+    if (isHeading && el.classList.contains('km-collapsed')) stack.push(lvl)
+  })
+}
+function toggleSection(headEl) {
+  const isCollapsed = !headEl.classList.contains('km-collapsed')
+  headEl.classList.toggle('km-collapsed', isCollapsed)
+  if (isCollapsed) collapsed.add(sectionKey(headEl))
+  else collapsed.delete(sectionKey(headEl))
+  refreshVisibility()
+  tableScroll?.update() // hidden/shown tables change the layout
+}
+function applyCollapsed() {
+  host.querySelectorAll('.km-block[data-hlevel]').forEach((el) => {
+    el.classList.toggle('km-collapsed', collapsed.has(sectionKey(el)))
+  })
+  refreshVisibility()
 }
 
 function applyMultilineFlags() {
@@ -270,6 +362,7 @@ function closeFloating() {
   closeMenu()
   closeConfirm()
   closeCellPop()
+  closeLayoutPop()
 }
 
 // ── table cell editing ──
@@ -281,8 +374,8 @@ function closeCellPop() {
 }
 function repositionCellPop() {
   if (!activeCellPop) return
-  const { pop, td } = activeCellPop
-  const r = td.getBoundingClientRect()
+  const { pop } = activeCellPop
+  const r = (activeCellPop.anchor || activeCellPop.td).getBoundingClientRect()
   const pw = pop.offsetWidth || 360
   const ph = pop.offsetHeight || 160
   const left = Math.max(8, Math.min(r.left, window.innerWidth - pw - 8))
@@ -323,6 +416,7 @@ function commitCellPop() {
     if (td.tagName === 'TH') {
       const span = td.querySelector('.km-th-content')
       if (span) span.innerHTML = inline(val)
+      tableScroll?.refreshContent() // keep the floating-header clone's text in sync
     } else {
       td.innerHTML = inline(val)
     }
@@ -452,7 +546,7 @@ function openAfterClose(build) {
   })
 }
 
-function openCellPop(td) {
+function openCellPop(td, anchorEl) {
   openAfterClose(() => {
     if (!host.contains(td)) {
       const lineAttr = td.getAttribute('data-line')
@@ -485,7 +579,7 @@ function openCellPop(td) {
     pop.appendChild(ta)
     pop.appendChild(act)
     document.body.appendChild(pop)
-    activeCellPop = { pop, td, raw, lineIdx, colIdx }
+    activeCellPop = { pop, td, anchor: anchorEl && document.body.contains(anchorEl) ? anchorEl : td, raw, lineIdx, colIdx }
     repositionCellPop()
     ta.focus()
     ta.select()
@@ -819,7 +913,17 @@ function openFilterPop(btn) {
     closePop()
     applyFilter(ti)
     const cols = filterState[ti]
-    btn.classList.toggle('active', !!(cols && cols[ci] && cols[ci].size > 0))
+    const isActive = !!(cols && cols[ci] && cols[ci].size > 0)
+    // Toggle ▼ active on every copy of this column's button — the live header AND
+    // the floating-header clone (which may be the one that was clicked).
+    host
+      .querySelectorAll('.km-filter-btn[data-ti="' + ti + '"][data-ci="' + ci + '"]')
+      .forEach((b) => b.classList.toggle('active', isActive))
+    document
+      .querySelectorAll('.km-float-header .km-filter-btn[data-ti="' + ti + '"][data-ci="' + ci + '"]')
+      .forEach((b) => b.classList.toggle('active', isActive))
+    // Hiding rows can reflow column widths — re-measure the floating header.
+    tableScroll?.update()
   }
   document.body.appendChild(pop)
   activePop = pop
@@ -840,6 +944,207 @@ function applyFilter(ti) {
     })
     tr.classList.toggle('km-filtered', hide)
   })
+}
+
+// ── layout controls (page width / font size / zoom / line height / para spacing) ──
+// Shares the app's apply* (CSS vars on the document root + the full-width body
+// class). Values persist via the host (globalState), pushed on every change.
+let layoutPop = null
+let layoutBtn = null
+let sourceBtn = null
+
+function applyLayout(L) {
+  applyPageWidth(L.pageWidth)
+  applyFontSize(L.fontSize)
+  applyZoom(L.zoom)
+  applyLineHeight(L.lineHeight)
+  applyParagraphSpacing(L.paragraphSpacing)
+}
+function postLayout() {
+  vscode.postMessage({ type: 'layout', layout: layout })
+}
+function setLayout(key, value) {
+  layout = { ...layout, [key]: value }
+  applyLayout(layout)
+  postLayout()
+}
+
+function closeLayoutPop() {
+  if (layoutPop) {
+    layoutPop.remove()
+    layoutPop = null
+  }
+  if (layoutBtn) layoutBtn.classList.remove('active')
+}
+
+// One row: a label, preset chips, and a fine-tune slider. `presets` is an array
+// of { label, value }; `value === layout[key]` highlights the chip. `fmt` renders
+// the current numeric value. pageWidth is special-cased ('full' has no slider value).
+function buildLayoutRow({ label, key, presets, min, max, step, fmt }) {
+  const row = document.createElement('div')
+  row.className = 'km-lo-row'
+  const head = document.createElement('div')
+  head.className = 'km-lo-head'
+  const lab = document.createElement('span')
+  lab.className = 'km-lo-label'
+  lab.textContent = label
+  const val = document.createElement('span')
+  val.className = 'km-lo-val'
+  head.append(lab, val)
+  row.appendChild(head)
+
+  const chips = document.createElement('div')
+  chips.className = 'km-lo-presets'
+  const slider = document.createElement('input')
+  slider.type = 'range'
+  slider.className = 'km-lo-slider'
+  slider.min = String(min)
+  slider.max = String(max)
+  slider.step = String(step)
+
+  const sync = () => {
+    const cur = layout[key]
+    val.textContent = fmt(cur)
+    chips.querySelectorAll('.km-lo-chip').forEach((c) => {
+      c.classList.toggle('active', String(c.dataset.v) === String(cur))
+    })
+    if (cur === 'full') {
+      slider.disabled = true
+      slider.value = String(max)
+    } else {
+      slider.disabled = false
+      slider.value = String(cur)
+    }
+  }
+
+  presets.forEach((p) => {
+    const chip = document.createElement('button')
+    chip.type = 'button'
+    chip.className = 'km-lo-chip'
+    chip.textContent = p.label
+    chip.dataset.v = p.value
+    chip.onclick = () => {
+      setLayout(key, p.value)
+      sync()
+    }
+    chips.appendChild(chip)
+  })
+  slider.addEventListener('input', () => {
+    setLayout(key, key === 'pageWidth' ? parseInt(slider.value) : parseFloat(slider.value))
+    sync()
+  })
+  row.appendChild(chips)
+  row.appendChild(slider)
+  sync()
+  return row
+}
+
+function openLayoutPop() {
+  closeFloating()
+  const pop = document.createElement('div')
+  pop.className = 'km-layout-pop'
+  pop.appendChild(
+    buildLayoutRow({
+      label: t('settings.pageWidth'),
+      key: 'pageWidth',
+      presets: PAGE_WIDTH_PRESETS.map((p) => ({
+        label: t('settings.width.' + p.id),
+        value: p.width
+      })),
+      min: PAGE_WIDTH_MIN,
+      max: PAGE_WIDTH_MAX,
+      step: 20,
+      fmt: (v) => (v === 'full' ? t('settings.width.full') : v + 'px')
+    })
+  )
+  pop.appendChild(
+    buildLayoutRow({
+      label: t('settings.fontSize'),
+      key: 'fontSize',
+      presets: FONT_SIZE_PRESETS.map((p) => ({ label: t('settings.font.' + p.id), value: p.size })),
+      min: FONT_SIZE_MIN,
+      max: FONT_SIZE_MAX,
+      step: 1,
+      fmt: (v) => v + 'px'
+    })
+  )
+  pop.appendChild(
+    buildLayoutRow({
+      label: t('settings.zoom'),
+      key: 'zoom',
+      presets: ZOOM_PRESETS.map((p) => ({ label: Math.round(p.zoom * 100) + '%', value: p.zoom })),
+      min: ZOOM_MIN,
+      max: ZOOM_MAX,
+      step: 0.05,
+      fmt: (v) => Math.round(v * 100) + '%'
+    })
+  )
+  pop.appendChild(
+    buildLayoutRow({
+      label: t('settings.lineHeight'),
+      key: 'lineHeight',
+      presets: LINE_HEIGHT_PRESETS.map((p) => ({
+        label: t('settings.lineHeightPreset.' + p.id),
+        value: p.value
+      })),
+      min: LINE_HEIGHT_MIN,
+      max: LINE_HEIGHT_MAX,
+      step: 0.05,
+      fmt: (v) => Number(v).toFixed(2)
+    })
+  )
+  pop.appendChild(
+    buildLayoutRow({
+      label: t('settings.paragraphSpacing'),
+      key: 'paragraphSpacing',
+      presets: PARA_SPACING_PRESETS.map((p) => ({
+        label: t('settings.paraSpacingPreset.' + p.id),
+        value: p.value
+      })),
+      min: PARA_SPACING_MIN,
+      max: PARA_SPACING_MAX,
+      step: 0.1,
+      fmt: (v) => Number(v).toFixed(1) + 'em'
+    })
+  )
+  document.body.appendChild(pop)
+  layoutPop = pop
+  if (layoutBtn) layoutBtn.classList.add('active')
+}
+
+function ensureLayoutButton() {
+  if (layoutBtn) return
+  const btn = document.createElement('button')
+  btn.type = 'button'
+  btn.className = 'km-layout-btn'
+  btn.title = t('settings.layoutLabel')
+  btn.setAttribute('aria-label', t('settings.layoutLabel'))
+  btn.innerHTML =
+    '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg>'
+  btn.onclick = (e) => {
+    e.stopPropagation()
+    if (layoutPop) closeLayoutPop()
+    else openLayoutPop()
+  }
+  document.body.appendChild(btn)
+  layoutBtn = btn
+}
+
+// In-editor "source" button: one click back to the text editor (the host reopens
+// this file with the default editor). Mirrors the title-bar icon, but on the page.
+function ensureSourceButton() {
+  if (sourceBtn) return
+  const btn = document.createElement('button')
+  btn.type = 'button'
+  btn.className = 'km-source-btn'
+  btn.title = t('mode.source')
+  btn.innerHTML =
+    '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg><span>' +
+    escapeHtmlLocal(t('mode.source')) +
+    '</span>'
+  btn.onclick = () => vscode.postMessage({ type: 'switchToSource' })
+  document.body.appendChild(btn)
+  sourceBtn = btn
 }
 
 // ── links ──
@@ -866,6 +1171,7 @@ function activateLink(href) {
 let linkTimer = null
 function onDblClick(e) {
   clearTimeout(linkTimer)
+  if (e.target.closest('.km-collapse-toggle')) return // a fold toggle, not an edit
   const cell = e.target.closest('td, th')
   if (cell && host.contains(cell) && !e.target.closest('.km-filter-btn')) {
     openCellPop(cell)
@@ -877,6 +1183,12 @@ function onDblClick(e) {
   }
 }
 function onClick(e) {
+  const ct = e.target.closest('.km-collapse-toggle')
+  if (ct && host.contains(ct)) {
+    const head = ct.closest('.km-block[data-hlevel]')
+    if (head) toggleSection(head)
+    return
+  }
   const a = e.target.closest('a')
   if (a && host.contains(a) && !e.shiftKey && (window.getSelection()?.isCollapsed ?? true)) {
     const href = a.getAttribute('href')
@@ -937,6 +1249,14 @@ function onDocDown(e) {
     closePop()
   }
   if (activeMenu && !activeMenu.contains(e.target)) closeMenu()
+  if (
+    layoutPop &&
+    !layoutPop.contains(e.target) &&
+    layoutBtn &&
+    !layoutBtn.contains(e.target)
+  ) {
+    closeLayoutPop()
+  }
 }
 function onEsc(e) {
   if (e.key !== 'Escape') return
@@ -947,10 +1267,12 @@ function onScroll() {
   closeMenu()
   repositionCellPop()
   repositionFilterPop()
+  tableScroll?.update()
 }
 function onResize() {
   repositionCellPop()
   repositionFilterPop()
+  tableScroll?.update()
 }
 
 host.addEventListener('dblclick', onDblClick)

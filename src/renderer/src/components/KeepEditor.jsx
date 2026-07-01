@@ -3,11 +3,15 @@ import { useI18n } from '../i18n.jsx'
 import {
   renderDoc,
   renderBlockInner,
+  renderBlockRange,
+  parseDoc,
+  toViewLines,
   inline,
   replaceCellInLine,
   insertColumnInLine,
   removeColumnInLine,
-  buildTableRow
+  buildTableRow,
+  replaceBlockLines
 } from '../keep-parser.js'
 import { inlineRichStyles } from './editor-copy.js'
 import { dirOf } from './editor-images.js'
@@ -87,6 +91,10 @@ export default function KeepEditor({
   // confirm modal). Set inside the mount effect; called when the pane leaves view
   // so a floating edit bar never lingers over another tab's document.
   const closeFloatingRef = useRef(null)
+  // Re-measure multi-line flags for the whole doc. Set inside the mount effect;
+  // called when the pane RE-ENTERS view, since blocks streamed while it was hidden
+  // measured 0 height (display:none) and may have missed their km-multiline class.
+  const remeasureRef = useRef(null)
 
   useEffect(() => {
     const host = hostRef.current
@@ -109,10 +117,6 @@ export default function KeepEditor({
       onOutlineRef.current(heads)
     }
 
-    // Docs above this many lines build tens of thousands of DOM nodes in one
-    // synchronous innerHTML — enough to stall the main thread for a visible beat.
-    // For those we paint a "loading…" placeholder and yield a frame first.
-    const LARGE_DOC_LINES = 1200
     let afterPaintRaf = 0 // pending requestAnimationFrame id (cancelled on re-render/destroy)
     let embedObserver = null // IntersectionObserver: render mermaid/math only when near view
     let katexPromise = null // lazily-loaded KaTeX module (one import per session)
@@ -123,59 +127,153 @@ export default function KeepEditor({
       }
     }
 
-    // Full re-render from rawLines (re-parse → innerHTML). The layout-measuring and
-    // embed work is pushed PAST first paint (finishRender) so the document is
-    // visible/scrollable immediately and the main thread is free for input (the
-    // :hover highlight, caret) instead of stalling on a whole-doc reflow.
-    const rerender = () => {
-      if (destroyed) return
-      const { html, blocks, viewLines } = renderDoc(rawLinesRef.current, filterStateRef.current, {
-        srcEditLabel: tRef.current('keep.editSource'),
-        collapseLabel: tRef.current('keep.toggleSection'),
-        baseDir: dirOf(docPathRef.current)
-      })
-      // tag blocks with their index so the outline can reference them
-      blocks.forEach((b, i) => {
-        b.bi = i
-      })
-      blocksRef.current = blocks
-      viewLinesRef.current = viewLines
-
-      const paint = () => {
-        if (destroyed) return
-        host.innerHTML = html
-        pushOutline()
-        cancelAfterPaint()
-        afterPaintRaf = requestAnimationFrame(finishRender)
-      }
-
-      cancelAfterPaint()
-      if (blocks.length && rawLinesRef.current.length > LARGE_DOC_LINES) {
-        // Show the placeholder, then yield two frames so it actually paints before
-        // the blocking innerHTML build (one frame to commit, one to let it display).
-        host.innerHTML =
-          '<div class="km-loading"><span class="km-spinner"></span>' +
-          escapeHtmlLocal(tRef.current('keep.loading')) +
-          '</div>'
-        afterPaintRaf = requestAnimationFrame(() => {
-          afterPaintRaf = requestAnimationFrame(paint)
-        })
-      } else {
-        paint()
+    // ── progressive (chunked) render ──
+    // A big doc built in ONE synchronous innerHTML stalls the main thread for a
+    // visible beat (tens of thousands of DOM nodes at once). Instead we parse the
+    // whole document up front (cheap, and the full block map is needed immediately
+    // for the outline / edit indices) but paint it in BLOCK-SIZED chunks: the first
+    // chunk synchronously (the top is instantly visible + scrollable), the rest
+    // appended across idle frames so the user can read/scroll while it streams in.
+    const CHUNK_BLOCKS = 150 // blocks per batch; ≤ this many → one synchronous paint
+    let chunkToken = 0 // bumped on every rerender/destroy → in-flight chunk steps bail
+    let chunkIdle = 0 // pending idle-callback id for the next chunk
+    let pendingFrom = 0 // next not-yet-painted block index (Infinity ⇒ fully painted)
+    const idle = (fn) =>
+      typeof requestIdleCallback === 'function'
+        ? requestIdleCallback(fn, { timeout: 200 })
+        : requestAnimationFrame(() => fn())
+    const cancelIdle = (h) =>
+      typeof cancelIdleCallback === 'function' ? cancelIdleCallback(h) : cancelAnimationFrame(h)
+    const cancelChunks = () => {
+      chunkToken++
+      if (chunkIdle) {
+        cancelIdle(chunkIdle)
+        chunkIdle = 0
       }
     }
 
-    // Post-paint batch: the layout-dependent + lazy work that needn't block the
-    // first paint. Runs one frame after innerHTML so the doc is already on screen.
-    const finishRender = () => {
+    const renderOpts = () => ({
+      srcEditLabel: tRef.current('keep.editSource'),
+      collapseLabel: tRef.current('keep.toggleSection'),
+      filterState: filterStateRef.current,
+      baseDir: dirOf(docPathRef.current)
+    })
+    // Running table index at the start of each block (tables key filter state by
+    // index, so a chunk must continue the count). Rebuilt per render.
+    let tableIdxAt = []
+    const computeTableIdx = (blocks) => {
+      let ti = 0
+      tableIdxAt = blocks.map((b) => {
+        const cur = ti
+        if (b.type === 'table') ti++
+        return cur
+      })
+    }
+
+    // Full re-render from rawLines (re-parse → chunked paint). Layout-measuring +
+    // embed work is pushed PAST each chunk's paint so the doc is visible/scrollable
+    // immediately and the main thread stays free for input (hover highlight, caret).
+    const rerender = () => {
       if (destroyed) return
-      applyMultilineFlags()
-      applyCollapsed() // restore folded sections AFTER measuring (hidden blocks measure 0)
-      Object.keys(filterStateRef.current).forEach((ti) => applyFilter(parseInt(ti)))
+      const viewLines = toViewLines(rawLinesRef.current)
+      const blocks = parseDoc(viewLines)
+      blocks.forEach((b, i) => {
+        b.bi = i // tag blocks with their index so the outline / edits can reference them
+      })
+      blocksRef.current = blocks
+      viewLinesRef.current = viewLines
+      computeTableIdx(blocks)
+
+      cancelAfterPaint()
+      cancelChunks()
+      const myToken = ++chunkToken
+      const total = blocks.length
+
+      if (!total) {
+        host.innerHTML = '<div class="km-empty"></div>'
+        pushOutline()
+        pendingFrom = Infinity
+        return
+      }
+
+      const opts = renderOpts()
+      const first = Math.min(CHUNK_BLOCKS, total)
+      host.innerHTML = renderBlockRange(blocks, viewLines, 0, first, 0, opts).html
+      pushOutline() // outline comes from the full block map — nav works before full paint
+      pendingFrom = first
+      cancelAfterPaint()
+      afterPaintRaf = requestAnimationFrame(() => finishRenderRange(0, first, first >= total))
+
+      if (first >= total) {
+        pendingFrom = Infinity
+        return
+      }
+      // Stream the remaining chunks in idle time. Each step re-checks the token so a
+      // newer rerender (or destroy) abandons a stale stream instead of appending to
+      // a DOM that's already been replaced.
+      const step = () => {
+        chunkIdle = 0
+        if (destroyed || myToken !== chunkToken) return
+        const from = pendingFrom
+        const to = Math.min(from + CHUNK_BLOCKS, total)
+        host.insertAdjacentHTML(
+          'beforeend',
+          renderBlockRange(blocks, viewLines, from, to, tableIdxAt[from], opts).html
+        )
+        pendingFrom = to
+        const last = to >= total
+        finishRenderRange(from, to, last)
+        if (last) pendingFrom = Infinity
+        else chunkIdle = idle(step)
+      }
+      chunkIdle = idle(step)
+    }
+
+    // Synchronously paint every remaining chunk NOW. Called before any operation
+    // that needs the WHOLE document in the DOM (outline jump / find / export),
+    // which can't wait for the idle stream to finish.
+    const flushRemaining = () => {
+      if (destroyed || pendingFrom === Infinity) return
+      if (chunkIdle) {
+        cancelIdle(chunkIdle)
+        chunkIdle = 0
+      }
+      const blocks = blocksRef.current
+      const viewLines = viewLinesRef.current
+      const total = blocks.length
+      const opts = renderOpts()
+      while (pendingFrom < total) {
+        const from = pendingFrom
+        const to = Math.min(from + CHUNK_BLOCKS, total)
+        host.insertAdjacentHTML(
+          'beforeend',
+          renderBlockRange(blocks, viewLines, from, to, tableIdxAt[from], opts).html
+        )
+        pendingFrom = to
+        finishRenderRange(from, to, to >= total)
+      }
+      pendingFrom = Infinity
+    }
+
+    // Post-paint batch for the blocks in `[from, to)`: layout-dependent + lazy work
+    // that needn't block the chunk's paint. Per-chunk work (multiline flags, embed
+    // observers, and any active collapse/filter so streamed-in blocks inherit them)
+    // runs every chunk; whole-document affordances (filter row counts, the wide-
+    // table floating header that needs every table present) run only on the last.
+    const finishRenderRange = (from, to, isLast) => {
+      if (destroyed) return
+      applyMultilineFlagsRange(from, to)
+      observeEmbedsRange(from, to)
+      // On a fresh open both sets are empty (→ skipped); they matter when a large
+      // doc with folded sections / active filters is fully re-rendered after an edit.
+      if (collapsedRef.current.size) applyCollapsed()
+      const fkeys = Object.keys(filterStateRef.current)
+      if (fkeys.length) fkeys.forEach((ti) => applyFilter(parseInt(ti)))
+      if (!isLast) return
       reportFilter()
       // Wide-table affordances: the top synced horizontal scrollbar + the
       // viewport-fixed floating header live outside the normal block flow (the
-      // float is appended to body), so rebuild them on every full re-render and
+      // float is appended to body), so rebuild them once every table is painted and
       // tear the old ones down first.
       tableScrollRef.current?.destroy()
       tableScrollRef.current = enhanceKeepTables(host, host.closest('.editor-scroll'), {
@@ -194,36 +292,32 @@ export default function KeepEditor({
           if (real) openCellPop(real, clonedTh)
         }
       })
-      if (embedObserver) embedObserver.disconnect() // drop stale observations from the old DOM
-      observeEmbeds()
     }
 
-    // Tag multi-line blocks so the edit button pins to the top-right; single-line
-    // blocks keep it vertically centered. Primary signal is the source line span; a
-    // height check also catches a long single line that wraps. Two phases — read all
-    // layout first, THEN write all classes — so writes don't force a reflow on the
-    // next read. The font size is uniform across the writing area, so read it ONCE
-    // (not getComputedStyle per block — that per-block style recalc was a chunk of
-    // the startup stall on docs with many short blocks).
-    const applyMultilineFlags = () => {
-      const elByBi = new Map()
-      host.querySelectorAll('.km-block').forEach((el) => {
-        const bi = el.getAttribute('data-bi')
-        if (bi != null) elByBi.set(Number(bi), el)
-      })
+    const blockElByBi = (bi) => host.querySelector('.km-block[data-bi="' + bi + '"]')
+
+    // Tag multi-line blocks in `[from, to)` so the edit button pins to the top-right;
+    // single-line blocks keep it vertically centered. Primary signal is the source
+    // line span; a height check also catches a long single line that wraps. Two
+    // phases — read all layout first, THEN write all classes — so writes don't force
+    // a reflow on the next read. The font size is uniform across the writing area, so
+    // read it ONCE per chunk (not getComputedStyle per block — that per-block style
+    // recalc was a chunk of the startup stall on docs with many short blocks).
+    const applyMultilineFlagsRange = (from, to) => {
       const baseFs = parseFloat(getComputedStyle(host).fontSize) || 16
       const pending = []
-      blocksRef.current.forEach((b, bi) => {
-        if (b.type === 'table') return
-        const bl = elByBi.get(bi)
-        if (!bl) return
+      for (let bi = from; bi < to; bi++) {
+        const b = blocksRef.current[bi]
+        if (!b || b.type === 'table') continue
+        const bl = blockElByBi(bi)
+        if (!bl) continue
         let multi = b.end > b.start
         if (!multi) {
           const content = Array.from(bl.children).find((c) => !c.classList.contains('km-src-edit'))
           if (content) multi = content.offsetHeight > baseFs * 2.2
         }
         pending.push([bl, multi])
-      })
+      }
       pending.forEach(([bl, multi]) => bl.classList.toggle('km-multiline', multi))
     }
     // Single-block variant for scoped restores (one getComputedStyle is fine).
@@ -385,6 +479,15 @@ export default function KeepEditor({
     const observeEmbeds = (root) => {
       ;(root || host).querySelectorAll('.km-mermaid, .km-math').forEach(observeEmbed)
     }
+    // Arm embeds only within the chunk just painted (`[from, to)`) — scanning the
+    // whole growing host on every chunk would be O(n²); embeds are appended at the
+    // end, so the new ones live under those block indices.
+    const observeEmbedsRange = (from, to) => {
+      for (let bi = from; bi < to; bi++) {
+        const bl = blockElByBi(bi)
+        if (bl) bl.querySelectorAll('.km-mermaid, .km-math').forEach(observeEmbed)
+      }
+    }
 
     // Tell the parent how many rows survive the active filters (status bar). Only
     // counts tables that actually have a filter applied; null = no filter active.
@@ -503,11 +606,8 @@ export default function KeepEditor({
         const { ta, b } = cur
         // Inherit this block's original EOL style (\r presence) so untouched
         // bytes never shift; every replacement line follows the same convention.
-        const eol = (rawLinesRef.current[b.start] || '').endsWith('\r') ? '\r' : ''
-        const newLines = ta.value
-          .split('\n')
-          .map((l) => (l.endsWith('\r') ? l.slice(0, -1) : l) + eol)
-        rawLinesRef.current.splice(b.start, b.end - b.start + 1, ...newLines)
+        // (Pure helper — see replaceBlockLines in keep-parser.js, unit-tested.)
+        rawLinesRef.current = replaceBlockLines(rawLinesRef.current, b.start, b.end, ta.value)
         emitChange()
         rerender() // line count may change → indices shift → rebuild the document
         return
@@ -1257,6 +1357,11 @@ export default function KeepEditor({
       closeCellPop()
       tableScrollRef.current?.hide() // a fixed floating header would otherwise linger
     }
+    // Only worth re-measuring once the doc is fully streamed; mid-stream the next
+    // chunk's finishRenderRange will measure the rest anyway (the host is visible again).
+    remeasureRef.current = () => {
+      if (pendingFrom === Infinity) applyMultilineFlagsRange(0, blocksRef.current.length)
+    }
 
     host.addEventListener('dblclick', onDblClick)
     host.addEventListener('click', onClick)
@@ -1276,6 +1381,7 @@ export default function KeepEditor({
       // the live DOM), so copy each already-rendered diagram/formula across by index
       // — both come from the same rawLines, so the Nth placeholder matches.
       getDocHTML: () => {
+        flushRemaining() // the by-index embed copy below needs every live placeholder present
         const tmp = document.createElement('div')
         tmp.innerHTML = renderDoc(rawLinesRef.current, {}, { forExport: true, baseDir: dirOf(docPathRef.current) }).html
         // Embeds now render lazily (only when scrolled near view), so the live host
@@ -1297,6 +1403,10 @@ export default function KeepEditor({
         return tmp.innerHTML
       },
       setBlock: () => {}, // no block model in keep mode
+      // Paint any not-yet-streamed chunks NOW. App calls this before an outline jump
+      // or a find run, both of which query the live DOM and would otherwise miss a
+      // heading / match still sitting in an un-appended chunk.
+      ensureRendered: () => flushRemaining(),
       // Outline jump: if the target heading is buried in a collapsed section, expand
       // its ancestors first so App's scrollIntoView lands on a visible element.
       revealHeading: (el) => revealHeading(el)
@@ -1305,6 +1415,7 @@ export default function KeepEditor({
     return () => {
       destroyed = true
       cancelAfterPaint()
+      cancelChunks() // abandon any in-flight progressive-render stream
       if (embedObserver) embedObserver.disconnect()
       clearTimeout(linkTimerRef)
       closePop()
@@ -1332,8 +1443,17 @@ export default function KeepEditor({
   // appended to document.body, so they'd keep showing over the next document.
   // Tear them down here. (A still-open block source editor lives inside the
   // hidden host, so it's hidden with the wrapper; no need to touch it.)
+  const wasHiddenRef = useRef(false)
   useEffect(() => {
-    if (!inView) closeFloatingRef.current?.()
+    if (!inView) {
+      wasHiddenRef.current = true
+      closeFloatingRef.current?.()
+    } else if (wasHiddenRef.current) {
+      // Only after a hide → show: fix km-multiline on blocks that streamed in while
+      // the pane was display:none (they measured 0 height). Skips the no-op remeasure
+      // on the very first mount, where the pane was visible the whole time.
+      remeasureRef.current?.()
+    }
   }, [inView])
 
   // Hot-swap the static "edit source" labels when the UI language changes. The

@@ -34,7 +34,98 @@
           "description": "UI language for the keep editor (auto follows VSCode's display language)."
         }
       }
-    }
+    },
+    "commands": [
+      {
+        "command": "easymarkdown.openWithKeep",
+        "title": "Open in Keep Mode",
+        "category": "EasyMarkdown",
+        "icon": "$(book)"
+      },
+      {
+        "command": "easymarkdown.openWithText",
+        "title": "Open in Source Mode",
+        "category": "EasyMarkdown",
+        "icon": "$(code)"
+      },
+      {
+        "command": "easymarkdown.openKeepToSide",
+        "title": "Open Keep View to the Side",
+        "category": "EasyMarkdown",
+        "icon": "$(split-horizontal)"
+      }
+    ],
+    "menus": {
+      "editor/title": [
+        {
+          "command": "easymarkdown.openWithKeep",
+          "when": "resourceExtname =~ /\\.(md|markdown)$/ && activeCustomEditorId != easymarkdown.keep",
+          "group": "navigation@9"
+        },
+        {
+          "command": "easymarkdown.openKeepToSide",
+          "when": "editorLangId == markdown && activeCustomEditorId != easymarkdown.keep",
+          "group": "navigation@10"
+        },
+        {
+          "command": "easymarkdown.openWithText",
+          "when": "activeCustomEditorId == easymarkdown.keep",
+          "group": "navigation@9"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "easymarkdown.openWithKeep",
+          "when": "editorLangId == markdown",
+          "group": "navigation@9"
+        },
+        {
+          "command": "easymarkdown.openKeepToSide",
+          "when": "editorLangId == markdown",
+          "group": "navigation@10"
+        }
+      ],
+      "editor/title/context": [
+        {
+          "command": "easymarkdown.openWithKeep",
+          "when": "resourceExtname =~ /\\.(md|markdown)$/",
+          "group": "navigation@9"
+        },
+        {
+          "command": "easymarkdown.openKeepToSide",
+          "when": "resourceExtname =~ /\\.(md|markdown)$/",
+          "group": "navigation@10"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "easymarkdown.openWithKeep",
+          "when": "resourceExtname =~ /\\.(md|markdown)$/"
+        },
+        {
+          "command": "easymarkdown.openWithText",
+          "when": "resourceExtname =~ /\\.(md|markdown)$/"
+        },
+        {
+          "command": "easymarkdown.openKeepToSide",
+          "when": "resourceExtname =~ /\\.(md|markdown)$/"
+        }
+      ]
+    },
+    "keybindings": [
+      {
+        "command": "easymarkdown.openWithKeep",
+        "key": "ctrl+shift+m",
+        "mac": "cmd+shift+m",
+        "when": "resourceExtname =~ /\\.(md|markdown)$/ && activeCustomEditorId != easymarkdown.keep"
+      },
+      {
+        "command": "easymarkdown.openWithText",
+        "key": "ctrl+shift+m",
+        "mac": "cmd+shift+m",
+        "when": "activeCustomEditorId == easymarkdown.keep"
+      }
+    ]
   },
   "scripts": {
     "build": "node esbuild.mjs",

@@ -63,7 +63,7 @@ function stats(md) {
   const text = (md || '')
     .replace(/```[\s\S]*?```/g, ' ')
     .replace(/`[^`]*`/g, ' ')
-    .replace(/[#>*_~\-\[\]()!]/g, ' ')
+    .replace(/[#>*_~\-[\]()!]/g, ' ')
   const words = (text.match(/[\p{L}\p{N}]+/gu) || []).length
   const chars = (md || '').length
   const charsNoSpace = (md || '').replace(/\s/g, '').length

@@ -1,6 +1,7 @@
 const vscode = require('vscode')
 
 const VIEW_TYPE = 'easymarkdown.keep'
+const LAYOUT_KEY = 'easymarkdown.keep.layout'
 
 /**
  * CustomTextEditorProvider for "keep mode" — the TextDocument is the single
@@ -53,7 +54,8 @@ class KeepEditorProvider {
         type: 'init',
         text: lastKnownText,
         baseUri,
-        lang
+        lang,
+        layout: this.context.globalState.get(LAYOUT_KEY) || null
       })
     }
 
@@ -89,6 +91,13 @@ class KeepEditorProvider {
         } catch {
           /* ignore malformed url */
         }
+      } else if (msg.type === 'layout') {
+        // Persist layout prefs globally (mirrors the app's single localStorage
+        // prefs object), so every keep editor shares the same layout.
+        this.context.globalState.update(LAYOUT_KEY, msg.layout)
+      } else if (msg.type === 'switchToSource') {
+        // The in-editor "source" button → reopen this file in the text editor.
+        vscode.commands.executeCommand('vscode.openWith', document.uri, 'default')
       }
     })
 

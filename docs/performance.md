@@ -77,12 +77,13 @@ const Editor = lazy(() => import('./components/Editor.jsx'))
 | **E1 局部更新：单元格** | [KeepEditor.jsx](../src/renderer/src/components/KeepEditor.jsx) `commitCellPop` | 改一个单元格也全文重建 | 单元格编辑只改一行一列、不移动任何行/块索引 → 直接重绘那一个 `<td>/<th>`（表头保留筛选 ▼，只改 `.km-th-content`），并同步该行 `viewLines`。不再 `rerender()` |
 | **E2 局部更新：筛选** | `openFilterPop` 的确认 | 筛选只切行可见性，却全文重建 | 改为 `applyFilter(ti)` + `reportFilter()` + 手动同步 ▼ 的 `active` 类。完全不动 rawLines / DOM 结构 |
 | **E3 局部恢复：取消编辑** | `closeBlockEdit(commit)` | 无改动取消也全文重建（块的 innerHTML 被换成了 textarea，所以要重建） | 抽出 `renderBlockInner`（[keep-parser.js](../src/renderer/src/keep-parser.js)）单块渲染；干净取消时只重建**那一个块**的 DOM。提交仍走全量（行数可能变、索引会移） |
-| **E4 重活推到首帧后** | `rerender` 拆 `paint` / `finishRender` | 布局测量 + embeds 与 innerHTML 挤在一帧同步跑 | 先 `innerHTML` 出文字（可见可滚），下一帧 `requestAnimationFrame` 再做布局测量 / 筛选 / embeds。主线程及时让位给输入与 `:hover` |
-| **E5 布局测量省一半** | `applyMultilineFlags` | 每个非表格块各跑一次 `getComputedStyle().fontSize` | 字号全篇一致 → 只在 `host` 上读一次基准字号；保留"先读后写"两段式批处理 |
+| **E4 重活推到首帧后** | `rerender` 拆 `paint` / `finishRenderRange` | 布局测量 + embeds 与 innerHTML 挤在一帧同步跑 | 先 `innerHTML` 出文字（可见可滚），下一帧 `requestAnimationFrame` 再做布局测量 / 筛选 / embeds。主线程及时让位给输入与 `:hover`。**E8 后按 chunk 粒度执行** |
+| **E5 布局测量省一半** | `applyMultilineFlagsRange` | 每个非表格块各跑一次 `getComputedStyle().fontSize` | 字号全篇一致 → 只在 `host` 上读一次基准字号；保留"先读后写"两段式批处理 |
 | **E6 embeds 懒渲染** | mermaid / KaTeX | mount 时把全篇图表 / 公式一次性渲染 | 改 `IntersectionObserver`（root=滚动容器，`rootMargin:400px`），只渲染进入视口附近的；缓存命中的图直接画、不等滚动。导出 `getDocHTML` 先从 mermaid 缓存回填，避免"没滚到的图导不出" |
-| **E7 加载提示** | `rerender` + [app.css](../src/renderer/src/styles/app.css) `.km-loading` / `.km-spinner` | 超大文档 innerHTML 同步构建那一下无反馈 | 行数 > `LARGE_DOC_LINES`(1200) 时先画"加载中…"占位、让两帧后再做阻塞构建，给用户反馈 |
+| **E7 加载提示（已被 E8 取代）** | ~~`rerender` + `.km-loading` / `.km-spinner`~~ | 超大文档 innerHTML 同步构建那一下无反馈 | 旧方案：行数 > 1200 时先画"加载中…"占位再阻塞构建。**E8 改为分块流式后不再需要占位**（首块即时出），此路径已移除；`.km-loading` CSS / `keep.loading` 文案保留未用 |
+| **E8 分块渐进渲染（首屏关键）** | [KeepEditor.jsx](../src/renderer/src/components/KeepEditor.jsx) `rerender` / `flushRemaining` + [keep-parser.js](../src/renderer/src/keep-parser.js) `renderBlockRange` | 整篇一次性 `host.innerHTML` 同步构建上万节点，主线程一卡到底（占位只是转圈，没让构建变增量） | 全文 `parseDoc` 仍同步（便宜，大纲/编辑索引要完整块表），但 DOM 按**块**分批：首块（`CHUNK_BLOCKS`=150）同步出、可立即滚动预览，其余用 `requestIdleCallback` 逐批 `insertAdjacentHTML` 追加，每批跑各自的 `finishRenderRange`。大纲跳转 / find / 导出会先 `ensureRendered()`（`flushRemaining`）同步补齐未画的块；切走 tab 隐藏期间流入的块在回到视图时由 `remeasureRef` 补测 `km-multiline` |
 
-> 取舍：E1/E2/E3 把高频编辑交互从"全文 O(整篇)"降到"O(改动局部)"，是这份 DTO 文档卡顿的直接解药（双击取消不再重建 2600 行表格）。E4~E7 针对"打开/切换"那一下的体感与反馈。**首屏构建超大表格本身的同步成本仍在**（innerHTML 上万节点），E7 给反馈但没消除——彻底解决需表格虚拟化（见待办，回归面大，暂不做）。
+> 取舍：E1/E2/E3 把高频编辑交互从"全文 O(整篇)"降到"O(改动局部)"，是这份 DTO 文档卡顿的直接解药（双击取消不再重建 2600 行表格）。E4~E6 针对"打开/切换"那一下的体感与反馈。**E8 把首屏 DOM 构建从"一次性卡完"改成"首块即时 + 其余空闲流式"**，是大文档（多块）打开体感的关键改善。**残留**：单张超大表格是**一个块**，块粒度分块无法切分它——首屏构建一张 2600 行表的同步成本仍在；彻底解决需表格行级虚拟化（见待办，回归面大，暂不做）。
 
 ### 待办（结构性 / 中等投入，按需再做）
 
