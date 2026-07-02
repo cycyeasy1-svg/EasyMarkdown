@@ -1,47 +1,51 @@
-# EasyMarkdown Keep (VSCode extension)
+# EasyMarkdown
 
-A VSCode port of [EasyMarkdown](../../)'s **keep mode** — a source-backed live
-preview that lets you edit Markdown inline (tables, block source, Excel-style
-column filters) while keeping the file's bytes intact everywhere you didn't
-touch (**zero diff**). Built for Git-tracked spec documents.
+A source-backed **live preview + inline editing** editor for Markdown — edit
+tables, block source, headings and more directly in the rendered view, while the
+file's bytes stay untouched everywhere you didn't edit (**zero diff**). Built for
+Git-tracked spec documents. This is the VSCode edition of EasyMarkdown's "keep
+mode".
 
 The `TextDocument` is the single source of truth: every edit is applied as a
-minimal line-range `WorkspaceEdit`, so VSCode owns dirty state, undo/redo and
-save.
+minimal line-range edit, so VSCode owns dirty state, undo/redo and save.
 
-## How it works
+## Features
 
-- Registered as an **optional** custom editor (`priority: "option"`) for
-  `*.md` / `*.markdown`. Open a file, then **Reopen Editor With… → EasyMarkdown
-  Keep** (or set it as your default for Markdown).
-- The core parser/renderer is **shared** with the desktop app by direct import
-  (`src/renderer/src/keep-parser.js`, `editor-images.js`, `editor-copy.js`) — no
-  copy, single source of truth. Only the Mermaid render helpers and a small i18n
-  subset are kept local (to avoid pulling Milkdown / React into the bundle); these
-  are flagged for later de-duplication.
+- **Zero-diff inline editing** — double-click a table cell or block to edit its
+  source; only the touched lines are rewritten.
+- **Tables** — Excel-style per-column filters, add/remove rows & columns, a
+  sticky floating header for wide tables, rich copy (cell / row / column / table).
+- **Heading fold** — collapse/expand a heading's whole section.
+- **Outline** — a heading navigator; jump to any heading (auto-expands folded
+  sections).
+- **Find** — `Ctrl+F` / `Cmd+F` in-document search with match count and next/prev.
+- **Settings** (the gear button) — color **theme** (follow VSCode, or the built-in
+  Warm Light / Warm Dark), UI **language** (follow system, or 中文 / 日本語 /
+  English), and **layout** (page width, font size, zoom, line height, paragraph
+  spacing).
+- **Mermaid & KaTeX** — click a diagram's magnifier to open a zoom lightbox
+  (wheel to zoom, drag to pan) so dense diagrams stay legible.
+- Relative images, live sync with external edits and undo/redo.
 
-## Develop
+## Getting started
 
-```bash
-cd packages/vscode-extension
-npm install
-npm run build        # esbuild → dist/extension.cjs + dist/webview.js + dist/webview.css
-# then press F5 in VSCode (Run Extension) to launch an Extension Development Host
-```
+The editor is registered as an **optional** editor for Markdown (it does not take
+over your default editor). Open a `.md` file, then switch in any of these ways:
 
-`npm run watch` rebuilds on change.
+- Click **📖 Open in Keep Mode** (the CodeLens at the top of the file), or the
+  book icon in the editor title bar.
+- Right-click in the editor → **Open in Keep Mode** or **Open Keep View to the
+  Side** (split beside the source).
+- Press `Ctrl+Shift+M` (`Cmd+Shift+M` on macOS) to toggle.
 
-## MVP scope
+Inside the keep editor, the top-right buttons are **Source** (back to text),
+**Outline**, and **Settings** (theme / language / layout). Press `Ctrl+F`
+(`Cmd+F`) to search within the document.
 
-Render · table cell edit · block source edit · table add/remove rows & columns ·
-Excel-style column filter · relative images · Mermaid / KaTeX · undo-redo &
-external-change sync.
+## Requirements
 
-Deferred: PDF export, outline (DocumentSymbolProvider), in-document link
-navigation, "open source here", pasted-image persistence.
+VSCode 1.84 or newer.
 
-## Isolation
+## License
 
-This package is fully self-contained: it has its own `package.json` / build and
-is **not** part of the desktop app's build, root `package.json`, or test runs.
-Building or running it does not affect the EasyMarkdown app.
+MIT © Easy Chen

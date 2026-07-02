@@ -1,7 +1,8 @@
 const vscode = require('vscode')
-const { KeepEditorProvider } = require('./keepEditorProvider')
+const { KeepEditorProvider, MODE_KEY } = require('./keepEditorProvider')
 
 const KEEP_VIEW_TYPE = 'easymarkdown.keep'
+const MD_RE = /\.(md|markdown)$/i
 
 // Resolve the Markdown file the user is acting on. From the editor-title menu the
 // command is invoked WITH the resource Uri; from the palette / keybinding it is
@@ -38,17 +39,58 @@ const keepCodeLensProvider = {
   }
 }
 
+// Auto-follow the last-used mode: when the user opened the previous Markdown file
+// in keep mode, transparently reopen newly-opened Markdown *text* tabs in keep too
+// (the `priority: "option"` custom editor never becomes the platform default, so we
+// swap it in ourselves). Reopening produces a TabInputCustom, so it never re-fires
+// this path. Guarded by the `rememberMode` setting and a short per-uri lock so a
+// slow openWith can't be triggered twice. Preferred mode 'source' needs no action —
+// VSCode already opens .md as text.
+function watchTabsForKeep(context) {
+  const reopening = new Set()
+  const rememberOn = () =>
+    vscode.workspace.getConfiguration('easymarkdown.keep').get('rememberMode', true)
+
+  const maybeReopen = (tab) => {
+    if (!rememberOn()) return
+    if (context.globalState.get(MODE_KEY) !== 'keep') return
+    const input = tab && tab.input
+    if (!(input instanceof vscode.TabInputText)) return
+    const uri = input.uri
+    if (!uri || !MD_RE.test(uri.path)) return
+    const key = uri.toString()
+    if (reopening.has(key)) return
+    reopening.add(key)
+    const release = () => setTimeout(() => reopening.delete(key), 500)
+    vscode.commands
+      .executeCommand('vscode.openWith', uri, KEEP_VIEW_TYPE, tab.group?.viewColumn)
+      .then(release, release)
+  }
+
+  return vscode.window.tabGroups.onDidChangeTabs((e) => {
+    e.opened.forEach(maybeReopen)
+  })
+}
+
 function activate(context) {
   context.subscriptions.push(
     KeepEditorProvider.register(context),
+    watchTabsForKeep(context),
     vscode.commands.registerCommand('easymarkdown.openWithKeep', async (uriArg) => {
       const uri = activeResourceUri(uriArg)
-      if (uri) await vscode.commands.executeCommand('vscode.openWith', uri, KEEP_VIEW_TYPE)
+      if (uri) {
+        await context.globalState.update(MODE_KEY, 'keep')
+        await vscode.commands.executeCommand('vscode.openWith', uri, KEEP_VIEW_TYPE)
+      }
     }),
     vscode.commands.registerCommand('easymarkdown.openWithText', async (uriArg) => {
       const uri = activeResourceUri(uriArg)
-      // 'default' reopens with VSCode's built-in text editor (source mode).
-      if (uri) await vscode.commands.executeCommand('vscode.openWith', uri, 'default')
+      // 'default' reopens with VSCode's built-in text editor (source mode), and
+      // source becomes the preferred mode for the next file.
+      if (uri) {
+        await context.globalState.update(MODE_KEY, 'source')
+        await vscode.commands.executeCommand('vscode.openWith', uri, 'default')
+      }
     }),
     vscode.commands.registerCommand('easymarkdown.openKeepToSide', async (uriArg) => {
       const uri = activeResourceUri(uriArg)

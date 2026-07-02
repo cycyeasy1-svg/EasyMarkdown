@@ -2,6 +2,14 @@ const vscode = require('vscode')
 
 const VIEW_TYPE = 'easymarkdown.keep'
 const LAYOUT_KEY = 'easymarkdown.keep.layout'
+// Last editor mode the user chose ('keep' | 'source'), so the next Markdown file
+// opens the same way. Read by the tab-open watcher in extension.js.
+const MODE_KEY = 'easymarkdown.keep.preferredMode'
+// In-editor overrides for color theme ('auto' | 'warm-light' | 'warm-dark') and
+// UI language ('auto' | 'en' | 'zh' | 'ja'), chosen from the settings panel and
+// shared across every keep editor (mirrors the app's single prefs object).
+const THEME_KEY = 'easymarkdown.keep.theme'
+const LANG_KEY = 'easymarkdown.keep.lang'
 
 /**
  * CustomTextEditorProvider for "keep mode" — the TextDocument is the single
@@ -24,6 +32,8 @@ class KeepEditorProvider {
   }
 
   resolveCustomTextEditor(document, webviewPanel) {
+    // Opening keep = the user's current preference; the next .md follows suit.
+    this.context.globalState.update(MODE_KEY, 'keep')
     const webview = webviewPanel.webview
     const docDir = vscode.Uri.joinPath(document.uri, '..')
     webview.options = {
@@ -46,7 +56,7 @@ class KeepEditorProvider {
     const baseUri = webview.asWebviewUri(docDir).toString()
     webview.html = this.getHtml(webview)
 
-    const lang = resolveLang()
+    const lang = resolveLang(this.context)
 
     const postInit = () => {
       lastKnownText = document.getText()
@@ -54,7 +64,9 @@ class KeepEditorProvider {
         type: 'init',
         text: lastKnownText,
         baseUri,
-        lang,
+        lang, // resolved code (en/zh/ja) used to render
+        langPref: this.context.globalState.get(LANG_KEY) || 'auto', // for the picker
+        theme: this.context.globalState.get(THEME_KEY) || 'auto',
         layout: this.context.globalState.get(LAYOUT_KEY) || null
       })
     }
@@ -95,8 +107,14 @@ class KeepEditorProvider {
         // Persist layout prefs globally (mirrors the app's single localStorage
         // prefs object), so every keep editor shares the same layout.
         this.context.globalState.update(LAYOUT_KEY, msg.layout)
+      } else if (msg.type === 'theme') {
+        this.context.globalState.update(THEME_KEY, msg.theme)
+      } else if (msg.type === 'lang') {
+        this.context.globalState.update(LANG_KEY, msg.lang)
       } else if (msg.type === 'switchToSource') {
-        // The in-editor "source" button → reopen this file in the text editor.
+        // The in-editor "source" button → reopen this file in the text editor,
+        // and remember source as the preferred mode for the next file.
+        this.context.globalState.update(MODE_KEY, 'source')
         vscode.commands.executeCommand('vscode.openWith', document.uri, 'default')
       }
     })
@@ -174,7 +192,12 @@ class KeepEditorProvider {
   }
 }
 
-function resolveLang() {
+// Language priority: the in-editor override (settings panel) wins, then the
+// settings.json config, then VSCode's display language. Each falls through on
+// 'auto' / unset.
+function resolveLang(context) {
+  const override = context && context.globalState.get(LANG_KEY)
+  if (override && override !== 'auto') return override
   const cfg = vscode.workspace.getConfiguration('easymarkdown.keep').get('language', 'auto')
   if (cfg && cfg !== 'auto') return cfg
   const loc = (vscode.env.language || 'en').toLowerCase()
@@ -190,4 +213,4 @@ function makeNonce() {
   return t
 }
 
-module.exports = { KeepEditorProvider }
+module.exports = { KeepEditorProvider, VIEW_TYPE, MODE_KEY }

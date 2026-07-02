@@ -16,11 +16,21 @@ import {
   replaceCellInLine,
   insertColumnInLine,
   removeColumnInLine,
-  buildTableRow
+  buildTableRow,
+  extractHeadings
 } from '../../../src/renderer/src/keep-parser.js'
 import { inlineRichStyles } from '../../../src/renderer/src/components/editor-copy.js'
 import { isRelativePath } from '../../../src/renderer/src/components/editor-images.js'
 import { enhanceKeepTables } from '../../../src/renderer/src/components/editor-tablescroll.js'
+// Find-in-document reuses the app's pure helpers (CSS Custom Highlight API — paints
+// ranges without mutating the DOM). We scope the search to #km-host and drop matches
+// inside hover affordances / hidden sections in runFind below.
+import {
+  clearFindHighlights,
+  findRangesInEl,
+  paintFindHighlights,
+  scrollRangeIntoView
+} from '../../../src/renderer/src/find.js'
 import { getMermaidSvg, peekMermaidSvg } from './mermaid-core.js'
 import { makeT } from './i18n.js'
 // Layout controls share the app's pure settings module directly (apply* set CSS
@@ -67,6 +77,8 @@ let baseUri = '' // webview URI of the document folder, for relative images
 let t = makeT('en')
 let ready = false
 let layout = { ...DEFAULT_SETTINGS } // page width / font size / zoom / line-height / para spacing
+let theme = 'auto' // 'auto' (follow VSCode) | 'warm-light' | 'warm-dark'
+let langPref = 'auto' // 'auto' | 'en' | 'zh' | 'ja' — the raw picker choice
 const collapsed = new Set() // collapsed heading-section keys ("level:text"), survives re-render
 let tableScroll = null // wide-table top-scrollbar + floating-header handle (editor-tablescroll)
 
@@ -82,10 +94,14 @@ window.addEventListener('message', (e) => {
   if (msg.type === 'init') {
     baseUri = (msg.baseUri || '').replace(/\/+$/, '')
     t = makeT(msg.lang || 'en')
+    langPref = msg.langPref || 'auto'
+    theme = msg.theme || 'auto'
+    applyTheme(theme)
     if (msg.layout) layout = { ...DEFAULT_SETTINGS, ...msg.layout }
     applyLayout(layout)
     ensureSourceButton()
-    ensureLayoutButton()
+    ensureOutlineButton()
+    ensureSettingsButton()
     setText(msg.text || '')
   } else if (msg.type === 'update') {
     // External edit / undo / redo — reset the mirror and re-render. Any open edit
@@ -208,6 +224,9 @@ function finishRender() {
       if (real) openCellPop(real, clonedTh)
     }
   })
+  // A re-render replaces the DOM, invalidating any painted find ranges — recompute
+  // against the fresh nodes so highlights survive edits / external updates.
+  if (findBar && findBar.style.display !== 'none' && findQuery) runFind(findQuery)
 }
 
 // ── heading section collapse / expand (display-only; never touches the source) ──
@@ -280,11 +299,39 @@ function applyMultilineForBlock(bl, b) {
 }
 
 // ── embeds (mermaid / KaTeX) ──
+const SVG_ATTRS =
+  'viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"'
+const icon = (w, body) => '<svg width="' + w + '" height="' + w + '" ' + SVG_ATTRS + '>' + body + '</svg>'
+const ICON_ZOOM = icon(
+  15,
+  '<circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/>'
+)
+const ICON_PLUS = icon(16, '<line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>')
+const ICON_MINUS = icon(16, '<line x1="5" y1="12" x2="19" y2="12"/>')
+const ICON_FIT = icon(
+  16,
+  '<polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/>'
+)
+const ICON_CLOSE = icon(16, '<line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>')
+
+// Paint a rendered diagram + append the magnifier affordance (opens the zoom
+// lightbox). Serialization/copy strips `button`s, so this never pollutes output.
+function setMermaidSvg(el, svg) {
+  el.innerHTML = svg
+  el.classList.add('km-mermaid-ready')
+  const btn = document.createElement('button')
+  btn.type = 'button'
+  btn.className = 'km-mermaid-zoom'
+  btn.title = t('mermaid.zoom')
+  btn.setAttribute('aria-label', t('mermaid.zoom'))
+  btn.innerHTML = ICON_ZOOM
+  el.appendChild(btn)
+}
 function renderMermaidEl(el) {
   const code = el.getAttribute('data-code') || ''
   const cached = peekMermaidSvg(code)
   if (cached && cached.svg) {
-    el.innerHTML = cached.svg
+    setMermaidSvg(el, cached.svg)
     return
   }
   el.classList.add('hm-mermaid-hint')
@@ -292,7 +339,7 @@ function renderMermaidEl(el) {
   getMermaidSvg(code).then((res) => {
     if (!host.contains(el)) return
     el.classList.remove('hm-mermaid-hint')
-    if (res && res.svg) el.innerHTML = res.svg
+    if (res && res.svg) setMermaidSvg(el, res.svg)
     else {
       el.classList.add('hm-mermaid-error')
       el.textContent = t('mermaid.error') + ' ' + ((res && res.error) || '')
@@ -339,7 +386,7 @@ function observeEmbed(el) {
   if (el.classList.contains('km-mermaid')) {
     const cached = peekMermaidSvg(el.getAttribute('data-code') || '')
     if (cached && cached.svg) {
-      el.innerHTML = cached.svg
+      setMermaidSvg(el, cached.svg)
       return
     }
   }
@@ -347,6 +394,135 @@ function observeEmbed(el) {
 }
 function observeEmbeds(root) {
   ;(root || host).querySelectorAll('.km-mermaid, .km-math').forEach(observeEmbed)
+}
+
+// ── mermaid zoom lightbox ──
+// A rendered diagram often shrinks to fit the column, so dense ones become
+// unreadable. Its magnifier opens a full-viewport overlay with wheel-zoom
+// (centered on the cursor) + drag pan. Display-only: clones the SVG, never
+// touches the document.
+let zoomOverlay = null
+function onZoomKey(e) {
+  if (e.key === 'Escape') {
+    e.preventDefault()
+    closeMermaidZoom()
+  }
+}
+function closeMermaidZoom() {
+  if (!zoomOverlay) return
+  document.removeEventListener('keydown', onZoomKey)
+  zoomOverlay.remove()
+  zoomOverlay = null
+}
+function openMermaidZoom(svgEl) {
+  closeMermaidZoom()
+  const overlay = document.createElement('div')
+  overlay.className = 'km-zoom-overlay'
+  const stage = document.createElement('div')
+  stage.className = 'km-zoom-stage'
+  const svg = svgEl.cloneNode(true)
+  svg.removeAttribute('width')
+  svg.removeAttribute('height')
+  svg.style.width = ''
+  svg.style.height = ''
+  svg.style.maxWidth = 'none'
+  svg.style.maxHeight = 'none'
+  stage.appendChild(svg)
+  overlay.appendChild(stage)
+
+  let scale = 1
+  let tx = 0
+  let ty = 0
+  const label = document.createElement('span')
+  label.className = 'km-zoom-label'
+  const apply = () => {
+    stage.style.transform = 'translate(' + tx + 'px,' + ty + 'px) scale(' + scale + ')'
+    label.textContent = Math.round(scale * 100) + '%'
+  }
+  const zoomAt = (cx, cy, next) => {
+    const ns = Math.min(8, Math.max(0.2, next))
+    tx = cx - (cx - tx) * (ns / scale)
+    ty = cy - (cy - ty) * (ns / scale)
+    scale = ns
+    apply()
+  }
+
+  const bar = document.createElement('div')
+  bar.className = 'km-zoom-bar'
+  const mkBtn = (html, title, fn) => {
+    const b = document.createElement('button')
+    b.type = 'button'
+    b.className = 'km-zoom-btn'
+    b.title = title
+    b.setAttribute('aria-label', title)
+    b.innerHTML = html
+    b.addEventListener('click', (ev) => {
+      ev.stopPropagation()
+      fn()
+    })
+    return b
+  }
+  bar.appendChild(mkBtn(ICON_MINUS, t('mermaid.zoomOut'), () => zoomAt(0, 0, scale / 1.25)))
+  bar.appendChild(label)
+  bar.appendChild(mkBtn(ICON_PLUS, t('mermaid.zoomIn'), () => zoomAt(0, 0, scale * 1.25)))
+  bar.appendChild(
+    mkBtn(ICON_FIT, t('mermaid.zoomReset'), () => {
+      scale = 1
+      tx = 0
+      ty = 0
+      apply()
+    })
+  )
+  bar.appendChild(mkBtn(ICON_CLOSE, t('mermaid.zoomClose'), closeMermaidZoom))
+  overlay.appendChild(bar)
+
+  overlay.addEventListener(
+    'wheel',
+    (e) => {
+      e.preventDefault()
+      const r = overlay.getBoundingClientRect()
+      const cx = e.clientX - r.left - r.width / 2
+      const cy = e.clientY - r.top - r.height / 2
+      zoomAt(cx, cy, scale * (e.deltaY < 0 ? 1.12 : 1 / 1.12))
+    },
+    { passive: false }
+  )
+
+  let dragging = false
+  let sx = 0
+  let sy = 0
+  stage.addEventListener('pointerdown', (e) => {
+    dragging = true
+    sx = e.clientX - tx
+    sy = e.clientY - ty
+    overlay.classList.add('km-zoom-grabbing')
+    try {
+      stage.setPointerCapture(e.pointerId)
+    } catch {
+      /* not all pointers are capturable */
+    }
+  })
+  stage.addEventListener('pointermove', (e) => {
+    if (!dragging) return
+    tx = e.clientX - sx
+    ty = e.clientY - sy
+    apply()
+  })
+  const endDrag = () => {
+    dragging = false
+    overlay.classList.remove('km-zoom-grabbing')
+  }
+  stage.addEventListener('pointerup', endDrag)
+  stage.addEventListener('pointercancel', endDrag)
+  // Click / double-click the empty backdrop (not the diagram) closes.
+  overlay.addEventListener('pointerdown', (e) => {
+    if (e.target === overlay) closeMermaidZoom()
+  })
+
+  document.body.appendChild(overlay)
+  document.addEventListener('keydown', onZoomKey)
+  zoomOverlay = overlay
+  apply()
 }
 
 // ── floating popovers (cell editor / filter / table menu / confirm) ──
@@ -362,7 +538,8 @@ function closeFloating() {
   closeMenu()
   closeConfirm()
   closeCellPop()
-  closeLayoutPop()
+  closeSettingsPop()
+  closeOutlinePop()
 }
 
 // ── table cell editing ──
@@ -946,12 +1123,15 @@ function applyFilter(ti) {
   })
 }
 
-// ── layout controls (page width / font size / zoom / line height / para spacing) ──
-// Shares the app's apply* (CSS vars on the document root + the full-width body
-// class). Values persist via the host (globalState), pushed on every change.
-let layoutPop = null
-let layoutBtn = null
+// ── settings panel (theme · language · layout) ──
+// The gear button opens one popover holding the color theme, UI language, and the
+// layout controls (page width / font size / zoom / line height / para spacing).
+// Every choice persists via the host (globalState) and is shared across editors.
+let settingsPop = null
+let settingsBtn = null
 let sourceBtn = null
+let outlinePop = null
+let outlineBtn = null
 
 function applyLayout(L) {
   applyPageWidth(L.pageWidth)
@@ -969,12 +1149,110 @@ function setLayout(key, value) {
   postLayout()
 }
 
-function closeLayoutPop() {
-  if (layoutPop) {
-    layoutPop.remove()
-    layoutPop = null
+// ── theme (color scheme) ──
+// 'auto' clears the class (keep.css maps tokens to --vscode-*); the two named
+// themes override every design token with the app's warm palettes.
+function applyTheme(name) {
+  const c = document.body.classList
+  c.remove('hm-theme-warm-light', 'hm-theme-warm-dark')
+  if (name === 'warm-light') c.add('hm-theme-warm-light')
+  else if (name === 'warm-dark') c.add('hm-theme-warm-dark')
+  // Mermaid is theme-keyed (light vs dark); re-render any already-painted diagram
+  // in place so it matches the new scheme without a full document rebuild.
+  if (host) {
+    host.querySelectorAll('.km-mermaid').forEach((el) => {
+      el.innerHTML = ''
+      observeEmbed(el)
+    })
   }
-  if (layoutBtn) layoutBtn.classList.remove('active')
+}
+function setTheme(name) {
+  theme = name
+  applyTheme(name)
+  vscode.postMessage({ type: 'theme', theme: name })
+}
+
+// ── language ──
+// A picker choice of 'auto' resolves against the webview's own navigator.language
+// (init already arrives host-resolved). Changing it relabels the chrome, re-renders
+// the document (the "edit source" pills carry localized labels), and reopens the
+// settings popover so its own text switches too.
+function resolveLangCode(pref) {
+  if (pref && pref !== 'auto') return pref
+  const l = (navigator.language || 'en').toLowerCase()
+  if (l.startsWith('zh')) return 'zh'
+  if (l.startsWith('ja')) return 'ja'
+  return 'en'
+}
+function applyLangChrome() {
+  if (sourceBtn) {
+    sourceBtn.title = t('mode.source')
+    const s = sourceBtn.querySelector('span')
+    if (s) s.textContent = t('mode.source')
+  }
+  if (outlineBtn) {
+    outlineBtn.title = t('outline.title')
+    outlineBtn.setAttribute('aria-label', t('outline.title'))
+  }
+  if (settingsBtn) {
+    settingsBtn.title = t('settings.title')
+    settingsBtn.setAttribute('aria-label', t('settings.title'))
+  }
+  if (findInput) findInput.placeholder = t('find.placeholder')
+}
+function setLang(pref) {
+  langPref = pref
+  t = makeT(resolveLangCode(pref))
+  applyLangChrome()
+  rerender()
+  vscode.postMessage({ type: 'lang', lang: pref })
+  if (settingsPop) {
+    closeSettingsPop()
+    openSettingsPop()
+  }
+}
+
+function closeSettingsPop() {
+  if (settingsPop) {
+    settingsPop.remove()
+    settingsPop = null
+  }
+  if (settingsBtn) settingsBtn.classList.remove('active')
+}
+
+// A label + a row of chips (segmented control, no slider) for a discrete choice.
+// `getCurrent` is read to highlight the active chip; `onPick(value)` applies it.
+function buildChoiceRow(label, options, getCurrent, onPick) {
+  const row = document.createElement('div')
+  row.className = 'km-lo-row'
+  const head = document.createElement('div')
+  head.className = 'km-lo-head'
+  const lab = document.createElement('span')
+  lab.className = 'km-lo-label'
+  lab.textContent = label
+  head.appendChild(lab)
+  row.appendChild(head)
+  const chips = document.createElement('div')
+  chips.className = 'km-lo-presets'
+  const sync = () =>
+    chips.querySelectorAll('.km-lo-chip').forEach((c) => {
+      c.classList.toggle('active', c.dataset.v === String(getCurrent()))
+    })
+  options.forEach((o) => {
+    const chip = document.createElement('button')
+    chip.type = 'button'
+    chip.className = 'km-lo-chip'
+    chip.textContent = o.label
+    chip.dataset.v = o.value
+    chip.onclick = () => {
+      onPick(o.value)
+      sync()
+    }
+    chips.appendChild(chip)
+  })
+  row.appendChild(chips)
+  sync()
+  return row
 }
 
 // One row: a label, preset chips, and a fine-tune slider. `presets` is an array
@@ -1039,10 +1317,38 @@ function buildLayoutRow({ label, key, presets, min, max, step, fmt }) {
   return row
 }
 
-function openLayoutPop() {
+function openSettingsPop() {
   closeFloating()
   const pop = document.createElement('div')
   pop.className = 'km-layout-pop'
+  pop.appendChild(
+    buildChoiceRow(
+      t('settings.themeLabel'),
+      [
+        { label: t('settings.theme.auto'), value: 'auto' },
+        { label: t('settings.theme.warmLight'), value: 'warm-light' },
+        { label: t('settings.theme.warmDark'), value: 'warm-dark' }
+      ],
+      () => theme,
+      setTheme
+    )
+  )
+  pop.appendChild(
+    buildChoiceRow(
+      t('settings.langLabel'),
+      [
+        { label: t('settings.lang.auto'), value: 'auto' },
+        { label: t('settings.lang.zh'), value: 'zh' },
+        { label: t('settings.lang.ja'), value: 'ja' },
+        { label: t('settings.lang.en'), value: 'en' }
+      ],
+      () => langPref,
+      setLang
+    )
+  )
+  const sep = document.createElement('div')
+  sep.className = 'km-lo-sep'
+  pop.appendChild(sep)
   pop.appendChild(
     buildLayoutRow({
       label: t('settings.pageWidth'),
@@ -1108,26 +1414,26 @@ function openLayoutPop() {
     })
   )
   document.body.appendChild(pop)
-  layoutPop = pop
-  if (layoutBtn) layoutBtn.classList.add('active')
+  settingsPop = pop
+  if (settingsBtn) settingsBtn.classList.add('active')
 }
 
-function ensureLayoutButton() {
-  if (layoutBtn) return
+function ensureSettingsButton() {
+  if (settingsBtn) return
   const btn = document.createElement('button')
   btn.type = 'button'
   btn.className = 'km-layout-btn'
-  btn.title = t('settings.layoutLabel')
-  btn.setAttribute('aria-label', t('settings.layoutLabel'))
+  btn.title = t('settings.title')
+  btn.setAttribute('aria-label', t('settings.title'))
   btn.innerHTML =
-    '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg>'
+    '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>'
   btn.onclick = (e) => {
     e.stopPropagation()
-    if (layoutPop) closeLayoutPop()
-    else openLayoutPop()
+    if (settingsPop) closeSettingsPop()
+    else openSettingsPop()
   }
   document.body.appendChild(btn)
-  layoutBtn = btn
+  settingsBtn = btn
 }
 
 // In-editor "source" button: one click back to the text editor (the host reopens
@@ -1145,6 +1451,186 @@ function ensureSourceButton() {
   btn.onclick = () => vscode.postMessage({ type: 'switchToSource' })
   document.body.appendChild(btn)
   sourceBtn = btn
+}
+
+// ── outline (heading navigator) ──
+function closeOutlinePop() {
+  if (outlinePop) {
+    outlinePop.remove()
+    outlinePop = null
+  }
+  if (outlineBtn) outlineBtn.classList.remove('active')
+}
+// Jump to a heading block by its index. Any collapsed ancestor section hiding it is
+// expanded first (mirrors the app's revealHeading), so a buried heading is reachable.
+function jumpToHeading(bi) {
+  const block = host.querySelector('.km-block[data-bi="' + bi + '"]')
+  if (!block) return
+  let need = block.hasAttribute('data-hlevel') ? parseInt(block.getAttribute('data-hlevel')) : Infinity
+  let node = block.previousElementSibling
+  while (node && need > 1) {
+    if (node.classList && node.classList.contains('km-block') && node.hasAttribute('data-hlevel')) {
+      const lvl = parseInt(node.getAttribute('data-hlevel'))
+      if (lvl < need) {
+        if (node.classList.contains('km-collapsed')) {
+          node.classList.remove('km-collapsed')
+          collapsed.delete(sectionKey(node))
+        }
+        need = lvl
+      }
+    }
+    node = node.previousElementSibling
+  }
+  refreshVisibility()
+  block.scrollIntoView({ behavior: 'smooth', block: 'start' })
+}
+// Strip inline markdown from a heading's raw text for a clean list label.
+function plainHeading(text) {
+  const tmp = document.createElement('div')
+  tmp.innerHTML = inline(text)
+  return tmp.textContent || ''
+}
+function openOutlinePop() {
+  closeFloating()
+  const heads = extractHeadings(blocks)
+  const pop = document.createElement('div')
+  pop.className = 'km-outline-pop'
+  if (!heads.length) {
+    const empty = document.createElement('div')
+    empty.className = 'km-ol-empty'
+    empty.textContent = t('outline.empty')
+    pop.appendChild(empty)
+  } else {
+    const minLvl = Math.min(...heads.map((h) => h.level))
+    heads.forEach((h) => {
+      const item = document.createElement('button')
+      item.type = 'button'
+      item.className = 'km-ol-item'
+      item.style.paddingLeft = 10 + (h.level - minLvl) * 14 + 'px'
+      item.textContent = plainHeading(h.text)
+      item.onclick = () => {
+        jumpToHeading(h.bi)
+        closeOutlinePop()
+      }
+      pop.appendChild(item)
+    })
+  }
+  document.body.appendChild(pop)
+  outlinePop = pop
+  if (outlineBtn) outlineBtn.classList.add('active')
+}
+function ensureOutlineButton() {
+  if (outlineBtn) return
+  const btn = document.createElement('button')
+  btn.type = 'button'
+  btn.className = 'km-outline-btn'
+  btn.title = t('outline.title')
+  btn.setAttribute('aria-label', t('outline.title'))
+  btn.innerHTML =
+    '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>'
+  btn.onclick = (e) => {
+    e.stopPropagation()
+    if (outlinePop) closeOutlinePop()
+    else openOutlinePop()
+  }
+  document.body.appendChild(btn)
+  outlineBtn = btn
+}
+
+// ── find in document (Ctrl/Cmd+F) ──
+// Scoped to #km-host via the app's CSS Custom Highlight helpers. Matches inside
+// hover affordances (edit pills / filter buttons / fold toggles) and hidden /
+// collapsed / filtered sections are dropped so only visible body text counts.
+let findBar = null
+let findInput = null
+let findCountEl = null
+let findRanges = []
+let findIdx = 0
+let findQuery = ''
+
+function ensureFindBar() {
+  if (findBar) return
+  const bar = document.createElement('div')
+  bar.className = 'km-findbar'
+  const input = document.createElement('input')
+  input.type = 'text'
+  input.className = 'km-fb-input'
+  input.placeholder = t('find.placeholder')
+  const count = document.createElement('span')
+  count.className = 'km-fb-count'
+  const mkBtn = (glyph, title, fn) => {
+    const b = document.createElement('button')
+    b.type = 'button'
+    b.className = 'km-fb-btn'
+    b.textContent = glyph
+    b.title = title
+    b.onclick = fn
+    return b
+  }
+  const prev = mkBtn('‹', t('find.prev'), () => stepFind(-1))
+  const next = mkBtn('›', t('find.next'), () => stepFind(1))
+  const close = mkBtn('✕', t('find.close'), closeFind)
+  bar.append(input, count, prev, next, close)
+  input.addEventListener('input', () => runFind(input.value))
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault()
+      stepFind(e.shiftKey ? -1 : 1)
+    } else if (e.key === 'Escape') {
+      e.preventDefault()
+      closeFind()
+    }
+  })
+  document.body.appendChild(bar)
+  findBar = bar
+  findInput = input
+  findCountEl = count
+}
+function openFind() {
+  ensureFindBar()
+  findBar.style.display = 'flex'
+  const sel = (window.getSelection?.().toString() || '').trim()
+  if (sel && sel.length <= 80 && !sel.includes('\n')) findInput.value = sel
+  findInput.focus()
+  findInput.select()
+  if (findInput.value) runFind(findInput.value)
+  else updateFindCount()
+}
+function closeFind() {
+  if (!findBar) return
+  findBar.style.display = 'none'
+  findQuery = ''
+  findRanges = []
+  clearFindHighlights()
+}
+function runFind(q) {
+  findQuery = q
+  clearFindHighlights()
+  const raw = q ? findRangesInEl(host, q) : []
+  findRanges = raw.filter((r) => {
+    const el = r.startContainer.parentElement
+    return (
+      el &&
+      el.offsetParent !== null && // skip hidden / collapsed / filtered text
+      !el.closest('.km-src-edit, .km-filter-btn, .km-collapse-toggle')
+    )
+  })
+  findIdx = 0
+  paintFindHighlights(findRanges, findIdx)
+  updateFindCount()
+  if (findRanges[findIdx]) scrollRangeIntoView(findRanges[findIdx], host.closest('.editor-scroll'))
+}
+function stepFind(dir) {
+  if (!findRanges.length) return
+  findIdx = (findIdx + dir + findRanges.length) % findRanges.length
+  paintFindHighlights(findRanges, findIdx)
+  updateFindCount()
+  scrollRangeIntoView(findRanges[findIdx], host.closest('.editor-scroll'))
+}
+function updateFindCount() {
+  if (!findCountEl) return
+  if (!findQuery) findCountEl.textContent = ''
+  else findCountEl.textContent = findRanges.length ? findIdx + 1 + '/' + findRanges.length : t('find.noResults')
 }
 
 // ── links ──
@@ -1183,6 +1669,14 @@ function onDblClick(e) {
   }
 }
 function onClick(e) {
+  const mz = e.target.closest('.km-mermaid-zoom')
+  if (mz && host.contains(mz)) {
+    e.preventDefault()
+    e.stopPropagation()
+    const svgEl = mz.closest('.km-mermaid')?.querySelector('svg')
+    if (svgEl) openMermaidZoom(svgEl)
+    return
+  }
   const ct = e.target.closest('.km-collapse-toggle')
   if (ct && host.contains(ct)) {
     const head = ct.closest('.km-block[data-hlevel]')
@@ -1250,12 +1744,20 @@ function onDocDown(e) {
   }
   if (activeMenu && !activeMenu.contains(e.target)) closeMenu()
   if (
-    layoutPop &&
-    !layoutPop.contains(e.target) &&
-    layoutBtn &&
-    !layoutBtn.contains(e.target)
+    settingsPop &&
+    !settingsPop.contains(e.target) &&
+    settingsBtn &&
+    !settingsBtn.contains(e.target)
   ) {
-    closeLayoutPop()
+    closeSettingsPop()
+  }
+  if (
+    outlinePop &&
+    !outlinePop.contains(e.target) &&
+    outlineBtn &&
+    !outlineBtn.contains(e.target)
+  ) {
+    closeOutlinePop()
   }
 }
 function onEsc(e) {
@@ -1281,6 +1783,12 @@ host.addEventListener('contextmenu', onContextMenu)
 host.addEventListener('copy', onCopy)
 document.addEventListener('click', onDocDown)
 document.addEventListener('keydown', onEsc)
+document.addEventListener('keydown', (e) => {
+  if ((e.ctrlKey || e.metaKey) && !e.altKey && (e.key === 'f' || e.key === 'F')) {
+    e.preventDefault()
+    openFind()
+  }
+})
 window.addEventListener('scroll', onScroll, true)
 window.addEventListener('resize', onResize)
 

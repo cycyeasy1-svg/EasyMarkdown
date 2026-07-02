@@ -61,6 +61,56 @@ body {
   overflow-y: auto;
   overflow-anchor: none;
   position: relative;
+  /* Fill the viewport with the themed background — a named theme overrides --bg on
+     <body>, and this scroller (a body descendant) inherits it, covering the html
+     element's own (VSCode-mapped) background at the edges. */
+  background: var(--bg);
+}
+
+/* ── built-in themes (settings → Theme) ──
+   'auto' (no class) uses the VSCode-mapped tokens in :root above. These two
+   override every design token with EasyMarkdown's warm light / warm night
+   palettes so the editor keeps its identity regardless of the VSCode theme.
+   The webview toggles the class on <body>. */
+body.hm-theme-warm-light {
+  color-scheme: light;
+  --text: #2a2620;
+  --text-strong: #0f0d0a;
+  --muted: #5a5650;
+  --faint: #8a867e;
+  --border: #c8c4bc;
+  --border-soft: #ddd9d2;
+  --bg: #ebe7e0;
+  --bg-editor: #fdfbf7;
+  --bg-elevated: #faf8f5;
+  --hover: #dad6ce;
+  --hover-elevated: #f0ede5;
+  --active: #cfcac2;
+  --accent: #c86b35;
+  --accent-strong: #a04f22;
+  --accent-soft: rgba(200, 107, 53, 0.15);
+  --code-bg: #f2efe8;
+  --code-border: #ddd9d2;
+}
+body.hm-theme-warm-dark {
+  color-scheme: dark;
+  --text: #d0c8bc;
+  --text-strong: #f2ebe0;
+  --muted: #8a8378;
+  --faint: #6a655c;
+  --border: #3a3630;
+  --border-soft: #302c28;
+  --bg: #16130e;
+  --bg-editor: #1d1914;
+  --bg-elevated: #1e1a16;
+  --hover: #302c28;
+  --hover-elevated: #2e2a24;
+  --active: #3e3a34;
+  --accent: #e69055;
+  --accent-strong: #ffb080;
+  --accent-soft: rgba(230, 144, 85, 0.18);
+  --code-bg: #24201c;
+  --code-border: #3a3630;
 }
 
 /* ── keep-mode content (ported from app.css) ── */
@@ -73,6 +123,13 @@ body {
   color: var(--text);
   font-family: var(--font-write);
   zoom: var(--editor-zoom, 1);
+}
+/* Full-width preset. The layout popover's applyPageWidth('full') adds
+   body.hm-full-width but intentionally leaves --editor-max-width untouched,
+   relying on THIS rule to drop the column cap (mirrors app.css). Without it,
+   'full' renders at the default width and only "sticks" after re-toggling. */
+body.hm-full-width .km-doc {
+  max-width: none;
 }
 .km-doc .km-src-edit,
 .km-doc .km-filter-btn,
@@ -274,6 +331,7 @@ body {
   padding: 0;
 }
 .km-doc .km-mermaid {
+  position: relative;
   margin: calc(1.2em * var(--editor-para-scale, 1)) 0;
   padding: 16px 18px;
   background: var(--bg-elevated);
@@ -282,6 +340,33 @@ body {
   display: flex;
   justify-content: center;
   overflow-x: auto;
+}
+/* Magnifier affordance on a rendered diagram → opens the zoom lightbox. */
+.km-mermaid-zoom {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm, 6px);
+  background: var(--bg-elevated);
+  color: var(--muted);
+  cursor: zoom-in;
+  opacity: 0;
+  transition: opacity 0.12s var(--ease-out, ease), color 0.12s, background 0.12s;
+}
+.km-mermaid:hover .km-mermaid-zoom,
+.km-mermaid-zoom:focus-visible {
+  opacity: 1;
+}
+.km-mermaid-zoom:hover {
+  color: var(--accent, var(--text-strong));
+  background: var(--hover-elevated, var(--hover));
 }
 .km-doc .km-mermaid svg {
   max-width: 100%;
@@ -734,7 +819,7 @@ body {
 .km-source-btn {
   position: fixed;
   top: 10px;
-  right: 52px;
+  right: 90px;
   z-index: 1150;
   height: 30px;
   display: inline-flex;
@@ -762,10 +847,10 @@ body {
   flex: none;
   opacity: 0.85;
 }
-.km-layout-btn {
+.km-layout-btn,
+.km-outline-btn {
   position: fixed;
   top: 10px;
-  right: 14px;
   z-index: 1150;
   width: 30px;
   height: 30px;
@@ -781,12 +866,62 @@ body {
   opacity: 0.7;
   transition: opacity 0.15s, color 0.12s, background 0.12s, border-color 0.12s;
 }
+.km-layout-btn {
+  right: 14px;
+}
+.km-outline-btn {
+  right: 52px;
+}
 .km-layout-btn:hover,
-.km-layout-btn.active {
+.km-layout-btn.active,
+.km-outline-btn:hover,
+.km-outline-btn.active {
   opacity: 1;
   color: var(--text);
   background: var(--hover-elevated);
   border-color: var(--accent);
+}
+.km-outline-pop {
+  position: fixed;
+  top: 46px;
+  right: 52px;
+  z-index: 1200;
+  width: 260px;
+  max-height: 60vh;
+  overflow-y: auto;
+  padding: 6px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  font-size: 13px;
+  color: var(--text);
+}
+.km-ol-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  font-size: 13px;
+  padding: 5px 8px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.km-ol-item:hover {
+  background: var(--hover);
+  color: var(--text-strong);
+}
+.km-ol-empty {
+  color: var(--faint);
+  font-size: 12px;
+  padding: 12px 8px;
+  text-align: center;
 }
 .km-layout-pop {
   position: fixed;
@@ -794,6 +929,8 @@ body {
   right: 14px;
   z-index: 1200;
   width: 280px;
+  max-height: 80vh;
+  overflow-y: auto;
   padding: 12px;
   background: var(--bg-elevated);
   border: 1px solid var(--border);
@@ -801,6 +938,11 @@ body {
   box-shadow: var(--shadow-lg);
   font-size: 13px;
   color: var(--text);
+}
+.km-lo-sep {
+  height: 1px;
+  background: var(--border-soft);
+  margin: 4px 0 12px;
 }
 .km-lo-row {
   margin-bottom: 12px;
@@ -855,4 +997,136 @@ body {
 }
 .km-lo-slider:disabled {
   opacity: 0.4;
+}
+
+/* ── find bar (Ctrl/Cmd+F) ── */
+.km-findbar {
+  position: fixed;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1300;
+  display: none;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 6px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+}
+.km-fb-input {
+  font: inherit;
+  font-size: 13px;
+  width: 200px;
+  padding: 3px 7px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-editor);
+  color: var(--text);
+  outline: none;
+}
+.km-fb-input:focus {
+  border-color: var(--accent);
+}
+.km-fb-count {
+  font-size: 11px;
+  color: var(--faint);
+  min-width: 48px;
+  text-align: center;
+}
+.km-fb-btn {
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: 15px;
+  line-height: 1;
+}
+.km-fb-btn:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+::highlight(hm-find) {
+  background-color: color-mix(in srgb, var(--accent) 30%, transparent);
+  color: inherit;
+}
+::highlight(hm-find-current) {
+  background-color: var(--accent);
+  color: #fff;
+}
+
+/* ── mermaid zoom lightbox ── */
+.km-zoom-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1500;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--bg) 82%, transparent);
+  backdrop-filter: blur(2px);
+  cursor: zoom-out;
+}
+.km-zoom-stage {
+  transform-origin: center center;
+  cursor: grab;
+  will-change: transform;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.km-zoom-overlay.km-zoom-grabbing .km-zoom-stage {
+  cursor: grabbing;
+}
+.km-zoom-stage svg {
+  max-width: none;
+  max-height: none;
+  /* A diagram with no intrinsic size still fills a readable box to zoom from. */
+  min-width: min(70vw, 900px);
+}
+.km-zoom-bar {
+  position: fixed;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px 6px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  cursor: default;
+}
+.km-zoom-label {
+  min-width: 46px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--muted);
+  user-select: none;
+}
+.km-zoom-btn {
+  width: 30px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.km-zoom-btn:hover {
+  background: var(--hover);
+  color: var(--text);
 }

@@ -1,15 +1,28 @@
 {
-  "name": "easymarkdown-keep",
-  "displayName": "EasyMarkdown Keep",
-  "description": "Source-backed live preview + inline editing for Markdown (tables, filters, zero-diff). A VSCode port of EasyMarkdown's keep mode.",
-  "version": "0.0.1",
-  "publisher": "easymarkdown",
+  "name": "easymarkdown",
+  "displayName": "EasyMarkdown",
+  "description": "Source-backed live preview + inline editing for Markdown (tables, column filters, heading fold, outline) with a zero-diff result. A VSCode edition of EasyMarkdown's keep mode.",
+  "version": "1.2.1",
+  "publisher": "easy-chen",
+  "author": {
+    "name": "Easy Chen"
+  },
   "license": "MIT",
+  "icon": "icon.png",
   "engines": {
     "vscode": "^1.84.0"
   },
   "categories": [
+    "Programming Languages",
+    "Visualization",
     "Other"
+  ],
+  "keywords": [
+    "markdown",
+    "preview",
+    "wysiwyg",
+    "table",
+    "editor"
   ],
   "main": "./dist/extension.cjs",
   "contributes": {
@@ -32,6 +45,11 @@
           "enum": ["auto", "en", "zh", "ja"],
           "default": "auto",
           "description": "UI language for the keep editor (auto follows VSCode's display language)."
+        },
+        "easymarkdown.keep.rememberMode": {
+          "type": "boolean",
+          "default": true,
+          "description": "Open the next Markdown file in the same mode (keep or source) you last used. Turn off to always open Markdown as source unless you pick keep."
         }
       }
     },

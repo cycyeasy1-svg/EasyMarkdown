@@ -1,0 +1,11 @@
+# Only ship the bundled output + metadata. Sources are bundled into dist/ by
+# esbuild (vscode:prepublish), so the raw src/webview files aren't needed.
+.vscode/**
+node_modules/**
+src/**
+webview/**
+sample/**
+esbuild.mjs
+.gitignore
+**/*.map
+**/*.vsix

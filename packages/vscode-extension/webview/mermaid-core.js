@@ -30,9 +30,12 @@ async function getMermaid() {
   return mermaidMod
 }
 
+// An explicit keep theme (warm light / dark) overrides VSCode's own theme; else
 // VSCode adds `vscode-dark` / `vscode-high-contrast` to <body> for dark themes.
 const curTheme = () => {
   const c = document.body.classList
+  if (c.contains('hm-theme-warm-dark')) return 'dark'
+  if (c.contains('hm-theme-warm-light')) return 'default'
   return c.contains('vscode-dark') || c.contains('vscode-high-contrast') ? 'dark' : 'default'
 }
 const keyFor = (theme, code) => theme + '::' + code
