@@ -50,6 +50,103 @@ test('keep mode: editing a table cell writes back to the rendered table', async 
   }
 })
 
+test('keep mode: find keeps query, selects it on reopen, and F3 steps matches', async () => {
+  const { page, cleanup } = await openWelcome()
+  const findShortcut = process.platform === 'darwin' ? 'Meta+F' : 'Control+F'
+  try {
+    await page.keyboard.press(findShortcut)
+    const input = page.locator('.findbar input')
+    await expect(input).toBeFocused()
+    await input.fill('this')
+    await expect(page.locator('.findbar-count')).toHaveText('1/2')
+    await page.keyboard.press('Alt+C')
+    await expect(page.locator('.findbar-count')).toHaveText('0/0')
+    await page.keyboard.press('Alt+C')
+    await expect(page.locator('.findbar-count')).toHaveText('1/2')
+
+    await input.fill('[')
+    await page.keyboard.press('Alt+R')
+    await expect(page.locator('.findbar')).toHaveClass(/has-error/)
+    await page.keyboard.press('Alt+R')
+    await input.fill('This')
+    await expect(page.locator('.findbar-count')).toHaveText('1/2')
+
+    await page.keyboard.press('F3')
+    await expect(page.locator('.findbar-count')).toHaveText('2/2')
+    await page.keyboard.press('Shift+F3')
+    await expect(page.locator('.findbar-count')).toHaveText('1/2')
+
+    await page.keyboard.press('Escape')
+    await expect(page.locator('.findbar')).toHaveCount(0)
+    await page.keyboard.press(findShortcut)
+    await expect(input).toHaveValue('This')
+    await expect(input).toBeFocused()
+    await expect(input).toHaveJSProperty('selectionStart', 0)
+    await expect(input).toHaveJSProperty('selectionEnd', 4)
+
+    await input.fill('paragraph')
+    await page.keyboard.press('Enter')
+    await input.fill('draft')
+    await page.keyboard.press('ArrowUp')
+    await expect(input).toHaveValue('paragraph')
+    await page.keyboard.press('ArrowUp')
+    await expect(input).toHaveValue('This')
+
+    await page.keyboard.press('Escape')
+    await page.evaluate(() => {
+      const root = document.querySelector('.km-doc')
+      const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
+      let node
+      while ((node = walker.nextNode())) {
+        const idx = node.nodeValue.indexOf('reliable click')
+        if (idx === -1) continue
+        const range = document.createRange()
+        range.setStart(node, idx)
+        range.setEnd(node, idx + 'reliable click'.length)
+        const sel = window.getSelection()
+        sel.removeAllRanges()
+        sel.addRange(range)
+        break
+      }
+    })
+    await page.keyboard.press(findShortcut)
+    await expect(input).toHaveValue('reliable click')
+    await page.locator('.findbar-option', { hasText: '[]' }).click()
+    await expect(page.locator('.findbar-option.active', { hasText: '[]' })).toHaveCount(1)
+    await input.fill('This')
+    await expect(page.locator('.findbar-count')).toHaveText('0/0')
+  } finally {
+    await cleanup()
+  }
+})
+
+test('find query is restored per tab instead of shared globally', async () => {
+  const { page, cleanup } = await launchApp([fixture('welcome.md'), fixture('images.md')])
+  const findShortcut = process.platform === 'darwin' ? 'Meta+F' : 'Control+F'
+  try {
+    await page.locator('.tab', { hasText: 'welcome.md' }).click()
+    await expect(page.locator('.km-doc', { hasText: 'E2E Welcome Fixture' })).toBeVisible()
+    await page.keyboard.press(findShortcut)
+    const input = page.locator('.findbar input')
+    await input.fill('This')
+    await page.keyboard.press('Escape')
+
+    await page.locator('.tab', { hasText: 'images.md' }).click()
+    await page.keyboard.press(findShortcut)
+    await expect(input).toHaveValue('')
+    await input.fill('image')
+    await page.keyboard.press('Escape')
+
+    await page.locator('.tab', { hasText: 'welcome.md' }).click()
+    await page.keyboard.press(findShortcut)
+    await expect(input).toHaveValue('This')
+    await page.locator('.tab', { hasText: 'images.md' }).click()
+    await expect(input).toHaveValue('image')
+  } finally {
+    await cleanup()
+  }
+})
+
 // Switch the active tab from keep mode to Milkdown (Crepe) via the status-bar
 // toggle, and return the Crepe editor locator scoped to the fixture's content.
 async function switchToMilkdown(page) {

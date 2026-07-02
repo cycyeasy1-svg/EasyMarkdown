@@ -139,6 +139,12 @@ export const STRINGS = {
     'find.linePlaceholder': 'Go to line…',
     'find.lineNext': 'Next line',
     'find.linePrev': 'Previous line',
+    'find.caseSensitive': 'Match case (Alt+C)',
+    'find.regex': 'Use regular expression (Alt+R)',
+    'find.wholeWord': 'Match whole word (Alt+W)',
+    'find.inSelection': 'Find in selection',
+    'find.selectFirst': 'Select text to find within it',
+    'find.invalidRegex': 'Invalid',
 
     // command palette
     'palette.placeholder': 'Search files and commands…',
@@ -406,6 +412,12 @@ export const STRINGS = {
     'find.linePlaceholder': '跳转到行号…',
     'find.lineNext': '下一行',
     'find.linePrev': '上一行',
+    'find.caseSensitive': '区分大小写 (Alt+C)',
+    'find.regex': '使用正则表达式 (Alt+R)',
+    'find.wholeWord': '全词匹配 (Alt+W)',
+    'find.inSelection': '在选区内查找',
+    'find.selectFirst': '请先选择文本',
+    'find.invalidRegex': '正则错误',
 
     'palette.placeholder': '搜索文件和命令…',
     'palette.empty': '无匹配项',
@@ -672,6 +684,12 @@ export const STRINGS = {
     'find.linePlaceholder': '行番号へジャンプ…',
     'find.lineNext': '次の行',
     'find.linePrev': '前の行',
+    'find.caseSensitive': '大文字/小文字を区別 (Alt+C)',
+    'find.regex': '正規表現を使用 (Alt+R)',
+    'find.wholeWord': '単語単位で一致 (Alt+W)',
+    'find.inSelection': '選択範囲内を検索',
+    'find.selectFirst': '先にテキストを選択',
+    'find.invalidRegex': '正規表現エラー',
 
     // command palette
     'palette.placeholder': 'ファイルとコマンドを検索…',

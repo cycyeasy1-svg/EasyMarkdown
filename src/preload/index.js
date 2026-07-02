@@ -1,5 +1,28 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 
+// Install this before the renderer bundle mounts. If a user drops a file while
+// the cold-start splash is still up, Electron's default behavior is to navigate
+// the whole window to file://... Preventing default here keeps the app intact;
+// App.jsx's richer drop handler still receives the event after React is ready.
+const isFileDrag = (event) => event.dataTransfer?.types?.includes('Files')
+window.addEventListener(
+  'dragover',
+  (event) => {
+    if (!isFileDrag(event)) return
+    event.preventDefault()
+    event.dataTransfer.dropEffect = 'copy'
+  },
+  true
+)
+window.addEventListener(
+  'drop',
+  (event) => {
+    if (!isFileDrag(event)) return
+    event.preventDefault()
+  },
+  true
+)
+
 // Subscribe to a main→renderer channel; returns an unsubscribe function.
 const on = (channel) => (cb) => {
   const fn = (_e, payload) => cb(payload)

@@ -10,10 +10,98 @@
       http-equiv="Content-Security-Policy"
       content="default-src 'self'; img-src 'self' data: https: blob:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; script-src 'self'"
     />
+    <style>
+      html, body, #root { height: 100%; margin: 0; }
+      body { background: #ebe7e0; }
+      #hm-boot-splash {
+        position: fixed;
+        inset: 0;
+        z-index: 9999;
+        display: grid;
+        place-content: center;
+        gap: 14px;
+        padding: 28px;
+        color: #2a2620;
+        background: linear-gradient(180deg, rgba(250, 248, 245, 0.96), rgba(235, 231, 224, 0.98)), #ebe7e0;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        text-align: center;
+        -webkit-app-region: drag;
+      }
+      #hm-boot-splash.is-hiding {
+        opacity: 0;
+        transform: scale(0.992);
+        transition: opacity 0.22s cubic-bezier(0.215, 0.61, 0.355, 1), transform 0.22s cubic-bezier(0.215, 0.61, 0.355, 1);
+        pointer-events: none;
+      }
+      .hm-boot-mark {
+        width: 48px;
+        height: 48px;
+        margin: 0 auto;
+        display: grid;
+        place-items: center;
+        border-radius: 12px;
+        color: #faf8f5;
+        background: #c86b35;
+        box-shadow: 0 12px 30px rgba(160, 79, 34, 0.18);
+        font-size: 24px;
+        font-weight: 700;
+        line-height: 1;
+      }
+      .hm-boot-copy { display: grid; gap: 3px; }
+      .hm-boot-title { color: #0f0d0a; font-size: 18px; font-weight: 700; }
+      .hm-boot-subtitle { color: #5a5650; font-size: 12px; font-weight: 500; }
+      .hm-boot-bar {
+        position: relative;
+        width: min(180px, calc(100vw - 80px));
+        height: 3px;
+        margin: 2px auto 0;
+        overflow: hidden;
+        border-radius: 999px;
+        background: rgba(200, 107, 53, 0.14);
+      }
+      .hm-boot-bar::after {
+        content: '';
+        position: absolute;
+        inset: 0 auto 0 0;
+        width: 42%;
+        border-radius: inherit;
+        background: #c86b35;
+        animation: hmBootBar 1.1s cubic-bezier(0.215, 0.61, 0.355, 1) infinite;
+      }
+      @keyframes hmBootBar {
+        0% { transform: translateX(-110%); }
+        100% { transform: translateX(260%); }
+      }
+      @media (prefers-color-scheme: dark) {
+        body { background: #16130e; }
+        #hm-boot-splash {
+          color: #d0c8bc;
+          background: linear-gradient(180deg, rgba(30, 26, 22, 0.97), rgba(22, 19, 14, 0.98)), #16130e;
+        }
+        .hm-boot-title { color: #f2ebe0; }
+        .hm-boot-subtitle { color: #8a8378; }
+        .hm-boot-mark { color: #16130e; background: #e69055; box-shadow: 0 12px 30px rgba(230, 144, 85, 0.2); }
+        .hm-boot-bar { background: rgba(230, 144, 85, 0.16); }
+        .hm-boot-bar::after { background: #e69055; }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        #hm-boot-splash.is-hiding { transition: opacity 0.01s linear; transform: none; }
+        .hm-boot-bar::after { animation: none; width: 100%; }
+      }
+    </style>
     <title>EasyMarkdown</title>
   </head>
   <body>
+    <div id="hm-boot-splash" role="status" aria-live="polite" aria-label="Starting EasyMarkdown">
+      <div class="hm-boot-mark">E</div>
+      <div class="hm-boot-copy">
+        <div class="hm-boot-title">EasyMarkdown</div>
+        <div class="hm-boot-subtitle">Starting editor...</div>
+      </div>
+      <div class="hm-boot-bar" aria-hidden="true"></div>
+    </div>
     <div id="root"></div>
+    <script src="./boot-splash.js" vite-ignore></script>
     <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>

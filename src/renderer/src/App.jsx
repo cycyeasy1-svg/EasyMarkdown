@@ -34,7 +34,7 @@ import {
 import { applyCustomTheme } from './customThemes.js'
 import { fireToast, HM_TOAST_EVENT } from './ui.js'
 import logoUrl from './assets/logo.png'
-import { clearFindHighlights, findRangesInEl, paintFindHighlights, scrollRangeIntoView, matchIndices, blockIndexForLine } from './find.js'
+import { clearFindHighlights, findRangesInEl, paintFindHighlights, scrollRangeIntoView, findMatchesInText, blockIndexForLine } from './find.js'
 import {
   isNewerVersion, isAbsolutePath, sanitizeWorkspaces, baseName, dirName, joinPath,
   isPlainTextDoc, isHeavyDoc, genId, LS, loadSession, buildSessionTabs, MD_DOC_RE
@@ -82,6 +82,315 @@ function findAnchorLine(content, anchor) {
     if (lines[i].includes(anchor)) return i + 1
   }
   return 0
+}
+
+function countSourceLines(value) {
+  let count = 1
+  for (let i = 0; i < value.length; i++) {
+    if (value.charCodeAt(i) === 10) count++
+  }
+  return count
+}
+
+function buildLineNumberText(count) {
+  const lines = new Array(Math.max(1, count))
+  for (let i = 0; i < lines.length; i++) lines[i] = String(i + 1)
+  return lines.join('\n')
+}
+
+function sourceHeadingForLine(line) {
+  const m = String(line || '').match(/^\s{0,3}(#{1,6})\s+(.*?)\s*#*\s*$/)
+  if (!m) return null
+  const text = (m[2] || '').trim()
+  if (!text) return null
+  return { level: m[1].length, text, key: `${m[1].length}:${text}` }
+}
+
+function findSourceFoldableLines(lines) {
+  const foldable = new Set()
+  const stack = []
+
+  for (let i = 0; i < lines.length; i++) {
+    const heading = sourceHeadingForLine(lines[i])
+    if (heading) {
+      while (stack.length && stack[stack.length - 1].level >= heading.level) stack.pop()
+      stack.forEach((h) => foldable.add(h.line))
+      stack.push({ level: heading.level, line: i })
+    } else {
+      stack.forEach((h) => foldable.add(h.line))
+    }
+  }
+
+  return foldable
+}
+
+function buildSourceView(lines, collapsedKeys) {
+  const visibleMap = []
+  const hiddenByLine = new Map()
+  const foldRows = []
+  const collapsedStack = []
+  const foldableLines = findSourceFoldableLines(lines)
+
+  for (let i = 0; i < lines.length; i++) {
+    const heading = sourceHeadingForLine(lines[i])
+    const foldable = heading && foldableLines.has(i)
+    if (heading) {
+      while (collapsedStack.length && collapsedStack[collapsedStack.length - 1].level >= heading.level) {
+        collapsedStack.pop()
+      }
+    }
+
+    const hiddenBy = collapsedStack.map((h) => h.key)
+    if (hiddenBy.length) {
+      hiddenByLine.set(i, hiddenBy)
+    } else {
+      const row = visibleMap.length
+      visibleMap.push(i)
+      if (foldable) {
+        foldRows.push({
+          row,
+          line: i,
+          key: heading.key,
+          collapsed: collapsedKeys.has(heading.key)
+        })
+      }
+    }
+
+    if (foldable && collapsedKeys.has(heading.key)) collapsedStack.push(heading)
+  }
+
+  return {
+    visibleMap,
+    hiddenByLine,
+    foldRows,
+    displayLines: visibleMap.map((i) => lines[i]),
+    lineNumbers: visibleMap.map((i) => String(i + 1)).join('\n') || '1'
+  }
+}
+
+function patchFoldedSourceLines(lines, oldVisibleLines, newVisibleLines, visibleMap) {
+  let prefix = 0
+  const maxPrefix = Math.min(oldVisibleLines.length, newVisibleLines.length)
+  while (prefix < maxPrefix && oldVisibleLines[prefix] === newVisibleLines[prefix]) prefix++
+
+  let oldSuffix = oldVisibleLines.length
+  let newSuffix = newVisibleLines.length
+  while (
+    oldSuffix > prefix &&
+    newSuffix > prefix &&
+    oldVisibleLines[oldSuffix - 1] === newVisibleLines[newSuffix - 1]
+  ) {
+    oldSuffix--
+    newSuffix--
+  }
+
+  if (prefix === oldVisibleLines.length && prefix === newVisibleLines.length) return lines.join('\n')
+
+  const next = lines.slice()
+  const inserted = newVisibleLines.slice(prefix, newSuffix)
+  const oldChanged = oldSuffix - prefix
+
+  if (oldChanged === 0) {
+    const prevOrig = prefix > 0 ? visibleMap[prefix - 1] : -1
+    next.splice(prevOrig + 1, 0, ...inserted)
+    return next.join('\n')
+  }
+
+  const startOrig = visibleMap[prefix] ?? lines.length
+  const endOrig = visibleMap[oldSuffix - 1] ?? startOrig
+  next.splice(startOrig, Math.max(1, endOrig - startOrig + 1), ...inserted)
+  return next.join('\n')
+}
+
+function SourceEditorPane({
+  value,
+  textareaRef,
+  paneClass,
+  style,
+  onPaneFocus,
+  onPaneMouseDown,
+  onChange
+}) {
+  const localTextareaRef = useRef(null)
+  const lineNumbersRef = useRef(null)
+  const foldGutterRef = useRef(null)
+  const [collapsedKeys, setCollapsedKeys] = useState(() => new Set())
+  const [sourceMetrics, setSourceMetrics] = useState({ lineHeight: 24, padTop: 40 })
+  const lines = useMemo(() => String(value ?? '').split('\n'), [value])
+  const sourceView = useMemo(() => buildSourceView(lines, collapsedKeys), [lines, collapsedKeys])
+  const hasFolds = collapsedKeys.size > 0
+  const displayedValue = hasFolds ? sourceView.displayLines.join('\n') : value
+  const lineNumbers = hasFolds ? sourceView.lineNumbers : buildLineNumberText(countSourceLines(value || ''))
+  const visibleMap = hasFolds ? sourceView.visibleMap : lines.map((_, i) => i)
+  const visibleLines = hasFolds ? sourceView.displayLines : lines
+
+  const valueRef = useRef(value)
+  const linesRef = useRef(lines)
+  const sourceViewRef = useRef(sourceView)
+  const collapsedKeysRef = useRef(collapsedKeys)
+  const visibleMapRef = useRef(visibleMap)
+  const visibleLinesRef = useRef(visibleLines)
+  valueRef.current = value
+  linesRef.current = lines
+  sourceViewRef.current = sourceView
+  collapsedKeysRef.current = collapsedKeys
+  visibleMapRef.current = visibleMap
+  visibleLinesRef.current = visibleLines
+
+  const setTextareaRef = useCallback((node) => {
+    localTextareaRef.current = node
+    if (textareaRef) textareaRef.current = node
+  }, [textareaRef])
+
+  const syncSourceGutters = useCallback(() => {
+    const el = localTextareaRef.current
+    const nums = lineNumbersRef.current
+    const folds = foldGutterRef.current
+    if (!el) return
+    const transform = `translateY(${-el.scrollTop}px)`
+    if (nums) nums.style.transform = transform
+    if (folds) folds.style.transform = transform
+  }, [])
+
+  const measureSourceMetrics = useCallback(() => {
+    const el = localTextareaRef.current
+    if (!el) return
+    const cs = getComputedStyle(el)
+    const padTop = parseFloat(cs.paddingTop) || 40
+    const padBottom = parseFloat(cs.paddingBottom) || 0
+    const fontSize = parseFloat(cs.fontSize) || 14
+    const fallbackLineHeight = parseFloat(cs.lineHeight) || fontSize * 1.75
+    const rowCount = Math.max(1, visibleLinesRef.current.length)
+    const measuredContentHeight = el.scrollHeight - padTop - padBottom
+    let lineHeight = measuredContentHeight > 0 ? measuredContentHeight / rowCount : fallbackLineHeight
+    if (!Number.isFinite(lineHeight) || lineHeight < fallbackLineHeight * 0.5 || lineHeight > fallbackLineHeight * 1.5) {
+      lineHeight = fallbackLineHeight
+    }
+    setSourceMetrics((prev) =>
+      Math.abs(prev.lineHeight - lineHeight) < 0.1 && Math.abs(prev.padTop - padTop) < 0.1
+        ? prev
+        : { lineHeight, padTop }
+    )
+  }, [])
+
+  const scrollToSourceLine = useCallback((lineNumber, commit = false) => {
+    const linesNow = linesRef.current
+    const total = linesNow.length
+    const ln = Math.min(Math.max(1, lineNumber), total)
+    const targetIdx = ln - 1
+    const hiddenBy = sourceViewRef.current.hiddenByLine.get(targetIdx)
+    if (hiddenBy?.length) {
+      setCollapsedKeys((prev) => {
+        const next = new Set(prev)
+        hiddenBy.forEach((key) => next.delete(key))
+        return next
+      })
+    }
+
+    const apply = () => {
+      const el = localTextareaRef.current
+      if (!el) return
+      const map = visibleMapRef.current
+      const displayLines = visibleLinesRef.current
+      const row = Math.max(0, map.indexOf(targetIdx))
+      let off = 0
+      for (let k = 0; k < row; k++) off += (displayLines[k] || '').length + 1
+      const lineText = displayLines[row] || ''
+      if (commit) {
+        el.focus()
+        el.setSelectionRange(off, off + lineText.length)
+      }
+      const cs = getComputedStyle(el)
+      const lh = parseFloat(cs.lineHeight) || parseFloat(cs.fontSize) * 1.5 || 20
+      el.scrollTop = Math.max(0, row * lh - el.clientHeight / 2)
+      syncSourceGutters()
+    }
+
+    requestAnimationFrame(apply)
+    setTimeout(apply, hiddenBy?.length ? 90 : 0)
+  }, [syncSourceGutters])
+
+  useLayoutEffect(() => {
+    const el = localTextareaRef.current
+    if (!el) return
+    el.__hmSourceApi = {
+      getFullValue: () => valueRef.current,
+      getLineCount: () => linesRef.current.length,
+      scrollToLine: scrollToSourceLine
+    }
+    return () => {
+      if (el.__hmSourceApi?.scrollToLine === scrollToSourceLine) delete el.__hmSourceApi
+    }
+  }, [scrollToSourceLine])
+
+  useLayoutEffect(() => {
+    measureSourceMetrics()
+    syncSourceGutters()
+  }, [lineNumbers, sourceView.foldRows, measureSourceMetrics, syncSourceGutters])
+
+  const handleChange = useCallback((e) => {
+    if (!collapsedKeysRef.current.size) {
+      onChange(e)
+      return
+    }
+    const nextContent = patchFoldedSourceLines(
+      linesRef.current,
+      visibleLinesRef.current,
+      e.target.value.split('\n'),
+      visibleMapRef.current
+    )
+    onChange({ target: { value: nextContent } })
+  }, [onChange])
+
+  const toggleFold = useCallback((key) => {
+    setCollapsedKeys((prev) => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
+  }, [])
+
+  return (
+    <div
+      className={`source-editor-wrap${paneClass || ''}`}
+      style={style}
+      onFocusCapture={onPaneFocus}
+      onMouseDownCapture={onPaneMouseDown}
+    >
+      <textarea
+        ref={setTextareaRef}
+        className="source-editor"
+        value={displayedValue}
+        spellCheck={false}
+        wrap="off"
+        onScroll={syncSourceGutters}
+        onChange={handleChange}
+      />
+      <pre ref={lineNumbersRef} className="source-line-numbers" aria-hidden="true">
+        {lineNumbers}
+      </pre>
+      <div ref={foldGutterRef} className="source-fold-gutter">
+        {sourceView.foldRows.map((fold) => (
+          <button
+            key={`${fold.line}:${fold.key}`}
+            type="button"
+            tabIndex={-1}
+            className={`source-fold-toggle${fold.collapsed ? ' is-collapsed' : ''}`}
+            style={{
+              top: `${sourceMetrics.padTop + fold.row * sourceMetrics.lineHeight + Math.max(0, (sourceMetrics.lineHeight - 24) / 2)}px`
+            }}
+            title="折叠/展开此节"
+            aria-label="折叠/展开此节"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => toggleFold(fold.key)}
+          >
+            <Icon name="chevron-down" size={15} strokeWidth={2.2} />
+          </button>
+        ))}
+      </div>
+    </div>
+  )
 }
 
 export default function App() {
@@ -137,7 +446,19 @@ export default function App() {
   const [refreshNonce, setRefreshNonce] = useState(0)
   const [files, setFiles] = useState([])
   // `mode` is 'text' (content search) or 'line' (jump to a markdown source line).
-  const [find, setFind] = useState({ open: false, query: '', matches: 0, active: 0, mode: 'text' })
+  const [find, setFind] = useState({
+    open: false,
+    query: '',
+    matches: 0,
+    active: 0,
+    mode: 'text',
+    caseSensitive: false,
+    wholeWord: false,
+    regex: false,
+    inSelection: false,
+    selectionAvailable: false,
+    error: ''
+  })
   // Current match set: Range objects (rich editor) or character offsets (source
   // textarea). Held in a ref so next/prev don't trigger re-renders.
   const findRangesRef = useRef([])
@@ -148,6 +469,7 @@ export default function App() {
   // Rename-from-tab-menu modal: { id, value } or null. (Electron has no
   // window.prompt, so renaming a tab's file uses this small inline dialog.)
   const [renameState, setRenameState] = useState(null)
+  const [startupRestored, setStartupRestored] = useState(false)
   // Mobile "save as": prompt for a filename before writing an untitled doc into
   // the local library (desktop uses the native save dialog instead).
   const [saveNameState, setSaveNameState] = useState(null)
@@ -165,6 +487,13 @@ export default function App() {
   const scrollRatioRef = useRef(null) // pending scroll position to restore across a mode switch
   const pendingSourceLineRef = useRef(null) // 0-based line to select after entering source mode
   const findInputRef = useRef(null)
+  const openFindRef = useRef(null)
+  const findOptionsRef = useRef({ caseSensitive: false, wholeWord: false, regex: false, inSelection: false })
+  const findSessionsRef = useRef({})
+  const findScopesRef = useRef({})
+  const findHistoryRef = useRef([])
+  const findHistoryCursorRef = useRef(-1)
+  const findHistoryDraftRef = useRef('')
   // Registry of each tab's editor API (by tab id). Several markdown editors can
   // be mounted at once (a tab stays mounted after its first activation), so a
   // single ref would get stuck on whichever editor mounted last; keying by tab
@@ -293,6 +622,26 @@ export default function App() {
     if (activeId == null) return
     setMountedIds((prev) => (prev.has(activeId) ? prev : new Set(prev).add(activeId)))
   }, [activeId])
+
+  useEffect(() => {
+    if (!startupRestored) return
+    if (activeTab?.loading) return
+    const splash = document.getElementById('hm-boot-splash')
+    if (!splash) return
+
+    const holdMs =
+      import.meta.env.DEV ? Math.max(0, Number(import.meta.env.VITE_BOOT_SPLASH_HOLD_MS) || 0) : 0
+    let removeTimer = null
+    const hideTimer = setTimeout(() => {
+      splash.classList.add('is-hiding')
+      removeTimer = setTimeout(() => splash.remove(), 240)
+    }, holdMs)
+
+    return () => {
+      clearTimeout(hideTimer)
+      clearTimeout(removeTimer)
+    }
+  }, [startupRestored, activeTab])
 
   // The right-pane tab must be mounted too (it's a second visible editor).
   useEffect(() => {
@@ -492,6 +841,10 @@ export default function App() {
     const apply = () => {
       const el = sourceRef.current
       if (!el) return
+      if (el.__hmSourceApi?.scrollToLine) {
+        el.__hmSourceApi.scrollToLine(line + 1, true)
+        return
+      }
       const lines = el.value.split('\n')
       const ln = Math.min(Math.max(0, line), lines.length - 1)
       let off = 0
@@ -1331,10 +1684,7 @@ export default function App() {
     zoomOut: () => bumpZoom(-ZOOM_STEP),
     zoomReset: () => setSettings((prev) => ({ ...prev, zoom: DEFAULT_ZOOM })),
     find: () => {
-      // Leave the Home page so find acts on the visible document, not a hidden one.
-      setHome(false)
-      setFind((f) => ({ ...f, open: true }))
-      setTimeout(() => findInputRef.current?.focus(), 0)
+      openFindRef.current?.()
     }
   }
 
@@ -1514,6 +1864,7 @@ export default function App() {
       const created = addUntitled()
       if (created && created.length) setActiveId(created[0].id)
     }
+    setStartupRestored(true)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -1676,34 +2027,153 @@ export default function App() {
   const findModeRef = useRef('text')
   const lineBiRef = useRef(-1) // last located block index (line mode)
   useEffect(() => { findModeRef.current = find.mode }, [find.mode])
+  useEffect(() => {
+    findOptionsRef.current = {
+      caseSensitive: find.caseSensitive,
+      wholeWord: find.wholeWord,
+      regex: find.regex,
+      inSelection: find.inSelection
+    }
+  }, [find.caseSensitive, find.wholeWord, find.regex, find.inSelection])
+
+  const activeFindKey = () => activeIdRef.current || '__home'
+
+  const saveFindSession = (patch) => {
+    const key = activeFindKey()
+    findSessionsRef.current[key] = {
+      ...(findSessionsRef.current[key] || {}),
+      ...patch
+    }
+  }
+
+  const activeFindScope = () => findScopesRef.current[activeFindKey()] || null
+
+  const saveFindScope = (scope) => {
+    const key = activeFindKey()
+    if (scope) findScopesRef.current[key] = scope
+    return findScopesRef.current[key] || null
+  }
+
+  const selectFindInputSoon = () => {
+    setTimeout(() => {
+      const input = findInputRef.current
+      if (!input) return
+      input.focus()
+      input.select()
+    }, 0)
+  }
+
+  const normalizeSelectedFindText = (value) => {
+    const text = String(value ?? '').replace(/\r\n?/g, '\n').trim()
+    if (!text) return ''
+    return text.split('\n').map((line) => line.trim()).find(Boolean) || ''
+  }
+
+  const getSelectedFindScope = () => {
+    const source = sourceRef.current
+    if (
+      source &&
+      document.activeElement === source &&
+      source.selectionStart != null &&
+      source.selectionEnd != null &&
+      source.selectionStart !== source.selectionEnd
+    ) {
+      const start = Math.min(source.selectionStart, source.selectionEnd)
+      const end = Math.max(source.selectionStart, source.selectionEnd)
+      const text = normalizeSelectedFindText(source.value.slice(start, end))
+      return text ? { text, source: { start, end } } : null
+    }
+
+    const root = richRoot()
+    const sel = window.getSelection?.()
+    if (!root || !sel || sel.isCollapsed || !sel.rangeCount) return null
+
+    const isInsideRoot = (node) => {
+      if (!node) return false
+      if (node === root) return true
+      const el = node.nodeType === Node.ELEMENT_NODE ? node : node.parentElement
+      return el === root || root.contains(el)
+    }
+    if (!isInsideRoot(sel.anchorNode) || !isInsideRoot(sel.focusNode)) return null
+    const text = normalizeSelectedFindText(sel.toString())
+    if (!text) return null
+    return { text, range: sel.getRangeAt(0).cloneRange() }
+  }
+
+  const matchInSource = (text, query, options, scope) => {
+    const result = findMatchesInText(text, query, options)
+    if (result.error || !options.inSelection || !scope?.source) return result
+    const { start, end } = scope.source
+    return {
+      ...result,
+      matches: result.matches.filter((m) => m.index >= start && m.index + m.length <= end)
+    }
+  }
 
   // Run a fresh search for `query`, scoped to the editor content.
-  const runFind = useCallback((query) => {
+  const runFind = useCallback((query, optionsArg = null, preferredActiveIdx = null) => {
     const q = query ?? ''
+    const options = optionsArg || findOptionsRef.current
+    const scope = options.inSelection ? activeFindScope() : null
     findQueryRef.current = q
     clearFindHighlights()
     findRangesRef.current = []
     activeIdxRef.current = -1
+    let nextMatches = 0
+    let nextActiveIdx = -1
+    let error = ''
+
     if (sourceRef.current) {
       // Source textarea: live-count only (selecting would steal the find input's
       // focus); Enter / next / prev jump to a match.
-      const hits = matchIndices(sourceRef.current.value, q)
+      const result = q ? matchInSource(sourceRef.current.value, q, options, scope) : { matches: [], error: '' }
+      const hits = result.matches
       findRangesRef.current = hits
-      setFind((f) => ({ ...f, matches: hits.length, active: 0 }))
+      error = result.error
+      nextMatches = error ? 0 : hits.length
+      if (nextMatches && preferredActiveIdx != null) {
+        nextActiveIdx = Math.min(Math.max(0, preferredActiveIdx), nextMatches - 1)
+        activeIdxRef.current = nextActiveIdx
+      }
+      setFind((f) => ({
+        ...f,
+        query: q,
+        matches: nextMatches,
+        active: nextActiveIdx >= 0 ? nextActiveIdx + 1 : 0,
+        error
+      }))
+      saveFindSession({ query: q, mode: 'text', activeIdx: nextActiveIdx, inSelection: !!options.inSelection })
       return
     }
     // Keep mode paints in chunks after open; flush the rest so find sees the whole
     // document, not just the first painted chunk.
     if (q) Object.values(editorApis.current).forEach((api) => api?.ensureRendered?.())
     const root = richRoot()
-    const ranges = q ? findRangesInEl(root, q) : []
+    const result = q ? findRangesInEl(root, q, options, scope?.range || null) : { ranges: [], error: '' }
+    const ranges = result.ranges
     findRangesRef.current = ranges
+    error = result.error
     if (ranges.length) {
-      activeIdxRef.current = 0
-      paintFindHighlights(ranges, 0)
-      scrollRangeIntoView(ranges[0], root.closest('.editor-scroll'))
+      nextActiveIdx =
+        preferredActiveIdx == null
+          ? 0
+          : Math.min(Math.max(0, preferredActiveIdx), ranges.length - 1)
+      activeIdxRef.current = nextActiveIdx
+      paintFindHighlights(ranges, nextActiveIdx)
+      scrollRangeIntoView(ranges[nextActiveIdx], root.closest('.editor-scroll'))
     }
-    setFind((f) => ({ ...f, matches: ranges.length, active: ranges.length ? 1 : 0 }))
+    nextMatches = error ? 0 : ranges.length
+    setFind((f) => ({
+      ...f,
+      query: q,
+      matches: nextMatches,
+      active: nextActiveIdx >= 0 ? nextActiveIdx + 1 : 0,
+      error
+    }))
+    saveFindSession({ query: q, mode: 'text', activeIdx: nextActiveIdx, inSelection: !!options.inSelection })
+    // Reads current editor/session refs; keeping this stable avoids re-wiring the
+    // debounced find path on every keystroke.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   // Live "highlight as you type" walks the whole editor DOM, so debounce it: clear
@@ -1716,6 +2186,57 @@ export default function App() {
     findDebounceRef.current = setTimeout(() => runFind(q), 160)
   }, [runFind])
 
+  const rememberFindQuery = (query) => {
+    const q = String(query ?? '').trim()
+    if (!q || findModeRef.current !== 'text') return
+    const history = findHistoryRef.current.filter((item) => item !== q)
+    history.push(q)
+    findHistoryRef.current = history.slice(-20)
+    findHistoryCursorRef.current = -1
+    findHistoryDraftRef.current = ''
+  }
+
+  const applyFindQuery = (query, options = {}) => {
+    const q = String(query ?? '')
+    if (!options.fromHistory) {
+      findHistoryCursorRef.current = -1
+      findHistoryDraftRef.current = ''
+    }
+    setFind((f) => ({ ...f, query: q, error: '' }))
+    saveFindSession({ query: q, mode: findModeRef.current, activeIdx: -1 })
+    if (findModeRef.current === 'line') runLineJump(q, false)
+    else if (options.immediate) runFind(q)
+    else runFindDebounced(q)
+  }
+
+  const recallFindHistory = (backwards) => {
+    const history = findHistoryRef.current
+    if (!history.length || findModeRef.current !== 'text') return false
+    if (findHistoryCursorRef.current === -1) {
+      findHistoryDraftRef.current = findInputRef.current?.value ?? find.query ?? ''
+    }
+
+    let next = findHistoryCursorRef.current
+    if (backwards) next = next === -1 ? history.length - 1 : Math.max(0, next - 1)
+    else if (next === -1) return false
+    else next += 1
+
+    if (next >= history.length) {
+      findHistoryCursorRef.current = -1
+      applyFindQuery(findHistoryDraftRef.current)
+      return true
+    }
+
+    findHistoryCursorRef.current = next
+    applyFindQuery(history[next], { fromHistory: true })
+    setTimeout(() => {
+      const input = findInputRef.current
+      if (!input) return
+      input.setSelectionRange(input.value.length, input.value.length)
+    }, 0)
+    return true
+  }
+
   // Move to the next / previous match (wrapping around).
   const stepFind = useCallback((backwards = false) => {
     const items = findRangesRef.current
@@ -1726,14 +2247,41 @@ export default function App() {
     activeIdxRef.current = i
     if (sourceRef.current) {
       const el = sourceRef.current
+      const item = items[i]
+      const start = typeof item === 'number' ? item : item.index
+      const length = typeof item === 'number' ? findQueryRef.current.length : item.length
       el.focus()
-      el.setSelectionRange(items[i], items[i] + findQueryRef.current.length)
+      el.setSelectionRange(start, start + length)
     } else {
       paintFindHighlights(items, i)
       scrollRangeIntoView(items[i], richRoot()?.closest('.editor-scroll'))
     }
     setFind((f) => ({ ...f, active: i + 1 }))
+    saveFindSession({ activeIdx: i, mode: 'text' })
+    // Uses refs for the active result set and visible editor.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  const stepTextFind = useCallback((backwards = false) => {
+    const inputValue = findInputRef.current?.value
+    const q = inputValue != null ? inputValue : find.query || findQueryRef.current
+    if (!q) {
+      runFind('')
+      return false
+    }
+
+    clearTimeout(findDebounceRef.current)
+    rememberFindQuery(q)
+    const needsFreshSearch = q !== findQueryRef.current || !findRangesRef.current.length
+    if (needsFreshSearch) {
+      runFind(q)
+      if (findRangesRef.current.length && (backwards || sourceRef.current)) stepFind(backwards)
+      return true
+    }
+
+    stepFind(backwards)
+    return true
+  }, [find.query, runFind, stepFind])
 
   // ── Line-number locate ──
   // Briefly highlight a preview block (display-only class) and scroll it center.
@@ -1754,21 +2302,27 @@ export default function App() {
   const runLineJump = useCallback((raw, commit = false) => {
     const str = String(raw ?? '').trim()
     findQueryRef.current = str
+    saveFindSession({ query: str, mode: 'line', activeIdx: -1, inSelection: false })
     if (sourceRef.current) {
       const el = sourceRef.current
-      const lines = el.value.split('\n')
-      const total = lines.length
+      const api = el.__hmSourceApi
+      const lines = (api?.getFullValue?.() || el.value).split('\n')
+      const total = api?.getLineCount?.() || lines.length
       const n = parseInt(str, 10)
       if (!str || !Number.isFinite(n)) { setFind((f) => ({ ...f, matches: total, active: 0 })); return }
       const ln = Math.min(Math.max(1, n), total)
-      const cs = getComputedStyle(el)
-      const lh = parseFloat(cs.lineHeight) || parseFloat(cs.fontSize) * 1.5 || 20
-      el.scrollTop = Math.max(0, (ln - 1) * lh - el.clientHeight / 2)
-      if (commit) {
+      if (api?.scrollToLine) {
+        api.scrollToLine(ln, commit)
+      } else {
+        const cs = getComputedStyle(el)
+        const lh = parseFloat(cs.lineHeight) || parseFloat(cs.fontSize) * 1.5 || 20
+        el.scrollTop = Math.max(0, (ln - 1) * lh - el.clientHeight / 2)
         let off = 0
         for (let k = 0; k < ln - 1; k++) off += lines[k].length + 1
-        el.focus()
-        el.setSelectionRange(off, off + lines[ln - 1].length)
+        if (commit) {
+          el.focus()
+          el.setSelectionRange(off, off + lines[ln - 1].length)
+        }
       }
       setFind((f) => ({ ...f, matches: total, active: ln }))
       return
@@ -1789,6 +2343,8 @@ export default function App() {
     }
     flashBlock(block)
     setFind((f) => ({ ...f, matches: total, active: Math.min(Math.max(1, n), total) }))
+    // Uses refs for the active tab/editor and saves the current line query.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   // Next/prev in line mode steps the target line by ±1 and re-jumps.
@@ -1799,6 +2355,138 @@ export default function App() {
     setFind((f) => ({ ...f, query: String(next) }))
     runLineJump(String(next), true)
   }, [runLineJump])
+
+  const openFind = () => {
+    const selectedScope = getSelectedFindScope()
+    const savedScope = selectedScope ? saveFindScope(selectedScope) : activeFindScope()
+    const session = findSessionsRef.current[activeFindKey()] || {}
+    const previousQuery = session.query ?? ''
+    const query = selectedScope?.text || previousQuery || ''
+    const inSelection = !!session.inSelection && !!savedScope
+
+    clearTimeout(findDebounceRef.current)
+    clearFindHighlights()
+    findRangesRef.current = []
+    activeIdxRef.current = -1
+    lineBiRef.current = -1
+    findQueryRef.current = query
+    findOptionsRef.current = { ...findOptionsRef.current, inSelection }
+
+    setHome(false)
+    setFind((f) => ({
+      ...f,
+      open: true,
+      mode: 'text',
+      query,
+      matches: query ? f.matches : 0,
+      active: query ? f.active : 0,
+      inSelection,
+      selectionAvailable: !!savedScope,
+      error: ''
+    }))
+    selectFindInputSoon()
+    saveFindSession({ query, mode: 'text', inSelection })
+    setTimeout(() => runFind(query, findOptionsRef.current, session.activeIdx ?? 0), 0)
+  }
+  openFindRef.current = openFind
+
+  const rerunTextFind = (options, activeIdx = activeIdxRef.current) => {
+    if (findModeRef.current !== 'text') return
+    const q = findInputRef.current?.value ?? findQueryRef.current
+    clearTimeout(findDebounceRef.current)
+    runFind(q, options, activeIdx >= 0 ? activeIdx : 0)
+  }
+
+  const toggleFindOption = (key) => {
+    const options = {
+      ...findOptionsRef.current,
+      [key]: !findOptionsRef.current[key]
+    }
+    findOptionsRef.current = options
+    setFind((f) => ({ ...f, [key]: options[key], error: '' }))
+    rerunTextFind(options)
+  }
+
+  const toggleFindInSelection = () => {
+    let scope = activeFindScope()
+    const nextEnabled = !findOptionsRef.current.inSelection
+    if (nextEnabled) {
+      scope = saveFindScope(getSelectedFindScope()) || scope
+      if (!scope) {
+        setFind((f) => ({ ...f, selectionAvailable: false, inSelection: false }))
+        return
+      }
+    }
+
+    const options = { ...findOptionsRef.current, inSelection: nextEnabled }
+    findOptionsRef.current = options
+    saveFindSession({ inSelection: nextEnabled })
+    setFind((f) => ({
+      ...f,
+      inSelection: nextEnabled,
+      selectionAvailable: !!scope,
+      error: ''
+    }))
+    rerunTextFind(options)
+  }
+
+  useEffect(() => {
+    const isTextEntry = (target) => {
+      if (!target || target === document.body) return false
+      const tag = target.tagName
+      return tag === 'INPUT' || tag === 'TEXTAREA' || target.isContentEditable
+    }
+    const isAllowedFindTarget = (target) => {
+      if (!target || target === document.body) return true
+      if (target === findInputRef.current || target === sourceRef.current) return true
+      return !!target.closest?.('.findbar, .editor-area, .ProseMirror, .km-doc')
+    }
+    const onKey = (e) => {
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.code === 'KeyF') {
+        e.preventDefault()
+        e.stopPropagation()
+        openFindRef.current?.()
+        return
+      }
+
+      if (find.open && findModeRef.current === 'text' && e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
+        const optionByCode = { KeyC: 'caseSensitive', KeyR: 'regex', KeyW: 'wholeWord' }
+        const option = optionByCode[e.code]
+        if (option) {
+          e.preventDefault()
+          e.stopPropagation()
+          toggleFindOption(option)
+          return
+        }
+      }
+
+      const isF3 = e.key === 'F3' && !e.ctrlKey && !e.metaKey && !e.altKey
+      const isMacFindNext =
+        window.api.platform === 'darwin' && e.code === 'KeyG' && e.metaKey && !e.ctrlKey && !e.altKey
+      if (!isF3 && !isMacFindNext) return
+      if (isTextEntry(e.target) && !isAllowedFindTarget(e.target)) return
+
+      let handled = false
+      if (findModeRef.current === 'line') {
+        if (!find.open) return
+        const raw = findInputRef.current?.value ?? findQueryRef.current
+        if (!String(raw ?? '').trim()) return
+        stepLine(e.shiftKey)
+        handled = true
+      } else {
+        handled = stepTextFind(e.shiftKey)
+      }
+      if (!handled) return
+      e.preventDefault()
+      e.stopPropagation()
+    }
+
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
+    // The listener dispatches through refs/current callbacks; this keeps shortcut
+    // handling stable while the input value changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [find.open, stepLine, stepTextFind])
 
   // Reveal an anchor (heading slug / explicit id / literal text) in a doc. The
   // target may have just opened, so we retry until its block/textarea is mounted.
@@ -1820,6 +2508,10 @@ export default function App() {
       }
       if (sourceRef.current) {
         const el = sourceRef.current
+        if (el.__hmSourceApi?.scrollToLine) {
+          el.__hmSourceApi.scrollToLine(line, true)
+          return
+        }
         const lines = el.value.split('\n')
         const ln = Math.min(Math.max(1, line), lines.length)
         let off = 0
@@ -1889,8 +2581,15 @@ export default function App() {
     activeIdxRef.current = -1
     lineBiRef.current = -1
     findQueryRef.current = ''
-    setFind((f) => ({ ...f, mode: f.mode === 'line' ? 'text' : 'line', query: '', matches: 0, active: 0 }))
-    setTimeout(() => findInputRef.current?.focus(), 0)
+    findOptionsRef.current = { ...findOptionsRef.current, inSelection: false }
+    setFind((f) => {
+      const mode = f.mode === 'line' ? 'text' : 'line'
+      saveFindSession({ mode, query: '', activeIdx: -1, inSelection: false })
+      return { ...f, mode, query: '', matches: 0, active: 0, inSelection: false, error: '' }
+    })
+    selectFindInputSoon()
+    // Uses refs and a functional state update to avoid stale mode/query values.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   const closeFind = useCallback(() => {
@@ -1899,16 +2598,34 @@ export default function App() {
     findRangesRef.current = []
     activeIdxRef.current = -1
     lineBiRef.current = -1
-    findQueryRef.current = ''
-    setFind((f) => ({ open: false, query: '', matches: 0, active: 0, mode: f.mode }))
+    setFind((f) => ({ ...f, open: false }))
   }, [])
 
   // Re-run the search/jump when switching tabs while the find bar is open, so it
   // points at the newly-visible document.
   useEffect(() => {
     if (!find.open) return
-    if (findModeRef.current === 'line') runLineJump(findQueryRef.current, false)
-    else runFind(findQueryRef.current)
+    const session = findSessionsRef.current[activeFindKey()] || {}
+    const scope = activeFindScope()
+    const mode = session.mode || 'text'
+    const query = session.query || ''
+    const inSelection = !!session.inSelection && !!scope
+    const options = { ...findOptionsRef.current, inSelection }
+    findOptionsRef.current = options
+    findModeRef.current = mode
+    findQueryRef.current = query
+    setFind((f) => ({
+      ...f,
+      mode,
+      query,
+      inSelection,
+      selectionAvailable: !!scope,
+      matches: 0,
+      active: 0,
+      error: ''
+    }))
+    if (mode === 'line') runLineJump(query, false)
+    else runFind(query, options, session.activeIdx ?? 0)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeId])
 
@@ -2043,7 +2760,7 @@ export default function App() {
 
         <main className="pane-center">
           {find.open && (
-            <div className="findbar">
+            <div className={`findbar${find.error ? ' has-error' : ''}`}>
               <button
                 className={`findbar-mode${find.mode === 'line' ? ' active' : ''}`}
                 title={t(find.mode === 'line' ? 'find.modeLine' : 'find.modeText')}
@@ -2053,36 +2770,73 @@ export default function App() {
               </button>
               <input
                 ref={findInputRef}
+                className={find.error ? 'is-error' : ''}
                 value={find.query}
                 inputMode={find.mode === 'line' ? 'numeric' : undefined}
                 placeholder={t(find.mode === 'line' ? 'find.linePlaceholder' : 'find.placeholder')}
-                onChange={(e) => {
-                  const q = e.target.value
-                  setFind((f) => ({ ...f, query: q }))
-                  if (find.mode === 'line') runLineJump(q, false) // live: scroll to the line
-                  else runFindDebounced(q) // live: highlight as you type (debounced)
-                }}
+                onChange={(e) => applyFindQuery(e.target.value)}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') {
                     e.preventDefault()
                     if (find.mode === 'line') runLineJump(find.query, true)
-                    else stepFind(e.shiftKey)
+                    else stepTextFind(e.shiftKey)
+                  }
+                  if (find.mode === 'text' && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
+                    if (recallFindHistory(e.key === 'ArrowUp')) {
+                      e.preventDefault()
+                    }
                   }
                   if (e.key === 'Escape') closeFind()
                 }}
               />
-              <span className="findbar-count">
-                {find.query && find.matches ? `${find.active}/${find.matches}` : ''}
+              <span className={`findbar-count${find.error ? ' is-error' : find.query && !find.matches ? ' is-empty' : ''}`}>
+                {find.query ? (find.error ? t('find.invalidRegex') : `${find.active || 0}/${find.matches || 0}`) : ''}
               </span>
+              {find.mode === 'text' && (
+                <>
+                  <button
+                    className={`findbar-option${find.caseSensitive ? ' active' : ''}`}
+                    title={t('find.caseSensitive')}
+                    aria-pressed={find.caseSensitive}
+                    onClick={() => toggleFindOption('caseSensitive')}
+                  >
+                    Aa
+                  </button>
+                  <button
+                    className={`findbar-option${find.regex ? ' active' : ''}`}
+                    title={t('find.regex')}
+                    aria-pressed={find.regex}
+                    onClick={() => toggleFindOption('regex')}
+                  >
+                    .*
+                  </button>
+                  <button
+                    className={`findbar-option${find.wholeWord ? ' active' : ''}`}
+                    title={t('find.wholeWord')}
+                    aria-pressed={find.wholeWord}
+                    onClick={() => toggleFindOption('wholeWord')}
+                  >
+                    W
+                  </button>
+                  <button
+                    className={`findbar-option${find.inSelection ? ' active' : ''}`}
+                    title={find.selectionAvailable ? t('find.inSelection') : t('find.selectFirst')}
+                    aria-pressed={find.inSelection}
+                    onClick={toggleFindInSelection}
+                  >
+                    []
+                  </button>
+                </>
+              )}
               <button
                 title={t(find.mode === 'line' ? 'find.linePrev' : 'find.prev')}
-                onClick={() => (find.mode === 'line' ? stepLine(true) : stepFind(true))}
+                onClick={() => (find.mode === 'line' ? stepLine(true) : stepTextFind(true))}
               >
                 <Icon name="chevron-up" size={14} />
               </button>
               <button
                 title={t(find.mode === 'line' ? 'find.lineNext' : 'find.next')}
-                onClick={() => (find.mode === 'line' ? stepLine(false) : stepFind(false))}
+                onClick={() => (find.mode === 'line' ? stepLine(false) : stepTextFind(false))}
               >
                 <Icon name="chevron-down" size={14} />
               </button>
@@ -2137,16 +2891,15 @@ export default function App() {
               if (usesTextarea) {
                 if (!inView) return null
                 return (
-                  <textarea
+                  <SourceEditorPane
                     key={tab.id}
-                    ref={isLeft ? sourceRef : undefined}
-                    className={`source-editor${paneClass}`}
-                    value={tab.content}
-                    spellCheck={false}
+                    textareaRef={isLeft ? sourceRef : undefined}
+                    paneClass={paneClass}
                     style={{ order, flex: paneFlex }}
-                    onFocus={onPaneFocus}
-                    onMouseDown={onPaneFocus}
+                    value={tab.content}
                     onChange={(e) => updateContent(tab.id, e.target.value, false)}
+                    onPaneFocus={onPaneFocus}
+                    onPaneMouseDown={onPaneFocus}
                   />
                 )
               }

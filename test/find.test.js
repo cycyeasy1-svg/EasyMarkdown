@@ -2,7 +2,7 @@
 // block-index mapping. The DOM-highlighting helpers (CSS Custom Highlight API)
 // are intentionally not covered here — they belong to the future E2E layer.
 import { describe, it, expect } from 'vitest'
-import { matchIndices, docBlocks, blockIndexForLine } from '../src/renderer/src/find.js'
+import { matchIndices, findMatchesInText, docBlocks, blockIndexForLine } from '../src/renderer/src/find.js'
 
 describe('matchIndices', () => {
   it('returns all case-insensitive match offsets', () => {
@@ -15,6 +15,24 @@ describe('matchIndices', () => {
   it('returns empty for empty text or query', () => {
     expect(matchIndices('', 'x')).toEqual([])
     expect(matchIndices('abc', '')).toEqual([])
+  })
+})
+
+describe('findMatchesInText', () => {
+  const offsets = (result) => result.matches.map((m) => [m.index, m.length])
+
+  it('honors case-sensitive search', () => {
+    expect(offsets(findMatchesInText('Foo foo', 'foo'))).toEqual([[0, 3], [4, 3]])
+    expect(offsets(findMatchesInText('Foo foo', 'foo', { caseSensitive: true }))).toEqual([[4, 3]])
+  })
+
+  it('filters whole-word matches', () => {
+    expect(offsets(findMatchesInText('cat scatter cat_ cat', 'cat', { wholeWord: true }))).toEqual([[0, 3], [17, 3]])
+  })
+
+  it('supports regular expressions and reports invalid patterns', () => {
+    expect(offsets(findMatchesInText('A-1 B-22', '[A-Z]-\\d+', { regex: true }))).toEqual([[0, 3], [4, 4]])
+    expect(findMatchesInText('abc', '[', { regex: true })).toMatchObject({ matches: [], error: 'regex' })
   })
 })
 

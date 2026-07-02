@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { Icon } from './icons.jsx'
 import { useI18n } from '../i18n.jsx'
 import { isMarkdownName } from '../paths.js'
@@ -103,7 +104,7 @@ export default function Tabs({
         <Icon name="plus" size={16} />
       </button>
 
-      {menu && (
+      {menu && createPortal(
         <>
           <div
             className="menu-backdrop"
@@ -189,7 +190,8 @@ export default function Tabs({
               )
             })()}
           </div>
-        </>
+        </>,
+        document.body
       )}
     </div>
   )

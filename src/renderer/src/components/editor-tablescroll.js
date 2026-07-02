@@ -210,11 +210,15 @@ export function enhanceKeepTables(host, scroller, { onFilterClick, onHeaderEdit 
       // window 'scroll' CAPTURE handler, which fires BEFORE the float bar's own
       // scroll listener — re-setting scrollLeft here would clobber (freeze) a drag
       // on the float's own scrollbar. While shown, hGroup keeps it in sync.
-      if (!floatEl.classList.contains('km-visible')) {
+      // Reveal it FIRST: while `display:none` the float's scrollers can't hold a
+      // scrollLeft, so assigning before the class is added is a silent no-op and
+      // the header snaps back to the left (misaligned with a right-scrolled body).
+      const wasVisible = floatEl.classList.contains('km-visible')
+      floatEl.classList.add('km-visible')
+      if (!wasVisible) {
         fscroll.scrollLeft = wrap.scrollLeft
         fTop.scrollLeft = wrap.scrollLeft
       }
-      floatEl.classList.add('km-visible')
     }
 
     floats.push({ update, hide, syncContent })

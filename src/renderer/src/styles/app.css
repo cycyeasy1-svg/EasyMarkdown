@@ -2347,14 +2347,29 @@ body.hm-full-width .editor-skeleton {
   content: var(--hm-placeholder, attr(data-placeholder));
 }
 
+.source-editor-wrap {
+  --source-editor-pad-top: 40px;
+  --source-editor-pad-bottom: 60vh;
+  --source-editor-pad-inline: max(60px, calc((100% - var(--editor-max-width, 800px)) / 2));
+  --source-line-number-width: 54px;
+  --source-fold-gutter-width: 30px;
+  --source-gutter-text-gap: 16px;
+  flex: 1;
+  min-width: 0;
+  position: relative;
+  display: flex;
+  overflow: hidden;
+  background: var(--bg-editor);
+}
 .source-editor {
   flex: 1;
   width: 100%;
+  height: 100%;
   min-width: 0;
   resize: none;
   border: none;
   outline: none;
-  background: var(--bg-editor);
+  background: transparent;
   color: var(--text);
   font-family: var(--font-mono);
   /* Track the editor font size, kept ~2px smaller (mono reads larger), and follow
@@ -2362,12 +2377,94 @@ body.hm-full-width .editor-skeleton {
      `zoom`, which would disturb the flex sizing) — for plain source that's enough. */
   font-size: calc((var(--editor-font-size, 16px) - 2px) * var(--editor-zoom, 1));
   line-height: 1.75;
-  padding: 40px max(60px, calc((100% - var(--editor-max-width, 800px)) / 2)) 60vh;
+  padding:
+    var(--source-editor-pad-top)
+    var(--source-editor-pad-inline)
+    var(--source-editor-pad-bottom)
+    calc(
+      var(--source-editor-pad-inline) +
+      var(--source-line-number-width) +
+      var(--source-fold-gutter-width) +
+      var(--source-gutter-text-gap)
+    );
+  overflow: auto;
   user-select: text;
+  position: relative;
+  z-index: 1;
 }
-body.hm-full-width .source-editor {
-  padding-left: 60px;
-  padding-right: 60px;
+.source-line-numbers {
+  position: absolute;
+  top: 0;
+  left: var(--source-editor-pad-inline);
+  z-index: 2;
+  width: var(--source-line-number-width);
+  box-sizing: border-box;
+  margin: 0;
+  padding: var(--source-editor-pad-top) 10px var(--source-editor-pad-bottom) 0;
+  color: var(--faint);
+  font-family: var(--font-mono);
+  font-size: calc((var(--editor-font-size, 16px) - 2px) * var(--editor-zoom, 1));
+  line-height: 1.75;
+  text-align: right;
+  white-space: pre;
+  pointer-events: none;
+  user-select: none;
+  opacity: 0.84;
+  will-change: transform;
+}
+.source-editor:focus + .source-line-numbers {
+  color: var(--muted);
+}
+.source-fold-gutter {
+  position: absolute;
+  top: 0;
+  left: calc(var(--source-editor-pad-inline) + var(--source-line-number-width));
+  z-index: 3;
+  width: var(--source-fold-gutter-width);
+  margin: 0;
+  padding: 0;
+  font-size: calc((var(--editor-font-size, 16px) - 2px) * var(--editor-zoom, 1));
+  line-height: 1.75;
+  pointer-events: none;
+  will-change: transform;
+}
+.source-fold-toggle {
+  position: absolute;
+  left: 3px;
+  width: 24px;
+  height: 24px;
+  margin-top: 0;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--muted);
+  opacity: 0.58;
+  cursor: pointer;
+  pointer-events: auto;
+  transition: opacity 0.15s var(--ease-out), background 0.12s var(--ease-out),
+    color 0.12s var(--ease-out);
+}
+.source-fold-toggle svg {
+  transition: transform 0.18s var(--ease-out);
+}
+.source-editor-wrap:hover .source-fold-toggle,
+.source-fold-toggle:hover,
+.source-fold-toggle.is-collapsed {
+  opacity: 1;
+  color: var(--text);
+}
+.source-fold-toggle:hover {
+  background: var(--hover-elevated);
+}
+.source-fold-toggle.is-collapsed svg {
+  transform: rotate(-90deg);
+}
+body.hm-full-width .source-editor-wrap {
+  --source-editor-pad-inline: 60px;
 }
 
 /* Find Bar */
@@ -2379,6 +2476,7 @@ body.hm-full-width .source-editor {
   display: flex;
   align-items: center;
   gap: 8px;
+  max-width: calc(100vw - 48px);
   background: var(--bg-elevated);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
@@ -2396,8 +2494,14 @@ body.hm-full-width .source-editor {
   outline: none;
   color: var(--text);
   font-size: 13px;
-  width: 180px;
+  width: clamp(132px, 22vw, 220px);
   padding: 2px 6px;
+}
+.findbar input.is-error {
+  color: var(--danger);
+}
+.findbar.has-error {
+  border-color: color-mix(in srgb, var(--danger) 44%, var(--border));
 }
 /* Find matches, painted via the CSS Custom Highlight API (no DOM mutation). */
 ::highlight(hm-find) {
@@ -2412,10 +2516,14 @@ body.hm-full-width .source-editor {
   font-size: 12px;
   color: var(--faint);
   font-variant-numeric: tabular-nums;
-  min-width: 34px;
+  min-width: 40px;
   text-align: right;
   padding-right: 2px;
   white-space: nowrap;
+}
+.findbar-count.is-empty,
+.findbar-count.is-error {
+  color: var(--danger);
 }
 .findbar button {
   font-size: 12px;
@@ -2432,10 +2540,24 @@ body.hm-full-width .source-editor {
   background: var(--hover);
   color: var(--text);
 }
+.findbar button:disabled {
+  cursor: default;
+  opacity: 0.38;
+}
+.findbar button:disabled:hover {
+  background: transparent;
+  color: var(--muted);
+}
 /* Mode toggle (text ⇄ line): tinted when line-locate is active. */
-.findbar-mode.active {
+.findbar-mode.active,
+.findbar-option.active {
   color: var(--accent-strong);
   background: var(--accent-soft);
+}
+.findbar-option {
+  min-width: 28px;
+  letter-spacing: 0;
+  line-height: 1;
 }
 /* Line-locate: briefly glow the jumped-to preview block. Display-only — the
    class is added/removed on the rendered `.km-block` / .ProseMirror child and
@@ -3386,9 +3508,11 @@ body.dark .milkdown {
   padding-right: 18px !important;
 }
 .app.is-mobile .editor-skeleton { padding-top: 18px; }
-.app.is-mobile .source-editor {
-  padding-left: 18px !important;
-  padding-right: 18px !important;
+.app.is-mobile .source-editor-wrap {
+  --source-editor-pad-inline: 18px;
+  --source-line-number-width: 44px;
+  --source-fold-gutter-width: 28px;
+  --source-gutter-text-gap: 12px;
 }
 
 /* Typography tuned for a phone: the desktop heading scale (h1 = 2.25em ≈ 36px)
