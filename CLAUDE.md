@@ -165,7 +165,10 @@ docs/                  architecture / features / implementation-notes / developm
   killer: a workspace with hundreds of nested folders made chokidar stat the entire
   tree (×N roots) on launch, saturating the main-process event loop so the
   renderer's own IPC (reading the active doc) stalled for seconds. Keep watching
-  shallow + lazy; a change in a collapsed folder is picked up fresh on expand.
+  shallow + lazy; a change in a collapsed folder is picked up fresh on expand,
+  by the folder context-menu Refresh action (explicit recursive scan of that
+  subtree, with toast feedback), or by rebuilding the command palette's
+  quick-open index when the palette opens.
 - **File watcher must stay crash-proof.** chokidar watching a directory that
   contains permission-protected paths throws a flood of `EACCES`/`EAGAIN`/`EBUSY`
   that, left unhandled, `abort()`s the whole main process on launch. The trap:

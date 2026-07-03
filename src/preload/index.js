@@ -46,6 +46,7 @@ const api = {
   createDir: (path) => ipcRenderer.invoke('fs:createDir', path),
   duplicate: (path) => ipcRenderer.invoke('fs:duplicate', path),
   readDir: (dir) => ipcRenderer.invoke('fs:readDir', dir),
+  readDirRecursive: (dir) => ipcRenderer.invoke('fs:readDirRecursive', dir),
   listFiles: (root) => ipcRenderer.invoke('fs:listFiles', root),
   openFolderTree: (dir) => ipcRenderer.invoke('fs:openFolderTree', dir),
 

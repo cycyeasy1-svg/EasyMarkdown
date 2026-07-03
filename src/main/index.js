@@ -408,6 +408,18 @@ async function readTree(dir, depth = 0) {
 
 ipcMain.handle('fs:readDir', async (_e, dir) => readTree(dir))
 
+async function readTreeRecursive(dir, depth = 0, acc = {}) {
+  if (depth > 12) return acc
+  const nodes = await readTree(dir)
+  acc[dir] = nodes
+  for (const node of nodes) {
+    if (node.type === 'dir') await readTreeRecursive(node.path, depth + 1, acc)
+  }
+  return acc
+}
+
+ipcMain.handle('fs:readDirRecursive', async (_e, dir) => readTreeRecursive(dir))
+
 async function listFilesFlat(root, dir, acc, depth) {
   if (depth > 12 || acc.length > 5000) return
   let entries

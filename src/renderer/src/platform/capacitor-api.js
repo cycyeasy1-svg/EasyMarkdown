@@ -145,6 +145,16 @@ const readTree = async (dir) => {
   return nodes
 }
 
+const readTreeRecursive = async (dir, depth = 0, acc = {}) => {
+  if (depth > 12) return acc
+  const nodes = await readTree(dir)
+  acc[dir] = nodes
+  for (const node of nodes) {
+    if (node.type === 'dir') await readTreeRecursive(node.path, depth + 1, acc)
+  }
+  return acc
+}
+
 const listFilesFlat = async (root, dir, acc, depth) => {
   if (depth > 12 || acc.length > 5000) return
   let files
@@ -302,6 +312,7 @@ export function makeCapacitorApi() {
     createDir,
     duplicate,
     readDir: readTree,
+    readDirRecursive: readTreeRecursive,
     listFiles,
     openFolderTree,
 

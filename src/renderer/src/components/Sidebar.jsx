@@ -2,7 +2,7 @@ import { memo, useCallback, useEffect, useRef, useState } from 'react'
 import { Icon } from './icons.jsx'
 import { useI18n } from '../i18n.jsx'
 import { baseName, dirName as parentDir, joinPath as join, isMarkdownName, isValidName, isExistsError } from '../paths.js'
-import { copyToClipboard } from '../ui.js'
+import { copyToClipboard, fireToast } from '../ui.js'
 
 // Memoized: the parent (App) re-renders on every keystroke, but the file tree only
 // depends on the workspace roots, the open-file set, and the active path — none of
@@ -230,6 +230,25 @@ function Sidebar({ workspaces, activePath, openTabPaths, openTabPathsRaw, onOpen
   const refreshParentOf = async (path) => {
     const p = parentDir(path)
     if (childrenMap[p] !== undefined) await loadDir(p)
+  }
+
+  const refreshDir = async (dir) => {
+    fireToast(t('side.refreshing'), { sticky: true })
+    try {
+      const nextMap = await window.api.readDirRecursive(dir)
+      const root = dir.replace(/\\/g, '/')
+      setChildrenMap((prev) => {
+        const next = { ...prev }
+        for (const key of Object.keys(next)) {
+          const k = key.replace(/\\/g, '/')
+          if (k === root || k.startsWith(root + '/')) delete next[key]
+        }
+        return { ...next, ...nextMap }
+      })
+      fireToast(t('side.refreshed'), { duration: 1600 })
+    } catch (e) {
+      fireToast(t('side.refreshFailed', { msg: e?.message || String(e) }), { sticky: true })
+    }
   }
 
   // Start inline creation for a file. `dir` is an explicit folder path (a root
@@ -686,6 +705,7 @@ function Sidebar({ workspaces, activePath, openTabPaths, openTabPathsRaw, onOpen
         }} onClick={(e) => e.stopPropagation()}>
           <button onClick={() => { startNewFile(menu.node ? (menu.node.type === 'dir' ? menu.node.path : parentDir(menu.node.path)) : null); setMenu(null) }}>{t('side.ctxNewFile')}</button>
           <button onClick={() => { startNewFolder(menu.node ? (menu.node.type === 'dir' ? menu.node.path : parentDir(menu.node.path)) : null); setMenu(null) }}>{t('side.ctxNewFolder')}</button>
+          {menu.node?.type === 'dir' && <button onClick={() => { refreshDir(menu.node.path); setMenu(null) }}>{t('side.refresh')}</button>}
           {menu.node?.type === 'file' && onOpenRight && (
             <>
               <div className="menu-sep" />

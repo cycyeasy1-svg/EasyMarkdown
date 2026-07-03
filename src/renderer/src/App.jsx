@@ -1364,31 +1364,31 @@ export default function App() {
   const rootsKey = workspaces.map((w) => w.rootPath).join('\n')
 
   // The cross-root file index (for the command palette's quick-open) is built
-  // LAZILY — recursively scanning two whole trees at launch stalled startup. We
-  // build it the first time the palette opens, then keep it fresh on changes.
-  const filesBuiltRef = useRef(false)
+  // LAZILY — recursively scanning whole workspace trees at launch stalls big
+  // projects. Rebuild it when the palette opens (so collapsed-folder changes are
+  // picked up), and while the palette is open after watched changes.
   const relistTimerRef = useRef(null)
+  const relistSeqRef = useRef(0)
   const relistFiles = useCallback(() => {
+    const seq = ++relistSeqRef.current
     const roots = workspaces.map((w) => w.rootPath)
-    filesBuiltRef.current = true
     if (!roots.length) {
       setFiles([])
       return
     }
     Promise.all(roots.map((r) => window.api.listFiles(r).catch(() => [])))
-      .then((arrs) => setFiles(arrs.flat()))
+      .then((arrs) => {
+        if (seq === relistSeqRef.current) setFiles(arrs.flat())
+      })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rootsKey])
 
-  // Build the index on first palette open; rebuild on root-set change if already
-  // built (so a newly added folder shows up in quick-open).
+  // Rebuild every time the palette opens. This is the "manual freshness" escape
+  // hatch for lazy folder watching: changes under collapsed, never-expanded dirs
+  // are not watched, but quick-open sees them on the next palette open.
   useEffect(() => {
-    if (paletteOpen && !filesBuiltRef.current) relistFiles()
+    if (paletteOpen) relistFiles()
   }, [paletteOpen, relistFiles])
-  useEffect(() => {
-    if (filesBuiltRef.current) relistFiles()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rootsKey])
 
   // Folder watching is LAZY and lives in the Sidebar: it shallow-watches each
   // directory as it's loaded/expanded (Sidebar.loadDir → watchStart), instead of
@@ -1398,15 +1398,18 @@ export default function App() {
   useEffect(() => {
     const off = window.api.onWatchChanged(() => {
       setRefreshNonce((n) => n + 1) // cheap: Sidebar only reloads already-open dirs
-      // Refresh the quick-open index only if it's been built, and debounce so a
-      // burst of fs events triggers one rescan, not one per event.
-      if (filesBuiltRef.current) {
+      // If quick-open is visible, keep its index live. If it's closed, don't scan
+      // in the background; the next palette open rebuilds from disk anyway.
+      if (paletteOpen) {
         clearTimeout(relistTimerRef.current)
         relistTimerRef.current = setTimeout(relistFiles, 400)
       }
     })
-    return off
-  }, [relistFiles])
+    return () => {
+      off()
+      clearTimeout(relistTimerRef.current)
+    }
+  }, [paletteOpen, relistFiles])
 
   // --------- auto-reload open files edited by external programs ----------
   const watchedRef = useRef(new Set())
