@@ -2017,15 +2017,22 @@ export default function App() {
   // ------------------------- update check (notify-only) ------------
   useEffect(() => {
     let alive = true
-    window.api.checkUpdate?.().then((r) => {
-      if (!alive || !r?.ok || !r.latest) return
-      const dismissed = localStorage.getItem(UPDATE_DISMISS_KEY)
-      if (isNewerVersion(r.latest, r.current) && r.latest !== dismissed) {
-        setUpdate({ latest: r.latest, current: r.current, url: r.url, notes: r.notes, name: r.name })
-      }
-    }).catch(() => {})
+    // Delayed a few seconds: the check itself is async (net.fetch in main), but
+    // firing it at mount competes with session restore / first document read
+    // for main-process time during the busiest startup window. Nothing about a
+    // notify-only update is urgent.
+    const timer = setTimeout(() => {
+      window.api.checkUpdate?.().then((r) => {
+        if (!alive || !r?.ok || !r.latest) return
+        const dismissed = localStorage.getItem(UPDATE_DISMISS_KEY)
+        if (isNewerVersion(r.latest, r.current) && r.latest !== dismissed) {
+          setUpdate({ latest: r.latest, current: r.current, url: r.url, notes: r.notes, name: r.name })
+        }
+      }).catch(() => {})
+    }, 4000)
     return () => {
       alive = false
+      clearTimeout(timer)
     }
   }, [])
 
