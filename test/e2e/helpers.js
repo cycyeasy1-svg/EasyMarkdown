@@ -37,7 +37,11 @@ export async function launchApp(fixtureFiles = []) {
   delete env.ELECTRON_RUN_AS_NODE
 
   const app = await electron.launch({
-    args: [MAIN, `--user-data-dir=${userDataDir}`, ...fixtureFiles],
+    // --lang pins Chromium's locale (→ navigator.language → DEFAULT_LANG) to
+    // Chinese, which the specs' title selectors ("切换编辑模式" etc.) assume.
+    // Without it the app follows the OS locale and the suite breaks on ja/en
+    // machines. Flag args are ignored by main's extractArgs (leading "-").
+    args: [MAIN, `--user-data-dir=${userDataDir}`, '--lang=zh-CN', ...fixtureFiles],
     env
   })
   const page = await app.firstWindow()
