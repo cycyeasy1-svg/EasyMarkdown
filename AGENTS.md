@@ -42,7 +42,7 @@ src/renderer/src/
   components/{Sidebar,Tabs,Outline,CommandPalette,StatusBar,icons}.jsx
   components/{Welcome,WindowControls,UpdateToast,RenameModal}.jsx  leaf views split out of App
   components/editor-{html,images,copy,mermaid,tablebreak}.js  Editor helpers: HTML node view · img paths · rich-copy · mermaid widget · table-cell <br>
-  {paths,find,ui,settings,customThemes}.js  pure helpers: session · find · toast · prefs (page width / font size / zoom) · custom-theme injection
+  {paths,find,ui,settings,customThemes,sourceFold}.js  pure helpers: session · find · toast · prefs (page width / font size / zoom) · custom-theme injection � source-pane folding
   {blocks,themes,i18n,onboarding}.{js,jsx}
   styles/app.css       all styles + theme variables
 build/                 icon.ico (Windows) + icon.icns (macOS) + installer.nsh (NSIS uninstall: keep user files)
@@ -197,7 +197,7 @@ docs/                  architecture / features / implementation-notes / developm
   `npm run test:watch`). Tests live in `test/`; config is `vitest.config.mjs`.
   They're written as **characterization tests** (lock current behavior, since
   there's no design spec) over `keep-parser`, `paths`, `editor-images`,
-  `main/helpers`, `settings`, `find`, `blocks`. Default env is `node`; a test
+  `main/helpers`, `settings`, `find`, `blocks`, `sourceFold`. Default env is `node`; a test
   needing `localStorage`/`document` opts into happy-dom via a
   `// @vitest-environment happy-dom` first line. **Main-process pure functions
   live in `src/main/helpers.js`** (not `index.js`, which imports `electron` and
