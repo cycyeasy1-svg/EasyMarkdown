@@ -515,7 +515,6 @@ export default function App() {
       /* quota / serialization failure — skip this snapshot */
     }
   }, [])
-  const [activeBlock, setActiveBlock] = useState('paragraph')
   // Lazy mounting: a rich (Crepe) editor is only created once its tab has been
   // activated, then kept mounted so later tab switches stay instant. This keeps
   // startup/session-restore fast — only the active tab spins up an editor
@@ -2967,9 +2966,6 @@ export default function App() {
                       onReady={(api) => {
                         editorApis.current[tab.id] = api
                       }}
-                      onActiveBlock={(id) => {
-                        if (tab.id === activeIdRef.current) setActiveBlock(id)
-                      }}
                     />
                   </Suspense>
                 </div>
@@ -3036,7 +3032,6 @@ export default function App() {
         }}
         theme={theme}
         setTheme={pickBuiltinTheme}
-        cycleTheme={cycleTheme}
         customThemes={customThemes}
         customTheme={customTheme}
         onPickCustom={setCustomTheme}
@@ -3061,8 +3056,6 @@ export default function App() {
         }}
         showModeHint={showModeHint}
         onDismissModeHint={dismissModeHint}
-        activeBlock={activeBlock}
-        onPickBlock={(id) => editorApis.current[activeId]?.setBlock(id)}
         pageWidth={settings.pageWidth}
         onSetPageWidth={(w) => updateSettings({ pageWidth: w })}
         fontSize={settings.fontSize}
