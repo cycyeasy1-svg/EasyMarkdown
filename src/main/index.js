@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, dialog, Menu, shell, net } from 'electron'
+import { app, BrowserWindow, ipcMain, dialog, Menu, shell, net, nativeTheme } from 'electron'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { dirname, join, basename, extname, resolve, sep } from 'node:path'
 import fs from 'node:fs/promises'
@@ -173,7 +173,11 @@ function createWindow() {
     minWidth: 720,
     minHeight: 480,
     show: false,
-    backgroundColor: '#1a1b20',
+    // Match the boot splash's background (index.html: light #ebe7e0 / dark
+    // #16130e via prefers-color-scheme) so the first painted frame doesn't
+    // flash a mismatched tint — the old fixed dark value showed a dark flicker
+    // on light-theme systems.
+    backgroundColor: nativeTheme.shouldUseDarkColors ? '#16130e' : '#ebe7e0',
     // Dev-only window icon: the packaged app already gets its icon from
     // build/icon.ico|icns via electron-builder, and build/ isn't bundled into
     // the asar — so only point at it when running unpacked (npm run dev), else
