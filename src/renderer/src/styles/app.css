@@ -1973,7 +1973,14 @@ body.hm-col-resizing .pane-left { transition: none !important; }
   /* No smooth scroll on the edit surface: it turns every implicit
      scroll-into-view (on click/select) into a visible upward slide.
      Outline/find jumps pass `behavior: 'smooth'` explicitly when wanted. */
-  overflow-anchor: none;
+  /* Scroll anchoring stays ON: content can still change height mid-scroll
+     (mermaid previews replacing code, images loading, KaTeX), and `auto` lets
+     Chromium adjust scrollTop so those deltas don't jolt the view. This was
+     `none` (from afeb9e5, to fight Crepe's virtual-cursor reflow), but the
+     virtual cursor is disabled ([CrepeFeature.Cursor]: false in Editor.jsx) so
+     that rationale is gone — and `none` let lazily-mounted code blocks jump
+     the page (see editor-codeblock-eager.js). */
+  overflow-anchor: auto;
   position: relative; /* containing block for the loading skeleton */
 }
 
@@ -3227,10 +3234,14 @@ body.dark .milkdown {
   margin-top: 0;
 }
 
-/* Paragraphs — enhanced readability. Vertical spacing is user-adjustable. */
+/* Paragraphs — enhanced readability. Vertical spacing is user-adjustable.
+   font-size must be EXPLICIT: Crepe's reset.css pins `.ProseMirror p` to 16px
+   (same selector/specificity — app.css wins by source order, see main.jsx), and
+   without this line the body text ignored the font-size slider entirely. */
 .milkdown .ProseMirror p {
   margin: var(--editor-para-spacing, 0.8em) 0;
   line-height: inherit;
+  font-size: var(--editor-font-size, 16px);
 }
 .milkdown .ProseMirror > p:first-child {
   margin-top: 0;

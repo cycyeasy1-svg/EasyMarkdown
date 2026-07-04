@@ -27,6 +27,8 @@ import { inlineRichStyles } from './editor-copy.js'
 import { createMermaidPreviewRenderer, createMermaidSplitPlugin } from './editor-mermaid.js'
 import { tableBreakKeymap, tableCellBreakHandler, brToBreakRemarkPlugin } from './editor-tablebreak.js'
 import { attachMdPasteHandler } from './editor-md-paste.js'
+import { normalizeDisplayMath } from './editor-math.js'
+import './editor-codeblock-eager.js' // side effect: stable code-block heights (scroll-jump fix)
 import remarkFrontmatter from 'remark-frontmatter'
 import { frontmatterSchema, renderFrontmatterNodeView, remarkFrontmatterAnywhere } from './editor-frontmatter.js'
 import {
@@ -231,7 +233,9 @@ function Editor({
 
     const crepe = new Crepe({
       root: host,
-      defaultValue: initialContent || '',
+      // Single-line `$$x^2$$` is expanded to the block form Milkdown's LaTeX
+      // feature recognizes; code fences / front matter are left untouched.
+      defaultValue: normalizeDisplayMath(initialContent || ''),
       features: {
         [CrepeFeature.SelectionTooltip]: true,
         [CrepeFeature.SlashCommand]: true,
