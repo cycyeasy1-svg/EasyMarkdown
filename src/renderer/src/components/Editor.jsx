@@ -44,6 +44,48 @@ import {
 // on the wrong (hidden) tab when more than one tab was open.
 const liveEditors = new Set()
 
+// One shared document.body MutationObserver serves every mounted editor's
+// toolbar scan. Crepe creates its selection toolbar lazily on selection, so we
+// re-scan when nodes are added — but with one observer per editor, N mounted
+// tabs meant N body-wide observers all allocating mutation records on every
+// edit. The single observer coalesces to one rAF and runs each registered
+// scanner (same work as before — injection is idempotent and each editor's
+// highlight-active refresh reads its own view), so behavior is unchanged while
+// the per-mutation overhead stops scaling with tab count.
+const toolbarScanners = new Set()
+let sharedToolbarObserver = null
+let sharedToolbarRaf = 0
+function registerToolbarScanner(scan) {
+  toolbarScanners.add(scan)
+  if (!sharedToolbarObserver) {
+    sharedToolbarObserver = new MutationObserver((muts) => {
+      for (const m of muts) {
+        if (m.addedNodes && m.addedNodes.length) {
+          if (!sharedToolbarRaf) {
+            sharedToolbarRaf = requestAnimationFrame(() => {
+              sharedToolbarRaf = 0
+              toolbarScanners.forEach((s) => s())
+            })
+          }
+          return
+        }
+      }
+    })
+    sharedToolbarObserver.observe(document.body, { childList: true, subtree: true })
+  }
+  return () => {
+    toolbarScanners.delete(scan)
+    if (!toolbarScanners.size && sharedToolbarObserver) {
+      sharedToolbarObserver.disconnect()
+      sharedToolbarObserver = null
+      if (sharedToolbarRaf) {
+        cancelAnimationFrame(sharedToolbarRaf)
+        sharedToolbarRaf = 0
+      }
+    }
+  }
+}
+
 // A "Mermaid" entry for the code-block language picker. Mermaid has no real
 // CodeMirror language (the diagram is rendered via the code-block preview in
 // editor-mermaid.js), so load() returns a no-op language — the picker just needs
@@ -914,32 +956,10 @@ function Editor({
           updateHighlightActive()
         }
         scanToolbars()
-        // The toolbar is created on selection, so we only need to re-scan when
-        // nodes are actually added — not on every edit. Skip mutation batches
-        // with no added nodes, and coalesce the rest into one scan per frame, so
-        // typing in a large document doesn't trigger a document-wide query each
-        // keystroke (one observer per mounted editor made this add up).
-        let scanRaf = 0
-        const scheduleScan = () => {
-          if (scanRaf) return
-          scanRaf = requestAnimationFrame(() => {
-            scanRaf = 0
-            scanToolbars()
-          })
-        }
-        const toolbarObserver = new MutationObserver((muts) => {
-          for (const m of muts) {
-            if (m.addedNodes && m.addedNodes.length) {
-              scheduleScan()
-              return
-            }
-          }
-        })
-        toolbarObserver.observe(document.body, { childList: true, subtree: true })
-        cleanups.push(() => {
-          if (scanRaf) cancelAnimationFrame(scanRaf)
-          toolbarObserver.disconnect()
-        })
+        // Re-scan when nodes are added (the toolbar is created on selection) —
+        // via the module-level shared observer, so N mounted editors cost one
+        // body observer instead of N (see registerToolbarScanner above).
+        cleanups.push(registerToolbarScanner(scanToolbars))
         }
 
         // Typora-style new document: first line is an empty Heading 1 (title),
