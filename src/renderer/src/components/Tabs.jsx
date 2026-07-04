@@ -1,11 +1,14 @@
-import { useEffect, useRef, useState } from 'react'
+import { memo, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Icon } from './icons.jsx'
 import { useI18n } from '../i18n.jsx'
 import { isMarkdownName } from '../paths.js'
 import { copyToClipboard } from '../ui.js'
 
-export default function Tabs({
+// `tabs` here is App's stable tabsMeta projection ({id, title, path, dirty}),
+// NOT the full tab objects — its identity only changes when one of those
+// fields does, which is what makes the memo() below effective while typing.
+function Tabs({
   tabs,
   activeId,
   splitId,
@@ -61,7 +64,7 @@ export default function Tabs({
     <div className="tabs">
       <div className="tabs-scroll">
         {tabs.map((tab) => {
-          const dirty = tab.content !== tab.savedContent
+          const dirty = tab.dirty
           const isLeft = tab.id === activeId
           const isRight = splitId != null && tab.id === splitId
           // Both panes' tabs are highlighted in split view; the focused pane's tab
@@ -196,3 +199,5 @@ export default function Tabs({
     </div>
   )
 }
+
+export default memo(Tabs)

@@ -556,6 +556,26 @@ export default function App() {
     () => new Set(openTabPathsRaw.map((p) => p.replace(/\\/g, '/'))),
     [openTabPathsRaw]
   )
+  // Stable projection for the memoized tab strip: `tabs` gets a fresh identity
+  // on every keystroke (content edits map a new array), so the strip is keyed on
+  // exactly what it renders — id/title/path/dirty — and only re-renders when one
+  // of those actually changes (same trick as openPathsKey above).
+  const tabsStripKey = tabs
+    .map(
+      (x) => JSON.stringify([x.id, x.title, x.path || '', x.content !== x.savedContent])
+    )
+    .join('\n')
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const tabsMeta = useMemo(
+    () =>
+      tabs.map((x) => ({
+        id: x.id,
+        title: x.title,
+        path: x.path,
+        dirty: x.content !== x.savedContent
+      })),
+    [tabsStripKey]
+  )
   // Split is "live" only when the right-pane tab exists and differs from the
   // active (left) one. Hidden on the welcome/home screen.
   const splitTab = useMemo(
@@ -566,6 +586,12 @@ export default function App() {
   // Always-current activeId for callbacks that fire after a tab switch.
   const activeIdRef = useRef(activeId)
   activeIdRef.current = activeId
+  // Mirrors for stable event callbacks (tab strip, per-tab pane handlers): they
+  // decide split/pane routing at event time without re-creating per render.
+  const splitRef = useRef(split)
+  splitRef.current = split
+  const focusedPaneRef = useRef(focusedPane)
+  focusedPaneRef.current = focusedPane
 
   // Always-current snapshot of tabs for use inside async callbacks / event
   // handlers that must not capture a stale `tabs` closure.
@@ -1202,6 +1228,20 @@ export default function App() {
       return next
     })
   }, [])
+
+  // Stable handlers for the memoized tab strip: split/pane routing is decided
+  // at click time via refs, so these never change identity.
+  const onTabActivate = useCallback((id) => {
+    setHome(false)
+    // Load into whichever pane is focused, so both panes are switchable.
+    if (splitRef.current && focusedPaneRef.current === 'right' && id !== activeIdRef.current) {
+      setSplitId(id)
+    } else {
+      setActiveId(id)
+    }
+  }, [])
+  const onCloseLeftTabs = useCallback((id) => closeSide(id, 'left'), [closeSide])
+  const onCloseRightTabs = useCallback((id) => closeSide(id, 'right'), [closeSide])
 
   const writeTab = useCallback(async (tab, targetPath) => {
     try {
@@ -2718,24 +2758,16 @@ export default function App() {
           </button>
         )}
         <Tabs
-          tabs={tabs}
+          tabs={tabsMeta}
           activeId={home ? null : activeId}
           splitId={home ? null : splitId}
           focusedPane={focusedPane}
-          onActivate={(id) => {
-            setHome(false)
-            // Load into whichever pane is focused, so both panes are switchable.
-            if (split && focusedPane === 'right' && id !== activeId) {
-              setSplitId(id)
-            } else {
-              setActiveId(id)
-            }
-          }}
+          onActivate={onTabActivate}
           onClose={closeTab}
           onNew={newTab}
           onCloseOthers={closeOthers}
-          onCloseLeft={(id) => closeSide(id, 'left')}
-          onCloseRight={(id) => closeSide(id, 'right')}
+          onCloseLeft={onCloseLeftTabs}
+          onCloseRight={onCloseRightTabs}
           onOpenRight={openRight}
           onRename={renameTabFile}
           onDuplicate={duplicateTabFile}
