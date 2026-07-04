@@ -565,7 +565,6 @@ export default function App() {
       (x) => JSON.stringify([x.id, x.title, x.path || '', x.content !== x.savedContent])
     )
     .join('\n')
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   const tabsMeta = useMemo(
     () =>
       tabs.map((x) => ({
@@ -574,6 +573,7 @@ export default function App() {
         path: x.path,
         dirty: x.content !== x.savedContent
       })),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [tabsStripKey]
   )
   // Split is "live" only when the right-pane tab exists and differs from the
