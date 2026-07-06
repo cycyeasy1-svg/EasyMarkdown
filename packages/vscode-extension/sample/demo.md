@@ -1,7 +1,19 @@
+---
+title: Keep Mode Demo
+author: EasyMarkdown
+draft: false
+---
+
 # Keep Mode Demo
 
 This file is for testing the **EasyMarkdown Keep** custom editor. Open it, then
 run **Reopen Editor With… → EasyMarkdown Keep**.
+
+## Task list (click a checkbox — only that line changes)
+
+- [x] Render checkboxes
+- [ ] Toggle writes back a single source line
+- [ ] Zero diff everywhere else
 
 ## Inline editing
 

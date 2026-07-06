@@ -1,4 +1,7 @@
 const vscode = require('vscode')
+// Pure filename sanitizer shared with the desktop app's image:save IPC — same
+// naming convention for pasted images on both sides.
+const { imageNameParts } = require('../../../src/main/helpers.js')
 
 const VIEW_TYPE = 'easymarkdown.keep'
 const LAYOUT_KEY = 'easymarkdown.keep.layout'
@@ -21,6 +24,8 @@ const LANG_KEY = 'easymarkdown.keep.lang'
 class KeepEditorProvider {
   constructor(context) {
     this.context = context
+    this.panels = new Map() // uriString -> live webviewPanel (for cross-file anchor jumps)
+    this.pendingAnchor = new Map() // uriString -> #fragment to apply once the editor opens
   }
 
   static register(context) {
@@ -32,8 +37,13 @@ class KeepEditorProvider {
   }
 
   resolveCustomTextEditor(document, webviewPanel) {
-    // Opening keep = the user's current preference; the next .md follows suit.
-    this.context.globalState.update(MODE_KEY, 'keep')
+    // NOTE: resolving does NOT update MODE_KEY. Keep is the platform default
+    // editor, so files auto-open here even when the user's explicit preference
+    // is 'source' (the tab watcher then reverts them) — recording every resolve
+    // as a preference would overwrite that choice. Only explicit actions
+    // (the commands / the in-editor Source button) update the preference.
+    const docKey = document.uri.toString()
+    this.panels.set(docKey, webviewPanel)
     const webview = webviewPanel.webview
     const docDir = vscode.Uri.joinPath(document.uri, '..')
     webview.options = {
@@ -53,6 +63,14 @@ class KeepEditorProvider {
     let lastKnownText = document.getText()
     let ownEditPending = false
 
+    // ── scroll sync (keep view ⇄ a side-by-side source editor of the same file) ──
+    // Timestamp windows (not one-shot flags) suppress echo: a revealRange / a
+    // programmatic webview scroll emits a STREAM of scroll events, not one.
+    const scrollSyncOn = () =>
+      vscode.workspace.getConfiguration('easymarkdown.keep').get('scrollSync', true)
+    let suppressEditorScrollUntil = 0
+    let editorScrollTimer = null
+
     const baseUri = webview.asWebviewUri(docDir).toString()
     webview.html = this.getHtml(webview)
 
@@ -60,6 +78,11 @@ class KeepEditorProvider {
 
     const postInit = () => {
       lastKnownText = document.getText()
+      // A cross-file link may have queued a #fragment for this document before
+      // the editor resolved — deliver it with the init so the webview can jump
+      // once the first paint lands.
+      const anchor = this.pendingAnchor.get(docKey) || null
+      this.pendingAnchor.delete(docKey)
       webview.postMessage({
         type: 'init',
         text: lastKnownText,
@@ -67,7 +90,8 @@ class KeepEditorProvider {
         lang, // resolved code (en/zh/ja) used to render
         langPref: this.context.globalState.get(LANG_KEY) || 'auto', // for the picker
         theme: this.context.globalState.get(THEME_KEY) || 'auto',
-        layout: this.context.globalState.get(LAYOUT_KEY) || null
+        layout: this.context.globalState.get(LAYOUT_KEY) || null,
+        anchor
       })
     }
 
@@ -103,6 +127,20 @@ class KeepEditorProvider {
         } catch {
           /* ignore malformed url */
         }
+      } else if (msg.type === 'saveImage') {
+        this.saveImage(document, webview, msg)
+      } else if (msg.type === 'openRelative') {
+        this.openRelative(document, webview, msg.href)
+      } else if (msg.type === 'visibleLine') {
+        // Webview scrolled → align every visible text editor of the same file.
+        if (!scrollSyncOn()) return
+        suppressEditorScrollUntil = Date.now() + 250
+        const line = Math.max(0, Math.min(msg.line | 0, document.lineCount - 1))
+        for (const ed of vscode.window.visibleTextEditors) {
+          if (ed.document.uri.toString() === docKey) {
+            ed.revealRange(new vscode.Range(line, 0, line, 0), vscode.TextEditorRevealType.AtTop)
+          }
+        }
       } else if (msg.type === 'layout') {
         // Persist layout prefs globally (mirrors the app's single localStorage
         // prefs object), so every keep editor shares the same layout.
@@ -119,10 +157,107 @@ class KeepEditorProvider {
       }
     })
 
+    // Source editor scrolled → tell the webview to align to its top line.
+    const scrollSub = vscode.window.onDidChangeTextEditorVisibleRanges((e) => {
+      if (e.textEditor.document.uri.toString() !== docKey) return
+      if (!scrollSyncOn()) return
+      if (Date.now() < suppressEditorScrollUntil) return // echo of our own reveal
+      const first = e.visibleRanges[0]
+      if (!first) return
+      clearTimeout(editorScrollTimer)
+      editorScrollTimer = setTimeout(() => {
+        webview.postMessage({ type: 'scrollToLine', line: first.start.line })
+      }, 100)
+    })
+
     webviewPanel.onDidDispose(() => {
       changeSub.dispose()
       msgSub.dispose()
+      scrollSub.dispose()
+      clearTimeout(editorScrollTimer)
+      if (this.panels.get(docKey) === webviewPanel) this.panels.delete(docKey)
     })
+  }
+
+  /**
+   * Open a document-relative link from the webview: `guide/setup.md#install`,
+   * `../notes.md`, `./spec.pdf`, … Resolved against the document's folder. A
+   * markdown target honors the user's preferred mode (the tab watcher reopens it
+   * in keep mode when that's the preference); other files open with whatever
+   * editor VSCode associates. A #fragment on the same document just scrolls; on
+   * another document it's queued (pendingAnchor) or posted to the live panel.
+   */
+  async openRelative(document, webview, href) {
+    try {
+      const hashAt = String(href).indexOf('#')
+      const pathPart = hashAt >= 0 ? String(href).slice(0, hashAt) : String(href)
+      const fragment = hashAt >= 0 ? String(href).slice(hashAt + 1) : ''
+      let rel = ''
+      try {
+        rel = decodeURIComponent(pathPart)
+      } catch {
+        rel = pathPart
+      }
+      if (!rel) {
+        if (fragment) webview.postMessage({ type: 'scrollToAnchor', slug: fragment })
+        return
+      }
+      const target = vscode.Uri.joinPath(document.uri, '..', ...rel.split(/[\\/]+/))
+      const targetKey = target.toString()
+      if (targetKey === document.uri.toString()) {
+        if (fragment) webview.postMessage({ type: 'scrollToAnchor', slug: fragment })
+        return
+      }
+      try {
+        await vscode.workspace.fs.stat(target)
+      } catch {
+        vscode.window.showWarningMessage(`EasyMarkdown: file not found — ${rel}`)
+        return
+      }
+      const existing = this.panels.get(targetKey)
+      if (existing) {
+        // retainContextWhenHidden: the webview is live — reveal + jump directly.
+        existing.reveal()
+        if (fragment) existing.webview.postMessage({ type: 'scrollToAnchor', slug: fragment })
+        return
+      }
+      if (fragment) this.pendingAnchor.set(targetKey, fragment)
+      await vscode.commands.executeCommand('vscode.open', target)
+    } catch {
+      /* ignore malformed links */
+    }
+  }
+
+  /**
+   * Save a pasted/dropped image into an `assets/` folder next to the document
+   * (Typora-style, matching the desktop app's image:save IPC) and reply with the
+   * POSIX-relative path to insert. The webview does the actual markdown insert
+   * through its normal minimal-diff commit path — the host never edits the
+   * document here. An untitled document has no folder to save into → error.
+   */
+  async saveImage(document, webview, msg) {
+    const fail = (code) => webview.postMessage({ type: 'imageError', reqId: msg.reqId, code })
+    try {
+      if (document.uri.scheme !== 'file') return fail('untitled')
+      const dir = vscode.Uri.joinPath(document.uri, '..', 'assets')
+      await vscode.workspace.fs.createDirectory(dir) // recursive + idempotent
+      const { stem, ext } = imageNameParts(msg.name)
+      // Non-clobbering name: probe stem.ext, stem-1.ext, … (stat throws = free).
+      let fileName = stem + ext
+      for (let n = 1; ; n++) {
+        try {
+          await vscode.workspace.fs.stat(vscode.Uri.joinPath(dir, fileName))
+          fileName = `${stem}-${n}${ext}`
+        } catch {
+          break
+        }
+      }
+      const bytes = msg.bytes instanceof Uint8Array ? msg.bytes : new Uint8Array(msg.bytes)
+      await vscode.workspace.fs.writeFile(vscode.Uri.joinPath(dir, fileName), bytes)
+      webview.postMessage({ type: 'imageSaved', reqId: msg.reqId, relPath: 'assets/' + fileName })
+    } catch (e) {
+      fail((e && e.message) || String(e))
+    }
   }
 
   /**

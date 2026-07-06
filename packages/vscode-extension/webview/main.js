@@ -29,9 +29,15 @@ import {
   clearFindHighlights,
   findRangesInEl,
   paintFindHighlights,
-  scrollRangeIntoView
+  scrollRangeIntoView,
+  findMatchesInText,
+  replaceMatchesInText
 } from '../../../src/renderer/src/find.js'
-import { getMermaidSvg, peekMermaidSvg } from './mermaid-core.js'
+import {
+  getMermaidSvg,
+  peekMermaidSvg,
+  setMermaidThemeResolver
+} from '../../../src/renderer/src/components/editor-mermaid-core.js'
 import { makeT } from './i18n.js'
 // Layout controls share the app's pure settings module directly (apply* set CSS
 // vars on the document root + the full-width body class; presets/bounds match).
@@ -64,6 +70,15 @@ import 'katex/dist/katex.min.css'
 
 const vscode = acquireVsCodeApi()
 
+// An explicit keep theme (warm light / dark) overrides VSCode's own theme; else
+// VSCode adds `vscode-dark` / `vscode-high-contrast` to <body> for dark themes.
+setMermaidThemeResolver(() => {
+  const c = document.body.classList
+  if (c.contains('hm-theme-warm-dark')) return 'dark'
+  if (c.contains('hm-theme-warm-light')) return 'default'
+  return c.contains('vscode-dark') || c.contains('vscode-high-contrast') ? 'dark' : 'default'
+})
+
 const COPY_WRAP =
   'font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;font-size:15px;line-height:1.7;color:#24292f;'
 
@@ -76,6 +91,7 @@ let filterState = {} // tableIdx -> { colIdx: Set(excluded values) }
 let baseUri = '' // webview URI of the document folder, for relative images
 let t = makeT('en')
 let ready = false
+let pendingAnchor = null // #fragment carried by a cross-file link, applied after first paint
 let layout = { ...DEFAULT_SETTINGS } // page width / font size / zoom / line-height / para spacing
 let theme = 'auto' // 'auto' (follow VSCode) | 'warm-light' | 'warm-dark'
 let langPref = 'auto' // 'auto' | 'en' | 'zh' | 'ja' — the raw picker choice
@@ -102,12 +118,23 @@ window.addEventListener('message', (e) => {
     ensureSourceButton()
     ensureOutlineButton()
     ensureSettingsButton()
+    if (msg.anchor) pendingAnchor = msg.anchor // consumed by finishRender
     setText(msg.text || '')
+  } else if (msg.type === 'scrollToAnchor') {
+    scrollToAnchor(msg.slug)
+  } else if (msg.type === 'scrollToLine') {
+    scrollToSourceLine(msg.line | 0)
   } else if (msg.type === 'update') {
     // External edit / undo / redo — reset the mirror and re-render. Any open edit
     // popover is torn down (its anchor may no longer exist).
     closeFloating()
     setText(msg.text || '')
+  } else if (msg.type === 'imageSaved') {
+    onImageSaved(msg)
+  } else if (msg.type === 'imageError') {
+    const p = imgPending.get(msg.reqId)
+    imgPending.delete(msg.reqId)
+    if (p) showToast(msg.code === 'untitled' ? t('img.untitled') : t('img.saveFailed') + ' ' + (msg.code || ''))
   }
 })
 
@@ -170,7 +197,8 @@ const cancelAfterPaint = () => {
 function rerender() {
   const r = renderDoc(lines, filterState, {
     srcEditLabel: t('keep.editSource'),
-    collapseLabel: t('keep.toggleSection')
+    collapseLabel: t('keep.toggleSection'),
+    interactiveTasks: true // task checkboxes are clickable; onClick writes the toggle back
   })
   r.blocks.forEach((b, i) => {
     b.bi = i
@@ -227,6 +255,11 @@ function finishRender() {
   // A re-render replaces the DOM, invalidating any painted find ranges — recompute
   // against the fresh nodes so highlights survive edits / external updates.
   if (findBar && findBar.style.display !== 'none' && findQuery) runFind(findQuery)
+  if (pendingAnchor) {
+    const a = pendingAnchor
+    pendingAnchor = null
+    scrollToAnchor(a)
+  }
 }
 
 // ── heading section collapse / expand (display-only; never touches the source) ──
@@ -623,7 +656,8 @@ function closeBlockEdit(commitChange) {
   if (blockDiv) {
     blockDiv.innerHTML = renderBlockInner(b, bi, lines, {
       srcEditLabel: t('keep.editSource'),
-      filterState
+      filterState,
+      interactiveTasks: true
     })
     resolveImgSrcs(blockDiv)
     applyMultilineForBlock(blockDiv, b)
@@ -1199,6 +1233,7 @@ function applyLangChrome() {
     settingsBtn.setAttribute('aria-label', t('settings.title'))
   }
   if (findInput) findInput.placeholder = t('find.placeholder')
+  if (replaceInput) replaceInput.placeholder = t('find.replacePlaceholder')
 }
 function setLang(pref) {
   langPref = pref
@@ -1461,11 +1496,10 @@ function closeOutlinePop() {
   }
   if (outlineBtn) outlineBtn.classList.remove('active')
 }
-// Jump to a heading block by its index. Any collapsed ancestor section hiding it is
-// expanded first (mirrors the app's revealHeading), so a buried heading is reachable.
-function jumpToHeading(bi) {
-  const block = host.querySelector('.km-block[data-bi="' + bi + '"]')
-  if (!block) return
+// Expand every collapsed ancestor section hiding `block` (mirrors the app's
+// revealHeading), so a buried block is reachable by outline jump / anchor /
+// scroll sync alike.
+function expandAncestors(block) {
   let need = block.hasAttribute('data-hlevel') ? parseInt(block.getAttribute('data-hlevel')) : Infinity
   let node = block.previousElementSibling
   while (node && need > 1) {
@@ -1482,6 +1516,12 @@ function jumpToHeading(bi) {
     node = node.previousElementSibling
   }
   refreshVisibility()
+}
+// Jump to a heading block by its index, expanding whatever hides it first.
+function jumpToHeading(bi) {
+  const block = host.querySelector('.km-block[data-bi="' + bi + '"]')
+  if (!block) return
+  expandAncestors(block)
   block.scrollIntoView({ behavior: 'smooth', block: 'start' })
 }
 // Strip inline markdown from a heading's raw text for a clean list label.
@@ -1547,31 +1587,41 @@ let findCountEl = null
 let findRanges = []
 let findIdx = 0
 let findQuery = ''
+let replaceRow = null
+let replaceInput = null
+let replaceToggle = null
+let replCursor = 0 // source-match cursor for "replace one"
 
 function ensureFindBar() {
   if (findBar) return
   const bar = document.createElement('div')
   bar.className = 'km-findbar'
+  const row1 = document.createElement('div')
+  row1.className = 'km-fb-row'
   const input = document.createElement('input')
   input.type = 'text'
   input.className = 'km-fb-input'
   input.placeholder = t('find.placeholder')
   const count = document.createElement('span')
   count.className = 'km-fb-count'
-  const mkBtn = (glyph, title, fn) => {
+  const mkBtn = (glyph, title, fn, cls) => {
     const b = document.createElement('button')
     b.type = 'button'
-    b.className = 'km-fb-btn'
+    b.className = cls || 'km-fb-btn'
     b.textContent = glyph
     b.title = title
     b.onclick = fn
     return b
   }
+  const toggle = mkBtn('▸', t('find.toggleReplace'), () => toggleReplaceRow())
   const prev = mkBtn('‹', t('find.prev'), () => stepFind(-1))
   const next = mkBtn('›', t('find.next'), () => stepFind(1))
   const close = mkBtn('✕', t('find.close'), closeFind)
-  bar.append(input, count, prev, next, close)
-  input.addEventListener('input', () => runFind(input.value))
+  row1.append(toggle, input, count, prev, next, close)
+  input.addEventListener('input', () => {
+    replCursor = 0
+    runFind(input.value)
+  })
   input.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') {
       e.preventDefault()
@@ -1581,10 +1631,98 @@ function ensureFindBar() {
       closeFind()
     }
   })
+  // Replace row (chevron-toggled). Replacement is SOURCE-LINE based — the same
+  // pure helpers the desktop app's three editors share — so a replace commits
+  // through the normal minimal-diff path and stays zero-diff. Per-line matching:
+  // multi-line queries are not supported (matches how the view renders anyway).
+  const row2 = document.createElement('div')
+  row2.className = 'km-fb-row km-fb-replace'
+  const rInput = document.createElement('input')
+  rInput.type = 'text'
+  rInput.className = 'km-fb-input'
+  rInput.placeholder = t('find.replacePlaceholder')
+  const rOne = mkBtn(t('find.replace'), t('find.replaceTip'), () => replaceOne(), 'km-fb-btn km-fb-act')
+  const rAll = mkBtn(t('find.replaceAll'), t('find.replaceAllTip'), () => replaceAll(), 'km-fb-btn km-fb-act')
+  row2.append(rInput, rOne, rAll)
+  rInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault()
+      replaceOne()
+    } else if (e.key === 'Escape') {
+      e.preventDefault()
+      closeFind()
+    }
+  })
+  bar.append(row1, row2)
   document.body.appendChild(bar)
   findBar = bar
   findInput = input
   findCountEl = count
+  replaceRow = row2
+  replaceInput = rInput
+  replaceToggle = toggle
+}
+function toggleReplaceRow(open) {
+  if (!replaceRow) return
+  const on = open != null ? open : !replaceRow.classList.contains('open')
+  replaceRow.classList.toggle('open', on)
+  if (replaceToggle) replaceToggle.textContent = on ? '▾' : '▸'
+  if (on) replaceInput.focus()
+}
+
+// All (lineIdx, matchIdx) source matches of the current query, in document order.
+function sourceMatches(q) {
+  const out = []
+  for (let li = 0; li < lines.length; li++) {
+    const { matches } = findMatchesInText(lines[li], q)
+    for (let k = 0; k < matches.length; k++) out.push({ li, k, index: matches[k].index })
+  }
+  return out
+}
+function replaceOne() {
+  const q = findInput.value
+  if (!q) return
+  const repl = replaceInput.value
+  const all = sourceMatches(q)
+  if (!all.length) {
+    updateFindCount()
+    return
+  }
+  if (replCursor >= all.length) replCursor = 0
+  const { li, k, index } = all[replCursor]
+  let newLine = null
+  mutate(() => {
+    const r = replaceMatchesInText(lines[li], q, repl, {}, k)
+    newLine = r.text
+    lines[li] = newLine
+  })
+  // Advance past the replacement (and any matches the replacement itself
+  // introduced), so repeated presses can't loop on their own output.
+  const earlier = replCursor - k // matches on lines before li — unchanged
+  const { matches: after } = findMatchesInText(newLine, q)
+  replCursor = earlier + after.filter((m) => m.index < index + repl.length).length
+  rerender()
+  requestAnimationFrame(() =>
+    requestAnimationFrame(() => scrollToSourceLine(li))
+  )
+}
+function replaceAll() {
+  const q = findInput.value
+  if (!q) return
+  const repl = replaceInput.value
+  let count = 0
+  mutate(() => {
+    for (let li = 0; li < lines.length; li++) {
+      const r = replaceMatchesInText(lines[li], q, repl, {})
+      if (r.count) {
+        lines[li] = r.text
+        count += r.count
+      }
+    }
+  })
+  replCursor = 0
+  if (count) rerender()
+  showToast(t('find.replacedCount', { n: count }))
 }
 function openFind() {
   ensureFindBar()
@@ -1606,7 +1744,7 @@ function closeFind() {
 function runFind(q) {
   findQuery = q
   clearFindHighlights()
-  const raw = q ? findRangesInEl(host, q) : []
+  const raw = q ? findRangesInEl(host, q).ranges : []
   findRanges = raw.filter((r) => {
     const el = r.startContainer.parentElement
     return (
@@ -1642,6 +1780,10 @@ function safeDecode(s) {
   }
 }
 function activateLink(href) {
+  if (href.startsWith('#')) {
+    scrollToAnchor(href.slice(1))
+    return
+  }
   if (/^(https?:|mailto:)/i.test(href)) {
     vscode.postMessage({ type: 'openExternal', url: href })
     return
@@ -1650,14 +1792,263 @@ function activateLink(href) {
     vscode.postMessage({ type: 'openExternal', url: href })
     return
   }
-  // Relative doc links / pure anchors are deferred in this MVP.
+  // Relative file link (optionally with #fragment) — the host resolves it
+  // against the document folder and opens it in VSCode.
+  vscode.postMessage({ type: 'openRelative', href })
+}
+
+// ── anchors (#heading) ──
+// GitHub-style slugs computed from the parsed headings: strip inline markdown,
+// lowercase, drop punctuation, spaces → '-', duplicates get -1/-2… suffixes.
+function slugifyHeading(text) {
+  return plainHeading(text)
+    .trim()
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s_-]/gu, '')
+    .replace(/\s+/g, '-')
+}
+function headingSlugs() {
+  const used = new Map()
+  return extractHeadings(blocks).map((h) => {
+    let s = slugifyHeading(h.text)
+    const n = used.get(s) || 0
+    used.set(s, n + 1)
+    if (n > 0) s = s + '-' + n
+    return { slug: s, bi: h.bi }
+  })
+}
+function scrollToAnchor(slug) {
+  const dec = safeDecode(String(slug || '')).toLowerCase()
+  const list = headingSlugs()
+  // Exact slug match first; then tolerate a raw-heading-text fragment.
+  const hit = list.find((h) => h.slug === dec) || list.find((h) => h.slug === slugifyHeading(dec))
+  if (hit) jumpToHeading(hit.bi)
+}
+
+// ── scroll sync (with a side-by-side source editor; host relays both ways) ──
+// Outbound: debounced top-visible-block line → host reveals it in text editors.
+// Inbound: host posts scrollToLine → align that block's top with the scroller.
+// A timestamp window suppresses echo — programmatic scrolls emit event streams,
+// so a one-shot flag would leak.
+let syncSuppressUntil = 0
+let syncEmitTimer = 0
+let lastSentLine = -1
+
+function topVisibleLine() {
+  const scroller = host.closest('.editor-scroll')
+  if (!scroller) return 0
+  const top = scroller.getBoundingClientRect().top
+  for (const el of host.querySelectorAll('.km-block')) {
+    if (el.classList.contains('km-section-hidden')) continue
+    if (el.getBoundingClientRect().bottom > top + 4) {
+      const b = blocks[parseInt(el.getAttribute('data-bi'))]
+      return b ? b.start : 0
+    }
+  }
+  return 0
+}
+function emitScrollSync() {
+  if (Date.now() < syncSuppressUntil) return
+  clearTimeout(syncEmitTimer)
+  syncEmitTimer = setTimeout(() => {
+    if (Date.now() < syncSuppressUntil) return
+    const line = topVisibleLine()
+    if (line !== lastSentLine) {
+      lastSentLine = line
+      vscode.postMessage({ type: 'visibleLine', line })
+    }
+  }, 100)
+}
+function scrollToSourceLine(line) {
+  const scroller = host.closest('.editor-scroll')
+  if (!scroller || !blocks.length) return
+  // The block containing the line; a blank-gap line takes the next block.
+  let bi = -1
+  for (let k = 0; k < blocks.length; k++) {
+    const b = blocks[k]
+    if (line >= b.start && line <= b.end) {
+      bi = k
+      break
+    }
+    if (b.start > line) {
+      bi = k
+      break
+    }
+  }
+  if (bi === -1) bi = blocks.length - 1
+  const el = host.querySelector('.km-block[data-bi="' + bi + '"]')
+  if (!el) return
+  if (el.classList.contains('km-section-hidden')) expandAncestors(el)
+  syncSuppressUntil = Date.now() + 250
+  // Direct scrollTop math, NOT smooth scrollIntoView — a smooth scroll's event
+  // stream would outlive the suppression window and echo back to the editor.
+  const r = el.getBoundingClientRect()
+  const sr = scroller.getBoundingClientRect()
+  scroller.scrollTop += r.top - sr.top - 8
+}
+
+// ── toast (transient notice, bottom center) ──
+let toastEl = null
+let toastTimer = 0
+function showToast(msg) {
+  if (!toastEl) {
+    toastEl = document.createElement('div')
+    toastEl.className = 'km-toast'
+    document.body.appendChild(toastEl)
+  }
+  toastEl.textContent = msg
+  toastEl.classList.add('show')
+  clearTimeout(toastTimer)
+  toastTimer = setTimeout(() => toastEl.classList.remove('show'), 2600)
+}
+
+// ── image paste & drop ──
+// The webview reads the image bytes and asks the host to write them into the
+// document's ./assets folder (the host owns the filesystem); the reply carries
+// the relative path and the INSERT happens here, through the same mutate()/
+// commit() minimal-diff path as every other edit. Keep mode has no cursor, so
+// the insert anchor is: the drop-highlighted block (drop), the open edit
+// textarea's caret (paste while editing), the last-interacted block (paste),
+// or end-of-file.
+const IMG_MAX_BYTES = 20 * 1024 * 1024
+let imgReqSeq = 0
+const imgPending = new Map() // reqId -> { at, ta } (line anchor + optional textarea)
+let lastInteractedBi = -1
+
+function imageFileName(file) {
+  if (file.name && file.name.includes('.')) return file.name
+  const ext = (file.type && file.type.split('/')[1]) || 'png'
+  const d = new Date()
+  const pad = (x) => String(x).padStart(2, '0')
+  return (
+    'image-' +
+    d.getFullYear() +
+    pad(d.getMonth() + 1) +
+    pad(d.getDate()) +
+    '-' +
+    pad(d.getHours()) +
+    pad(d.getMinutes()) +
+    pad(d.getSeconds()) +
+    '.' +
+    ext
+  )
+}
+
+function requestImageSave(file, at, ta) {
+  if (file.size > IMG_MAX_BYTES) {
+    showToast(t('img.tooLarge'))
+    return
+  }
+  const reqId = ++imgReqSeq
+  imgPending.set(reqId, { at, ta })
+  file.arrayBuffer().then(
+    (buf) => vscode.postMessage({ type: 'saveImage', reqId, name: imageFileName(file), bytes: new Uint8Array(buf) }),
+    () => imgPending.delete(reqId)
+  )
+}
+
+// Line index to insert at when nothing more specific applies.
+function insertAnchor() {
+  const b = blocks[lastInteractedBi]
+  return b ? b.end + 1 : lines.length
+}
+
+function onImageSaved(msg) {
+  const p = imgPending.get(msg.reqId)
+  imgPending.delete(msg.reqId)
+  if (!p) return
+  const md = '![](' + msg.relPath + ')'
+  // Pasted while an edit textarea was open (still is): insert at its caret; the
+  // normal commit of that editor carries the image line into the source.
+  if (p.ta && p.ta.isConnected) {
+    const s = p.ta.selectionStart ?? p.ta.value.length
+    p.ta.setRangeText(md, s, p.ta.selectionEnd ?? s, 'end')
+    p.ta.focus()
+    return
+  }
+  const at = Math.max(0, Math.min(p.at, lines.length))
+  const ins = []
+  if (at > 0 && (lines[at - 1] || '').trim() !== '') ins.push('')
+  const mdLine = at + ins.length
+  ins.push(md)
+  if (at < lines.length && (lines[at] || '').trim() !== '') ins.push('')
+  mutate(() => lines.splice(at, 0, ...ins))
+  // Later pending inserts at/after this anchor shift down by what we inserted.
+  imgPending.forEach((v) => {
+    if (v.at >= at) v.at += ins.length
+  })
+  rerender()
+  requestAnimationFrame(() =>
+    requestAnimationFrame(() => {
+      const bi = blocks.findIndex((b) => mdLine >= b.start && mdLine <= b.end)
+      const el = bi >= 0 ? host.querySelector('.km-block[data-bi="' + bi + '"]') : null
+      el?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    })
+  )
+}
+
+function onPaste(e) {
+  const items = e.clipboardData?.items
+  if (!items) return
+  const files = []
+  for (const it of items) {
+    if (it.kind === 'file' && it.type.startsWith('image/')) {
+      const f = it.getAsFile()
+      if (f) files.push(f)
+    }
+  }
+  if (!files.length) return
+  e.preventDefault()
+  const ae = document.activeElement
+  const ta = ae && ae.tagName === 'TEXTAREA' ? ae : null
+  const at = insertAnchor()
+  files.forEach((f) => requestImageSave(f, at, ta))
+}
+
+// Drop: highlight the block under the pointer with an insertion bar; the file
+// lands right after it. preventDefault on dragover/drop is required or the
+// VSCode workbench swallows the drop.
+let dropTargetEl = null
+function clearDropTarget() {
+  dropTargetEl?.classList.remove('km-drop-after')
+  dropTargetEl = null
+}
+function onDragOver(e) {
+  const items = e.dataTransfer?.items
+  if (!items || ![...items].some((it) => it.kind === 'file')) return
+  e.preventDefault()
+  e.dataTransfer.dropEffect = 'copy'
+  const blk = e.target.closest?.('.km-block')
+  if (blk !== dropTargetEl) {
+    clearDropTarget()
+    if (blk && host.contains(blk)) {
+      dropTargetEl = blk
+      blk.classList.add('km-drop-after')
+    }
+  }
+}
+function onDrop(e) {
+  const target = dropTargetEl
+  clearDropTarget()
+  const files = [...(e.dataTransfer?.files || [])].filter((f) => f.type.startsWith('image/'))
+  if (!files.length) return
+  e.preventDefault()
+  const bi = target ? parseInt(target.getAttribute('data-bi')) : -1
+  const at = bi >= 0 && blocks[bi] ? blocks[bi].end + 1 : lines.length
+  files.forEach((f) => requestImageSave(f, at))
 }
 
 // ── event delegation ──
 let linkTimer = null
+function trackInteraction(e) {
+  const blk = e.target.closest?.('.km-block')
+  if (blk && host.contains(blk)) lastInteractedBi = parseInt(blk.getAttribute('data-bi'))
+}
 function onDblClick(e) {
   clearTimeout(linkTimer)
+  trackInteraction(e)
   if (e.target.closest('.km-collapse-toggle')) return // a fold toggle, not an edit
+  if (e.target.closest('input.km-task-cb')) return // fast double-click on a checkbox ≠ block edit
   const cell = e.target.closest('td, th')
   if (cell && host.contains(cell) && !e.target.closest('.km-filter-btn')) {
     openCellPop(cell)
@@ -1669,6 +2060,21 @@ function onDblClick(e) {
   }
 }
 function onClick(e) {
+  trackInteraction(e)
+  // GFM task checkbox: the browser already flipped `checked`; write the toggle
+  // back to exactly one source line. No re-render needed — the DOM is the new
+  // state, and the minimal diff is that single line.
+  const cb = e.target.closest('input.km-task-cb')
+  if (cb && host.contains(cb)) {
+    const n = parseInt(cb.getAttribute('data-line'))
+    if (!Number.isNaN(n) && lines[n] != null) {
+      const on = cb.checked
+      mutate(() => {
+        lines[n] = lines[n].replace(/^(\s*(?:[-*+]|\d+[.)])\s+)\[[ xX]\]/, '$1[' + (on ? 'x' : ' ') + ']')
+      })
+    }
+    return
+  }
   const mz = e.target.closest('.km-mermaid-zoom')
   if (mz && host.contains(mz)) {
     e.preventDefault()
@@ -1765,11 +2171,16 @@ function onEsc(e) {
   if (activeConfirm) closeConfirm()
   else if (activeMenu) closeMenu()
 }
-function onScroll() {
+function onScroll(e) {
   closeMenu()
   repositionCellPop()
   repositionFilterPop()
   tableScroll?.update()
+  // Only the main editor scroller drives sync (not nested table-wrap scrolls).
+  const tg = e && e.target
+  if (!tg || tg === document || (tg.classList && tg.classList.contains('editor-scroll'))) {
+    emitScrollSync()
+  }
 }
 function onResize() {
   repositionCellPop()
@@ -1781,6 +2192,12 @@ host.addEventListener('dblclick', onDblClick)
 host.addEventListener('click', onClick)
 host.addEventListener('contextmenu', onContextMenu)
 host.addEventListener('copy', onCopy)
+document.addEventListener('paste', onPaste)
+document.addEventListener('dragover', onDragOver)
+document.addEventListener('drop', onDrop)
+document.addEventListener('dragleave', (e) => {
+  if (!e.relatedTarget) clearDropTarget() // left the window
+})
 document.addEventListener('click', onDocDown)
 document.addEventListener('keydown', onEsc)
 document.addEventListener('keydown', (e) => {

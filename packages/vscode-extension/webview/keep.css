@@ -815,6 +815,101 @@ body.hm-full-width .km-doc {
   display: none !important;
 }
 
+/* ── GFM task-list items (ported from app.css) ── */
+.km-doc li.km-task-item {
+  list-style: none;
+}
+.km-doc .km-task-cb {
+  width: 0.95em;
+  height: 0.95em;
+  margin: 0 0.45em 0.15em -1.5em;
+  vertical-align: middle;
+  accent-color: var(--accent-strong);
+  cursor: pointer;
+}
+.km-doc .km-task-cb[disabled] {
+  cursor: default;
+  opacity: 0.9;
+}
+
+/* ── YAML frontmatter card (ported from app.css) ── */
+.km-frontmatter {
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
+  background: var(--bg-elevated);
+  overflow: hidden;
+  font-size: 0.9em;
+  margin: 0 0 1.4em;
+}
+.km-fm-head {
+  padding: 5px 14px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--accent-strong);
+  background: var(--accent-soft);
+}
+.km-fm-grid {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 0;
+  margin: 0;
+  padding: 8px 14px;
+}
+.km-fm-grid dt {
+  grid-column: 1;
+  color: var(--muted);
+  font-weight: 500;
+  padding: 3px 16px 3px 0;
+  white-space: nowrap;
+}
+.km-fm-grid dd {
+  grid-column: 2;
+  margin: 0;
+  padding: 3px 0;
+  color: var(--text);
+  word-break: break-word;
+}
+.km-fm-raw {
+  margin: 0;
+  padding: 10px 14px;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  color: var(--text);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* ── image drop target + toast ── */
+/* Insertion bar under the block the dropped image will land after. */
+.km-block.km-drop-after {
+  box-shadow: 0 3px 0 0 var(--accent-strong);
+  border-radius: 2px;
+}
+.km-toast {
+  position: fixed;
+  left: 50%;
+  bottom: 28px;
+  transform: translateX(-50%) translateY(8px);
+  max-width: 70vw;
+  padding: 8px 16px;
+  border-radius: var(--radius-md);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-soft);
+  color: var(--text);
+  font-size: 12.5px;
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.18);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.18s var(--ease-out), transform 0.18s var(--ease-out);
+  z-index: 1500;
+}
+.km-toast.show {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
 /* ── Layout popover (page width / font / zoom / line-height / paragraph spacing) ── */
 .km-source-btn {
   position: fixed;
@@ -1007,7 +1102,8 @@ body.hm-full-width .km-doc {
   transform: translateX(-50%);
   z-index: 1300;
   display: none;
-  align-items: center;
+  flex-direction: column;
+  align-items: stretch;
   gap: 4px;
   padding: 4px 6px;
   background: var(--bg-elevated);
@@ -1052,6 +1148,27 @@ body.hm-full-width .km-doc {
 .km-fb-btn:hover {
   background: var(--hover);
   color: var(--text);
+}
+.km-fb-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+/* Replace row: hidden until the chevron opens it. */
+.km-fb-replace {
+  display: none;
+}
+.km-fb-replace.open {
+  display: flex;
+}
+/* Text-labelled action buttons (Replace / All) size to their label. */
+.km-fb-btn.km-fb-act {
+  width: auto;
+  padding: 0 9px;
+  font-size: 12px;
+}
+.km-fb-replace .km-fb-input {
+  flex: 1;
 }
 ::highlight(hm-find) {
   background-color: color-mix(in srgb, var(--accent) 30%, transparent);
