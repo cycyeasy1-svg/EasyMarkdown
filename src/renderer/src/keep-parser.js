@@ -153,6 +153,20 @@ export function parseDoc(lines) {
   let i = 0
   while (i < lines.length) {
     const line = lines[i]
+    // YAML frontmatter: a `---` fence on the FIRST line, closed by `---` or `...`.
+    // Only recognized when the closing fence exists — a lone opening `---` falls
+    // through and stays an hr (locked by the characterization tests). Without
+    // this branch the opener rendered as an hr and the body as a paragraph that
+    // swallowed the closing fence.
+    if (i === 0 && line.trim() === '---') {
+      let j = 1
+      while (j < lines.length && lines[j].trim() !== '---' && lines[j].trim() !== '...') j++
+      if (j < lines.length) {
+        out.push({ type: 'frontmatter', start: 0, end: j })
+        i = j + 1
+        continue
+      }
+    }
     // Fenced code block. Capture the info-string language so the renderer can turn
     // a ```mermaid fence into a live diagram (and leave others as code).
     if (/^\s*```/.test(line)) {
@@ -457,24 +471,53 @@ export function replaceBlockLines(rawLines, start, end, newText) {
 }
 
 // ── render helpers (return HTML strings; pure) ──
-function renderList(b, viewLines, baseDir) {
+function renderList(b, viewLines, baseDir, opts = {}) {
   const lines = viewLines.slice(b.start, b.end + 1)
   // Parse each line into a list item carrying its own indent depth and marker
   // type (ordered vs bullet). Unmarked indented lines are continuations of the
-  // previous item (e.g. a wrapped paragraph), appended with a soft break.
+  // previous item (e.g. a wrapped paragraph), appended with a soft break. Each
+  // marker line also records its source line (b.start + k) so a GFM task item's
+  // checkbox can map a click back to exactly one raw line.
   const items = []
-  for (const l of lines) {
+  for (let k = 0; k < lines.length; k++) {
+    const l = lines[k]
     if (l.trim() === '') continue // loose-list gaps carry no content
     const m = l.match(/^(\s*)([-*+]|\d+[.)])\s+(.*)$/)
     if (m) {
       const num = m[2].match(/^\d+/)
-      items.push({ indent: m[1].length, ordered: !!num, start: num ? +num[0] : null, html: inline(m[3], baseDir) })
+      // GFM task item: `[ ]` / `[x]` right after the marker, then a space (or
+      // nothing — an empty task). `- [x]foo` (no space) stays literal text.
+      const task = m[3].match(/^\[([ xX])\](?:\s+(.*))?$/)
+      items.push({
+        indent: m[1].length,
+        ordered: !!num,
+        start: num ? +num[0] : null,
+        task: !!task,
+        checked: !!task && task[1] !== ' ',
+        line: b.start + k,
+        html: inline(task ? task[2] || '' : m[3], baseDir)
+      })
     } else if (items.length) {
       items[items.length - 1].html += '<br>' + inline(l.trim(), baseDir)
     } else {
       items.push({ indent: 0, ordered: false, html: inline(l.trim(), baseDir) })
     }
   }
+  // A task item's checkbox is a REAL <input> carrying its source line. It's only
+  // interactive where a click handler exists to write the toggle back (the VSCode
+  // webview passes opts.interactiveTasks); elsewhere (desktop keep mode, PDF
+  // export) it renders disabled — an enabled box with no handler would toggle
+  // visually and silently revert on the next re-render, which is worse.
+  const taskBox = (it) =>
+    it.task
+      ? '<input type="checkbox" class="km-task-cb" data-line="' +
+        it.line +
+        '"' +
+        (it.checked ? ' checked' : '') +
+        (opts.interactiveTasks ? '' : ' disabled') +
+        '>'
+      : ''
+  const liOpen = (it) => '<li' + (it.task ? ' class="km-task-item"' : '') + '>' + taskBox(it) + it.html
   // Build nested <ul>/<ol> from the indent levels. Each nesting level keeps the
   // marker type of its first item, so a "1." parent with "-" children renders as
   // an ordered list containing a bullet sublist (not one flat numbered list).
@@ -488,7 +531,7 @@ function renderList(b, viewLines, baseDir) {
     const open = it.ordered
       ? '<ol' + (it.start != null && it.start !== 1 ? ' start="' + it.start + '"' : '') + '>'
       : '<ul>'
-    html += open + '<li>' + it.html
+    html += open + liOpen(it)
   }
   const closeList = () => {
     const s = stack.pop()
@@ -500,7 +543,7 @@ function renderList(b, viewLines, baseDir) {
       continue
     }
     while (stack.length > 1 && it.indent < stack[stack.length - 1].indent) closeList()
-    html += '</li><li>' + it.html // sibling at the current level
+    html += '</li>' + liOpen(it) // sibling at the current level
   }
   while (stack.length) closeList()
   return html
@@ -563,6 +606,8 @@ function renderTable(b, tableIdx, filterState, forExport, baseDir) {
 // whole document. Tables are never block-edited, so `tableIdx` only matters when
 // renderDoc drives the full loop; scoped single-block restores are non-table.
 //   opts.srcEditLabel · opts.forExport · opts.filterState · opts.tableIdx
+//   opts.interactiveTasks — render GFM task checkboxes enabled (the caller wires
+//   the click → single-line toggle); default disabled (display-only).
 export function renderBlockInner(b, bi, viewLines, opts = {}) {
   const forExport = !!opts.forExport
   const srcEditLabel = opts.srcEditLabel || 'edit'
@@ -612,9 +657,28 @@ export function renderBlockInner(b, bi, viewLines, opts = {}) {
       inline(viewLines.slice(b.start, b.end + 1).map((l) => l.replace(/^\s*>\s?/, '')).join('<br>'), baseDir) +
       '</blockquote>'
   } else if (b.type === 'list') {
-    inner = renderList(b, viewLines, baseDir)
+    inner = renderList(b, viewLines, baseDir, { interactiveTasks: !!opts.interactiveTasks && !forExport })
   } else if (b.type === 'table') {
     inner = renderTable(b, tableIdx, filterState, forExport, baseDir)
+  } else if (b.type === 'frontmatter') {
+    // Metadata card, mirroring the rich editor's frontmatter node view
+    // (editor-frontmatter.js buildCard): flat `key: value` lines → a definition
+    // grid; any complex YAML (nesting, lists, multiline) → a code box so we never
+    // misrender. Non-table, so the block keeps the generic "edit source" button —
+    // editing round-trips through the raw lines, zero-diff.
+    const body = viewLines.slice(b.start + 1, b.end)
+    const simple = body.every((l) => l.trim() === '' || /^[A-Za-z0-9_.-]+:\s?.*$/.test(l))
+    let content = ''
+    if (simple) {
+      let grid = ''
+      for (const l of body) {
+        const m = l.match(/^([A-Za-z0-9_.-]+):\s?(.*)$/)
+        if (m) grid += '<dt>' + escapeHtml(m[1]) + '</dt><dd>' + escapeHtml(m[2]) + '</dd>'
+      }
+      if (grid) content = '<dl class="km-fm-grid">' + grid + '</dl>'
+    }
+    if (!content) content = '<pre class="km-fm-raw">' + escapeHtml(body.join('\n')) + '</pre>'
+    inner = '<div class="km-frontmatter"><div class="km-fm-head">YAML</div>' + content + '</div>'
   }
   const editable = b.type !== 'table'
   const btn =
@@ -667,7 +731,8 @@ export function renderDoc(rawLines, filterState = {}, opts = {}) {
     srcEditLabel: opts.srcEditLabel || 'edit',
     collapseLabel: opts.collapseLabel,
     filterState,
-    baseDir: opts.baseDir
+    baseDir: opts.baseDir,
+    interactiveTasks: !!opts.interactiveTasks
   })
   return { html: html || '<div class="km-empty"></div>', blocks, viewLines }
 }

@@ -14,7 +14,8 @@ import {
   insertColumnInLine,
   removeColumnInLine,
   buildTableRow,
-  extractHeadings
+  extractHeadings,
+  renderBlockInner
 } from '../src/renderer/src/keep-parser.js'
 
 describe('escapeHtml / escapeAttr', () => {
@@ -184,6 +185,74 @@ describe('table cell/column edits (raw-line, byte-preserving)', () => {
   it('buildTableRow matches the reference row pipe style and column count', () => {
     expect(buildTableRow(2, '| x | y |')).toBe('|  |  |')
     expect(buildTableRow(2, 'x | y')).toBe('  |  ')
+  })
+})
+
+describe('YAML frontmatter', () => {
+  it('parses a closed --- fence on line 0 as one frontmatter block', () => {
+    const blocks = parseDoc(['---', 'title: x', 'tags: a, b', '---', '', 'body'])
+    expect(blocks[0]).toEqual({ type: 'frontmatter', start: 0, end: 3 })
+    expect(blocks[1]).toEqual({ type: 'paragraph', start: 5, end: 5 })
+  })
+  it('accepts the YAML "..." terminator', () => {
+    expect(parseDoc(['---', 'a: 1', '...'])[0]).toEqual({ type: 'frontmatter', start: 0, end: 2 })
+  })
+  it('a lone --- stays an hr (no closing fence → not frontmatter)', () => {
+    expect(parseDoc(['---'])[0].type).toBe('hr')
+    expect(parseDoc(['---', 'title: x'])[0].type).toBe('hr')
+  })
+  it('a --- later in the document is still an hr', () => {
+    const blocks = parseDoc(['text', '', '---'])
+    expect(blocks.map((b) => b.type)).toEqual(['paragraph', 'hr'])
+  })
+  it('renders flat key: value pairs as a definition grid', () => {
+    const lines = ['---', 'title: Hello', 'draft: true', '---']
+    const html = renderBlockInner(parseDoc(lines)[0], 0, lines, {})
+    expect(html).toContain('km-frontmatter')
+    expect(html).toContain('<dt>title</dt><dd>Hello</dd>')
+    expect(html).toContain('<dt>draft</dt><dd>true</dd>')
+  })
+  it('falls back to a raw <pre> for nested/complex YAML', () => {
+    const lines = ['---', 'tags:', '  - a', '---']
+    const html = renderBlockInner(parseDoc(lines)[0], 0, lines, {})
+    expect(html).toContain('km-fm-raw')
+    expect(html).not.toContain('<dt>')
+  })
+})
+
+describe('GFM task-list items', () => {
+  it('renders [ ] / [x] items as checkboxes carrying their source line', () => {
+    const lines = ['- [ ] todo', '- [x] done']
+    const html = renderBlockInner(parseDoc(lines)[0], 0, lines, {})
+    expect(html).toContain('<li class="km-task-item">')
+    expect(html).toContain('data-line="0"')
+    expect(html).toContain('data-line="1" checked')
+    // display-only by default: disabled unless the caller opts into interaction
+    expect(html.match(/disabled/g)).toHaveLength(2)
+  })
+  it('renders enabled checkboxes when interactiveTasks is set (not for export)', () => {
+    const lines = ['- [ ] todo']
+    expect(renderBlockInner(parseDoc(lines)[0], 0, lines, { interactiveTasks: true })).not.toContain(
+      'disabled'
+    )
+    expect(
+      renderBlockInner(parseDoc(lines)[0], 0, lines, { interactiveTasks: true, forExport: true })
+    ).toContain('disabled')
+  })
+  it('leaves [x]foo (no space after the bracket) as literal text', () => {
+    const lines = ['- [x]foo']
+    const html = renderBlockInner(parseDoc(lines)[0], 0, lines, {})
+    expect(html).not.toContain('km-task-cb')
+    expect(html).toContain('[x]foo')
+  })
+  it('an empty task item still gets a checkbox', () => {
+    const lines = ['- [ ]']
+    expect(renderBlockInner(parseDoc(lines)[0], 0, lines, {})).toContain('km-task-cb')
+  })
+  it('non-task lists render exactly as before', () => {
+    const lines = ['- a', '- b']
+    const html = renderBlockInner(parseDoc(lines)[0], 0, lines, {})
+    expect(html).toContain('<ul><li>a</li><li>b</li></ul>')
   })
 })
 
