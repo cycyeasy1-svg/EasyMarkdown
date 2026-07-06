@@ -2,10 +2,9 @@ import { memo, useDeferredValue, useEffect, useMemo, useRef, useState } from 're
 import { Icon } from './icons.jsx'
 import logoUrl from '../assets/logo.png'
 import { useI18n } from '../i18n.jsx'
-import { THEMES, themeById } from '../themes.js'
+import { THEMES } from '../themes.js'
 import { LANGS } from '../i18n.jsx'
 import { FONT_SIZE_MIN, FONT_SIZE_MAX, ZOOM_MIN, ZOOM_MAX, ZOOM_STEP } from '../settings.js'
-import { TypographyGroups } from './TypographyControls.jsx'
 
 const zoomPct = (z) => Math.round(z * 100) + '%'
 
@@ -70,27 +69,6 @@ function usePopover() {
   return { open, setOpen, ref }
 }
 
-// Combined "layout" control: ONE secondary status-bar button → a popover that
-// holds the five typography adjusters (shared with the Settings modal via
-// TypographyGroups). `hm-pagewidth` lets mobile hide it via CSS (mobile sets
-// size in the "more" sheet and forces full width).
-function LayoutControl(props) {
-  const { t } = useI18n()
-  const { open, setOpen, ref } = usePopover()
-  return (
-    <div className="block-switch hm-pagewidth hm-layout" ref={ref}>
-      <button className="status-btn" onClick={() => setOpen((v) => !v)} title={t('settings.layout')}>
-        <Icon name="settings" size={14} /> {t('settings.layoutLabel')}
-      </button>
-      {open && (
-        <div className="hm-pop hm-width-pop hm-layout-pop">
-          <TypographyGroups {...props} />
-        </div>
-      )}
-    </div>
-  )
-}
-
 // Document stats: one status-bar button showing the character count → popover
 // with the full breakdown (words, characters, characters w/o spaces, read time).
 function StatsControl({ stats }) {
@@ -115,128 +93,6 @@ function StatsControl({ stats }) {
               <span className="hm-stat-label">{label}</span>
               <span className="hm-stat-value">{value}</span>
             </div>
-          ))}
-        </div>
-      )}
-    </div>
-  )
-}
-
-function ThemePicker({
-  theme,
-  setTheme,
-  customThemes = [],
-  customTheme,
-  onPickCustom,
-  onRefreshThemes,
-  onOpenThemesFolder,
-  onGetMoreThemes
-}) {
-  const { lang, t } = useI18n()
-  const { open, setOpen, ref } = usePopover()
-  const cur = themeById(theme)
-  // Re-scan the themes folder each time the menu opens so freshly-dropped CSS
-  // files show up without a restart.
-  const toggle = () => {
-    if (!open) onRefreshThemes?.()
-    setOpen((v) => !v)
-  }
-  const activeCustom = customThemes.find((c) => c.file === customTheme)
-  const triggerLabel = activeCustom ? activeCustom.name : lang === 'zh' ? cur.zh : cur.en
-  return (
-    <div className="block-switch" ref={ref}>
-      <button className="status-btn" onClick={toggle} title={t('tip.toggleTheme')}>
-        <span className="theme-swatch" style={{ background: activeCustom ? 'var(--accent)' : cur.swatch }} />
-        {triggerLabel}
-        <span className="block-switch-caret">▾</span>
-      </button>
-      {open && (
-        <div className="block-switch-menu theme-menu">
-          {THEMES.map((th) => (
-            <button
-              key={th.id}
-              className={`block-menu-item${!customTheme && th.id === theme ? ' active' : ''}`}
-              onClick={() => {
-                setTheme(th.id)
-                setOpen(false)
-              }}
-            >
-              <span className="theme-swatch" style={{ background: th.swatch }} />
-              <span className="block-menu-name">{lang === 'zh' ? th.zh : th.en}</span>
-            </button>
-          ))}
-
-          {customThemes.length > 0 && (
-            <>
-              <div className="theme-menu-label">{t('theme.custom')}</div>
-              {customThemes.map((c) => (
-                <button
-                  key={c.file}
-                  className={`block-menu-item${customTheme === c.file ? ' active' : ''}`}
-                  onClick={() => {
-                    onPickCustom?.(c.file)
-                    setOpen(false)
-                  }}
-                  title={c.file}
-                >
-                  <span className="theme-swatch theme-swatch-custom" />
-                  <span className="block-menu-name">
-                    {c.name}
-                    {c.dir ? <span className="theme-custom-dir"> · {c.dir}</span> : null}
-                  </span>
-                </button>
-              ))}
-            </>
-          )}
-
-          <div className="theme-menu-sep" />
-          <button
-            className="block-menu-item theme-menu-action"
-            onClick={() => {
-              onOpenThemesFolder?.()
-              setOpen(false)
-            }}
-          >
-            <Icon name="folder" size={13} />
-            <span className="block-menu-name">{t('theme.openFolder')}</span>
-          </button>
-          <button
-            className="block-menu-item theme-menu-action"
-            onClick={() => {
-              onGetMoreThemes?.()
-              setOpen(false)
-            }}
-          >
-            <Icon name="globe" size={13} />
-            <span className="block-menu-name">{t('theme.getMore')}</span>
-          </button>
-        </div>
-      )}
-    </div>
-  )
-}
-
-function LangSwitch({ lang, setLang }) {
-  const { t } = useI18n()
-  const { open, setOpen, ref } = usePopover()
-  return (
-    <div className="block-switch" ref={ref}>
-      <button className="status-btn" onClick={() => setOpen((v) => !v)} title={t('tip.language')}>
-        <Icon name="globe" size={14} /> {LANGS.find((l) => l.id === lang)?.label ?? 'EN'}
-      </button>
-      {open && (
-        <div className="block-switch-menu">
-          {LANGS.map((l) => (
-            <button
-              key={l.id}
-              className={`block-menu-item${l.id === lang ? ' active' : ''}`}
-              onClick={() => {
-                setLang(l.id)
-                setOpen(false)
-              }}
-            >
-              <span className="block-menu-name">{l.label}</span>
-            </button>
           ))}
         </div>
       )}
@@ -453,22 +309,14 @@ function StatusBar({
   onToggleKeep,
   showModeHint,
   onDismissModeHint,
-  pageWidth,
-  onSetPageWidth,
   fontSize,
   onSetFontSize,
   zoom,
   onSetZoom,
-  lineHeight,
-  onSetLineHeight,
-  paragraphSpacing,
-  onSetParagraphSpacing,
   customThemes,
   customTheme,
   onPickCustom,
   onRefreshThemes,
-  onOpenThemesFolder,
-  onGetMoreThemes,
   filterInfo,
   onOpenSettings
 }) {
@@ -578,29 +426,6 @@ function StatusBar({
             <button className="status-btn" onClick={onToggleSource} title={t('tip.toggleSource')}>
               <Icon name="code" size={14} /> {sourceMode ? t('status.source') : t('status.rich')}
             </button>
-            <LayoutControl
-              fontSize={fontSize}
-              onSetFontSize={onSetFontSize}
-              pageWidth={pageWidth}
-              onSetPageWidth={onSetPageWidth}
-              zoom={zoom}
-              onSetZoom={onSetZoom}
-              lineHeight={lineHeight}
-              onSetLineHeight={onSetLineHeight}
-              paragraphSpacing={paragraphSpacing}
-              onSetParagraphSpacing={onSetParagraphSpacing}
-            />
-            <ThemePicker
-              theme={theme}
-              setTheme={setTheme}
-              customThemes={customThemes}
-              customTheme={customTheme}
-              onPickCustom={onPickCustom}
-              onRefreshThemes={onRefreshThemes}
-              onOpenThemesFolder={onOpenThemesFolder}
-              onGetMoreThemes={onGetMoreThemes}
-            />
-            <LangSwitch lang={lang} setLang={setLang} />
             {onOpenSettings && (
               <button className="status-btn" onClick={onOpenSettings} title={t('settings.title')}>
                 <Icon name="settings" size={14} />

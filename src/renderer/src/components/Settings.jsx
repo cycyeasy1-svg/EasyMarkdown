@@ -25,9 +25,9 @@ function SwitchRow({ label, desc, checked, onChange }) {
   )
 }
 
-// Unified settings modal — the discoverable home for every preference. The
-// status-bar Layout popover stays as a quick entry for the typography subset;
-// both write through the same settings state in App.
+// Unified settings modal — the single home for every preference (typography,
+// theme, language, editing). The status bar keeps only the everyday controls
+// (stats, keep/rich, source toggle) plus the gear button that opens this.
 export default function Settings({
   open,
   onClose,

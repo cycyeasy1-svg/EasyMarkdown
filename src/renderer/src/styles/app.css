@@ -184,19 +184,11 @@ body.theme-morandi-dark {
   flex: 0 0 auto;
   border: 1px solid rgba(0, 0, 0, 0.18);
 }
-.theme-menu .block-menu-item {
-  gap: 9px;
-}
 /* Custom-theme swatch (no single color → a soft accent gradient marker). */
 .theme-swatch-custom {
   background: linear-gradient(135deg, var(--accent), var(--accent-soft));
 }
-/* Subfolder hint for a nested theme css (e.g. amatriz · coding). */
-.theme-custom-dir {
-  color: var(--faint);
-  font-size: 0.85em;
-}
-/* Section label + separator + folder/gallery actions in the theme menu. */
+/* Section label + separator, shared by the mobile "more" sheet + settings. */
 .theme-menu-label {
   padding: 8px 10px 4px;
   font-size: 10.5px;
@@ -209,13 +201,6 @@ body.theme-morandi-dark {
   height: 1px;
   margin: 6px 6px;
   background: var(--border-soft);
-}
-.theme-menu .theme-menu-action {
-  gap: 9px;
-  color: var(--muted);
-}
-.theme-menu .theme-menu-action:hover {
-  color: var(--text);
 }
 
 /* While a custom (e.g. Typora) theme is active, let it own the writing-area
@@ -989,17 +974,6 @@ button:focus-visible,
   transition: none;
 }
 
-/* Page-width popover: anchored above the status-bar button (the wrapper
-   .block-switch is position:relative). */
-.hm-width-pop {
-  position: absolute;
-  bottom: calc(100% + 8px);
-  right: 0;
-  z-index: 200;
-  min-width: 268px;
-  animation: menuFadeIn 0.12s var(--ease-out);
-}
-
 /* ---- Mermaid live preview ---- */
 /* Preview states shown inside the code-block's built-in preview panel
    (rich editor) and inside keep mode's .km-mermaid block. */
@@ -1177,20 +1151,28 @@ body.dark .milkdown .ProseMirror mark.hm-hl-blue { background: #2f4a6b; }
   .hm-save-fab > span { max-width: 5em; opacity: 1; }
 }
 
-/* ---- Transient toast (copy feedback, etc.) ---- */
+/* ---- Transient toast (copy feedback, refresh progress, etc.) ----
+   Styled as a floating surface in the app's own palette (elevated bg + border
+   + soft shadow) so it reads as part of the UI in every theme, not a raw black
+   box. An optional leading icon (fireToast kind) carries the state: spinner
+   while working, green check on success, red alert on failure. */
 .hm-toast {
   position: fixed;
   left: 50%;
   bottom: calc(var(--status-h, 28px) + 28px);
   transform: translateX(-50%);
   z-index: 250;
-  padding: 8px 16px;
-  background: var(--text-strong);
-  color: var(--bg-editor);
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  padding: 9px 18px;
+  background: var(--bg-elevated);
+  color: var(--text);
   font-size: 13px;
   font-weight: 600;
+  border: 1px solid var(--border);
   border-radius: 999px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.22);
+  box-shadow: var(--shadow-md);
   pointer-events: none;
   animation: hm-toast-in 0.22s var(--ease-out);
 }
@@ -1203,33 +1185,66 @@ body.dark .milkdown .ProseMirror mark.hm-hl-blue { background: #2f4a6b; }
   bottom: auto;
   transform: translate(-50%, -50%);
   animation: hm-toast-center-in 0.18s var(--ease-out);
-  display: flex;
   align-items: flex-start;
-  gap: 10px;
-  padding: 14px 12px 14px 18px;
+  gap: 12px;
+  padding: 15px 14px 15px 19px;
   max-width: min(86vw, 460px);
-  border-radius: 16px;
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-float);
 }
 .hm-toast.sticky .hm-toast-msg {
   line-height: 1.45;
   text-align: left;
   white-space: pre-line; /* render the \n separators as real line breaks */
+  padding-top: 1px;
 }
 @keyframes hm-toast-center-in {
   from { opacity: 0; transform: translate(-50%, -46%); }
   to { opacity: 1; transform: translate(-50%, -50%); }
 }
+/* State icons (fireToast kind). Success = filled green disc + white check;
+   error = danger-tinted alert circle; progress = accent spinner. */
+.hm-toast-ico {
+  flex: none;
+  display: grid;
+  place-items: center;
+}
+.hm-toast-ico.ok {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--success);
+  color: #fff;
+}
+.hm-toast-ico.err {
+  color: var(--danger);
+}
+.hm-toast-spin {
+  flex: none;
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
+  animation: hm-toast-rotate 0.8s linear infinite;
+}
+/* In the centered (flex-start) layout, nudge icons onto the first text line. */
+.hm-toast.sticky .hm-toast-spin,
+.hm-toast.sticky .hm-toast-ico { margin-top: 2px; }
+@keyframes hm-toast-rotate {
+  to { transform: rotate(360deg); }
+}
 .hm-toast-close {
   flex: none;
   display: grid;
   place-items: center;
-  width: 28px;
-  height: 28px;
+  width: 26px;
+  height: 26px;
   border-radius: 50%;
-  color: var(--bg-editor);
-  background: rgba(255, 255, 255, 0.16);
+  color: var(--muted);
 }
-.hm-toast-close:active { background: rgba(255, 255, 255, 0.3); }
+.hm-toast-close:hover { background: var(--hover); color: var(--text); }
+.hm-toast-close:active { background: var(--active); }
 @keyframes hm-toast-in {
   from { opacity: 0; transform: translateX(-50%) translateY(10px); }
   to { opacity: 1; transform: translateX(-50%) translateY(0); }
@@ -3665,9 +3680,7 @@ body.dark .milkdown {
   to { opacity: 1; }
 }
 
-/* Hide controls that don't apply on a phone: the page-width preset (the editor
-   is always full width here) and the desktop keyboard-shortcut hints. */
-.app.is-mobile .hm-pagewidth { display: none; }
+/* Hide controls that don't apply on a phone: the desktop keyboard-shortcut hints. */
 .app.is-mobile .welcome-hints { display: none; }
 /* The floating "Text / H1" caret badge is desktop affordance; drop it on phones. */
 .app.is-mobile .hm-level-badge { display: none !important; }
@@ -4519,22 +4532,22 @@ body.hm-has-custom-theme .km-doc {
   animation: menuFadeIn 0.12s var(--ease-out);
 }
 .hm-settings {
-  width: 520px;
+  width: 620px;
   max-width: 92vw;
-  max-height: 82vh;
+  max-height: 84vh;
   display: flex;
   flex-direction: column;
   background: var(--bg-elevated);
   border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  box-shadow: var(--shadow-lg);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-float);
   overflow: hidden;
 }
 .hm-settings-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 12px 16px;
+  padding: 14px 22px;
   border-bottom: 1px solid var(--border);
 }
 .hm-settings-title {
@@ -4554,14 +4567,23 @@ body.hm-has-custom-theme .km-doc {
   color: var(--muted);
 }
 .hm-settings-close:hover { background: var(--hover); color: var(--text); }
+/* Body: a slightly recessed canvas; each section floats on it as a card.
+   The bg/bg-elevated contrast + the card border give the dialog structure in
+   every theme (light, dark, morandi) without hard-coding colors. */
 .hm-settings-body {
   overflow-y: auto;
-  padding: 6px 16px 16px;
+  padding: 18px 22px 22px;
+  background: var(--bg);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
 }
-.hm-set-section { padding-top: 12px; }
-.hm-set-section + .hm-set-section {
-  margin-top: 14px;
-  border-top: 1px solid var(--border);
+.hm-set-section {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
+  padding: 14px 18px 16px;
+  box-shadow: var(--shadow-sm);
 }
 .hm-set-section-title {
   font-size: 11px;
@@ -4569,14 +4591,14 @@ body.hm-has-custom-theme .km-doc {
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--faint);
-  margin-bottom: 8px;
+  margin-bottom: 10px;
 }
 .hm-set-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  padding: 7px 0;
+  padding: 8px 0;
 }
 .hm-set-text { min-width: 0; }
 .hm-set-label { font-size: 13px; color: var(--text); }

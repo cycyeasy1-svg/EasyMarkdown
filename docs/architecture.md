@@ -72,7 +72,7 @@ src/
         RenameModal.jsx    标签重命名弹窗（Electron 无 window.prompt）
         Outline.jsx        大纲面板（从内容解析标题）
         CommandPalette.jsx 命令面板（Ctrl+P 模糊跳转）
-        StatusBar.jsx      底部状态栏 + 块切换器 + 主题/语言选择
+        StatusBar.jsx      底部状态栏（字数统计 / 编辑模式切换 / 设置入口）
         icons.jsx          内联 SVG 图标
       styles/app.css       全部样式 + 主题变量
 scripts/

@@ -1326,16 +1326,17 @@ export default function App() {
           window.api.platform === 'ios' ? tRef.current('save.locIos') : tRef.current('save.locAndroid')
         fireToast(tRef.current('save.savedTo', { name: baseName(targetPath), loc }), {
           sticky: true,
-          duration: 5000
+          duration: 5000,
+          kind: 'success'
         })
       } else if (notify) {
         // Manual saves (Ctrl+S / FAB / menu) get a brief confirmation; autosave
         // stays silent so it doesn't toast every couple of seconds while typing.
-        fireToast(tRef.current('save.saved'))
+        fireToast(tRef.current('save.saved'), { kind: 'success' })
       }
     } catch (e) {
       // Never fail silently — surface the real error so saving is debuggable.
-      fireToast(tRef.current('save.failed', { msg: e?.message || String(e) }), { sticky: true })
+      fireToast(tRef.current('save.failed', { msg: e?.message || String(e) }), { sticky: true, kind: 'error' })
     }
   }, [isMobile])
 
@@ -2164,8 +2165,9 @@ export default function App() {
       const msg = typeof d === 'string' ? d : d?.msg
       const sticky = typeof d === 'object' && !!d?.sticky
       const duration = typeof d === 'object' ? d?.duration : undefined
+      const kind = typeof d === 'object' ? d?.kind : undefined
       if (!msg) return
-      setToast({ msg, key: Date.now() + Math.random(), sticky })
+      setToast({ msg, key: Date.now() + Math.random(), sticky, kind })
       clearTimeout(timer)
       // duration wins; otherwise sticky stays until ✕, plain toasts hide quickly.
       const ms = duration || (sticky ? 0 : 1600)
@@ -3390,8 +3392,6 @@ export default function App() {
         customTheme={customTheme}
         onPickCustom={setCustomTheme}
         onRefreshThemes={refreshThemes}
-        onOpenThemesFolder={onOpenThemesFolder}
-        onGetMoreThemes={onGetMoreThemes}
         lang={lang}
         setLang={setLang}
         sourceMode={sourceMode}
@@ -3407,16 +3407,10 @@ export default function App() {
         onToggleKeep={onToggleKeep}
         showModeHint={showModeHint}
         onDismissModeHint={dismissModeHint}
-        pageWidth={settings.pageWidth}
-        onSetPageWidth={onSetPageWidth}
         fontSize={settings.fontSize}
         onSetFontSize={onSetFontSize}
         zoom={settings.zoom}
         onSetZoom={onSetZoom}
-        lineHeight={settings.lineHeight}
-        onSetLineHeight={onSetLineHeight}
-        paragraphSpacing={settings.paragraphSpacing}
-        onSetParagraphSpacing={onSetParagraphSpacing}
         filterInfo={activeTab ? keepFilters[activeTab.id] : null}
         onOpenSettings={() => setSettingsOpen(true)}
       />
@@ -3463,6 +3457,17 @@ export default function App() {
 
       {toast && (
         <div className={`hm-toast${toast.sticky ? ' sticky' : ''}`} role="status" key={toast.key}>
+          {toast.kind === 'progress' && <span className="hm-toast-spin" />}
+          {toast.kind === 'success' && (
+            <span className="hm-toast-ico ok">
+              <Icon name="check" size={13} strokeWidth={2.4} />
+            </span>
+          )}
+          {toast.kind === 'error' && (
+            <span className="hm-toast-ico err">
+              <Icon name="alert" size={16} strokeWidth={2} />
+            </span>
+          )}
           <span className="hm-toast-msg">{toast.msg}</span>
           {toast.sticky && (
             <button className="hm-toast-close" onClick={() => setToast(null)} aria-label="Close">

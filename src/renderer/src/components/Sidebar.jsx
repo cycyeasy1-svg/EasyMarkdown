@@ -233,7 +233,7 @@ function Sidebar({ workspaces, activePath, openTabPaths, openTabPathsRaw, onOpen
   }
 
   const refreshDir = async (dir) => {
-    fireToast(t('side.refreshing'), { sticky: true })
+    fireToast(t('side.refreshing'), { sticky: true, kind: 'progress' })
     try {
       const nextMap = await window.api.readDirRecursive(dir)
       const root = dir.replace(/\\/g, '/')
@@ -245,9 +245,9 @@ function Sidebar({ workspaces, activePath, openTabPaths, openTabPathsRaw, onOpen
         }
         return { ...next, ...nextMap }
       })
-      fireToast(t('side.refreshed'), { duration: 1600 })
+      fireToast(t('side.refreshed'), { duration: 1600, kind: 'success' })
     } catch (e) {
-      fireToast(t('side.refreshFailed', { msg: e?.message || String(e) }), { sticky: true })
+      fireToast(t('side.refreshFailed', { msg: e?.message || String(e) }), { sticky: true, kind: 'error' })
     }
   }
 

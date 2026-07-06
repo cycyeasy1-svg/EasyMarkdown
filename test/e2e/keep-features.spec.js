@@ -29,9 +29,9 @@ test('paragraph-spacing preset changes the keep-mode block spacing', async () =>
     const marginOf = () => para.evaluate((el) => getComputedStyle(el).marginTop)
     const before = await marginOf()
 
-    // Open the layout popover (status bar) and pick a paragraph-spacing preset
-    // other than the active one, so the value is guaranteed to change.
-    await page.locator('button[title*="字号与宽度"]').click()
+    // Open the Settings modal (status-bar gear) and pick a paragraph-spacing
+    // preset other than the active one, so the value is guaranteed to change.
+    await page.locator('.statusbar button[title="设置"]').click()
     const group = page.locator('.hm-adjust-group', {
       has: page.locator('.hm-pop-title', { hasText: '段落间距' })
     })
