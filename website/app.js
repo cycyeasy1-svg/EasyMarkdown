@@ -11,7 +11,7 @@ const I18N = {
     'hero.sub': '一个免费的 Typora 平替，但不止于此。',
     'cta.win': '下载 Windows 版', 'cta.mac': 'macOS 下载 & 安装', 'cta.android': '下载安卓 APK',
     'hero.note': '构建未签名 — Windows：更多信息 → 仍要运行 · macOS（Apple 芯片 / Intel 均可）：右键 → 打开 · 安卓：安装 APK 时允许"未知来源"',
-    'hero.caption': 'HORSEMD · 文件树 / 标签页 / 所见即所得',
+    'hero.caption': 'EASYMARKDOWN · 文件树 / 标签页 / 所见即所得',
     'strip.tabs': '标签页', 'strip.tree': '文件树', 'strip.i18n': 'EN / 中文', 'strip.themes': '6 套主题',
     'features.title': '它能做什么',
     'f1.title': '标签页', 'f1.body': '双击一个文件，是多一个标签，不是多一个窗口。',
@@ -31,7 +31,7 @@ const I18N = {
     'hero.sub': 'A free Typora alternative, and then some.',
     'cta.win': 'Download for Windows', 'cta.mac': 'macOS — download & install', 'cta.android': 'Download Android APK',
     'hero.note': 'Unsigned builds — Windows: More info → Run anyway · macOS (Apple Silicon / Intel): right-click → Open · Android: allow "unknown sources" when installing the APK',
-    'hero.caption': 'HORSEMD · FILE TREE / TABS / WYSIWYG',
+    'hero.caption': 'EASYMARKDOWN · FILE TREE / TABS / WYSIWYG',
     'strip.tabs': 'Tabs', 'strip.tree': 'File tree', 'strip.i18n': 'EN / 中文', 'strip.themes': '6 themes',
     'features.title': 'What it does',
     'f1.title': 'Tabs', 'f1.body': 'Double-click a file and you get a new tab, not another window.',
@@ -112,7 +112,7 @@ const isMac = /mac/i.test(navigator.platform || '') || /Macintosh/.test(navigato
 document.getElementById(isMac ? 'dlWin' : 'dlMac').classList.replace('btn-solid', 'btn-ghost')
 
 /* ── GitHub Releases：填充版本号与安装包直链 ─────────────── */
-fetch('https://api.github.com/repos/BND-1/horseMD/releases/latest')
+fetch('https://api.github.com/repos/cycyeasy1-svg/EasyMarkdown/releases/latest')
   .then(r => (r.ok ? r.json() : null))
   .then(rel => {
     if (!rel) return

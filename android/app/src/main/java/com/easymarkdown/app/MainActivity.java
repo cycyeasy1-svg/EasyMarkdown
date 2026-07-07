@@ -1,4 +1,4 @@
-package com.horsemd.app;
+package com.easymarkdown.app;
 
 import com.getcapacitor.BridgeActivity;
 

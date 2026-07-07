@@ -325,13 +325,13 @@ page width, in-cell line breaks, an Intel macOS build, and a nicer update prompt
 - Dark/light themes, session restore, single-instance file association.
 - Windows NSIS installer and macOS dmg/zip packaging.
 
-[Unreleased]: https://github.com/BND-1/horseMD/compare/v0.2.0...HEAD
-[0.2.0]: https://github.com/BND-1/horseMD/compare/v0.1.7...v0.2.0
-[0.1.7]: https://github.com/BND-1/horseMD/compare/v0.1.6...v0.1.7
-[0.1.6]: https://github.com/BND-1/horseMD/compare/v0.1.5...v0.1.6
-[0.1.5]: https://github.com/BND-1/horseMD/compare/v0.1.4...v0.1.5
-[0.1.4]: https://github.com/BND-1/horseMD/compare/v0.1.3...v0.1.4
-[0.1.3]: https://github.com/BND-1/horseMD/compare/v0.1.2...v0.1.3
-[0.1.2]: https://github.com/BND-1/horseMD/compare/v0.1.1...v0.1.2
-[0.1.1]: https://github.com/BND-1/horseMD/compare/v0.1.0...v0.1.1
-[0.1.0]: https://github.com/BND-1/horseMD/releases/tag/v0.1.0
+[Unreleased]: https://github.com/cycyeasy1-svg/EasyMarkdown/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/cycyeasy1-svg/EasyMarkdown/compare/v0.1.7...v0.2.0
+[0.1.7]: https://github.com/cycyeasy1-svg/EasyMarkdown/compare/v0.1.6...v0.1.7
+[0.1.6]: https://github.com/cycyeasy1-svg/EasyMarkdown/compare/v0.1.5...v0.1.6
+[0.1.5]: https://github.com/cycyeasy1-svg/EasyMarkdown/compare/v0.1.4...v0.1.5
+[0.1.4]: https://github.com/cycyeasy1-svg/EasyMarkdown/compare/v0.1.3...v0.1.4
+[0.1.3]: https://github.com/cycyeasy1-svg/EasyMarkdown/compare/v0.1.2...v0.1.3
+[0.1.2]: https://github.com/cycyeasy1-svg/EasyMarkdown/compare/v0.1.1...v0.1.2
+[0.1.1]: https://github.com/cycyeasy1-svg/EasyMarkdown/compare/v0.1.0...v0.1.1
+[0.1.0]: https://github.com/cycyeasy1-svg/EasyMarkdown/releases/tag/v0.1.0

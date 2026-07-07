@@ -25,7 +25,8 @@ function boldMd(s) {
 // App version, injected at build time from package.json (see electron.vite.config).
 const APP_VERSION = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : ''
 const ORIGINAL_AUTHOR = 'Evan Yang'
-const FORK_AUTHOR = 'Easy Chen'
+const PRODUCT_AUTHOR = 'Easy Chen'
+const ORIGINAL_PROJECT = 'BND-1/horseMD'
 
 // Render an i18n template like "Built by {author}…" with the {token} slots
 // swapped for emphasized names, so the names stay bold across both languages.
@@ -100,9 +101,7 @@ function StatsControl({ stats }) {
   )
 }
 
-// About: replaces the bare GitHub link with a small credits popover. It keeps
-// the original author's attribution and a link to the upstream project, which
-// the MIT license requires us to preserve, alongside this fork's repo.
+// About: keep product ownership primary while preserving the MIT attribution.
 function AboutControl() {
   const { t } = useI18n()
   const { open, setOpen, ref } = usePopover()
@@ -124,10 +123,10 @@ function AboutControl() {
             </div>
           </div>
           <p className="hm-about-text">
-            {richLine(t('about.intro'), { author: FORK_AUTHOR, project: 'horseMD' })}
+            {richLine(t('about.intro'), { author: PRODUCT_AUTHOR })}
           </p>
           <p className="hm-about-text">
-            {richLine(t('about.thanks'), { author: ORIGINAL_AUTHOR })}
+            {richLine(t('about.thanks'), { project: ORIGINAL_PROJECT, author: ORIGINAL_AUTHOR })}
           </p>
           <div className="hm-about-license">{t('about.license')}</div>
         </div>
@@ -280,10 +279,10 @@ function MobileMore({
           <div className="theme-menu-label">{t('about.title')}</div>
           <div className="hm-about-sheet">
             <p className="hm-about-text">
-              {richLine(t('about.intro'), { author: FORK_AUTHOR, project: 'horseMD' })}
+              {richLine(t('about.intro'), { author: PRODUCT_AUTHOR })}
             </p>
             <p className="hm-about-text">
-              {richLine(t('about.thanks'), { author: ORIGINAL_AUTHOR })}
+              {richLine(t('about.thanks'), { project: ORIGINAL_PROJECT, author: ORIGINAL_AUTHOR })}
             </p>
             <div className="hm-about-license">{t('about.license')}</div>
           </div>

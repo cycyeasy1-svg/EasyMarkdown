@@ -1,7 +1,7 @@
 # EasyMarkdown
 
-[![CI](https://github.com/BND-1/horseMD/actions/workflows/ci.yml/badge.svg)](https://github.com/BND-1/horseMD/actions/workflows/ci.yml)
-[![Release](https://img.shields.io/github/v/release/BND-1/horseMD?include_prereleases)](https://github.com/BND-1/horseMD/releases)
+[![CI](https://github.com/cycyeasy1-svg/EasyMarkdown/actions/workflows/ci.yml/badge.svg)](https://github.com/cycyeasy1-svg/EasyMarkdown/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/cycyeasy1-svg/EasyMarkdown?include_prereleases)](https://github.com/cycyeasy1-svg/EasyMarkdown/releases)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
 
 [English](./README.en.md) · **简体中文**
@@ -106,7 +106,7 @@ EasyMarkdown 两个都给你：一个**单窗口**装下整个文件夹的文件
 
 ## 安装
 
-去 [**Releases 页面**](https://github.com/BND-1/horseMD/releases/latest) 下载最新版安装包。
+去 [**Releases 页面**](https://github.com/cycyeasy1-svg/EasyMarkdown/releases/latest) 下载最新版安装包。
 
 > ℹ️ 安装包目前**没有花钱买签名**，所以 Windows / macOS 第一次打开都会拦一下——**不是病毒、不是真的损坏**，按下面步骤放行即可。代码完全开源，可自行查看 / 构建。
 
@@ -172,6 +172,8 @@ Electron + Vite + React 外壳，编辑器引擎用 **Milkdown Crepe**（基于 
 - [docs/features.md](./docs/features.md) —— 每个功能的用法与实现（对应到文件）
 - [docs/implementation-notes.md](./docs/implementation-notes.md) —— 关键 bug 的根因与修法、设计决策
 - [docs/development.md](./docs/development.md) —— 开发、构建、Windows/macOS 打包、CDP 自动化测试
+- [docs/release.md](./docs/release.md) —— 正式发布前检查清单
+- [PRIVACY.md](./PRIVACY.md) / [SUPPORT.md](./SUPPORT.md) / [NOTICE.md](./NOTICE.md)
 
 ## 贡献
 
@@ -180,4 +182,4 @@ Electron + Vite + React 外壳，编辑器引擎用 **Milkdown Crepe**（基于 
 
 ## 许可证
 
-[MIT](./LICENSE) © 杨庭毅 ([yangsir.net](https://yangsir.net))
+[MIT](./LICENSE) © Easy Chen。原始开源项目归属信息见 [NOTICE.md](./NOTICE.md)。

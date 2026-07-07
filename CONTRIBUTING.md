@@ -5,8 +5,8 @@ Thanks for taking the time to contribute! 🎉
 ## Development setup
 
 ```bash
-git clone https://github.com/BND-1/horseMD.git
-cd horseMD
+git clone https://github.com/cycyeasy1-svg/EasyMarkdown.git
+cd EasyMarkdown
 npm install        # if Electron's binary download is blocked (e.g. in China):
                    #   ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/ npm install
 npm run dev        # hot-reload dev mode

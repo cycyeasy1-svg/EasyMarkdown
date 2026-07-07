@@ -1,7 +1,7 @@
 # EasyMarkdown
 
-[![CI](https://github.com/BND-1/horseMD/actions/workflows/ci.yml/badge.svg)](https://github.com/BND-1/horseMD/actions/workflows/ci.yml)
-[![Release](https://img.shields.io/github/v/release/BND-1/horseMD?include_prereleases)](https://github.com/BND-1/horseMD/releases)
+[![CI](https://github.com/cycyeasy1-svg/EasyMarkdown/actions/workflows/ci.yml/badge.svg)](https://github.com/cycyeasy1-svg/EasyMarkdown/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/cycyeasy1-svg/EasyMarkdown?include_prereleases)](https://github.com/cycyeasy1-svg/EasyMarkdown/releases)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
 
 **English** · [简体中文](./README.md)
@@ -108,7 +108,7 @@ switchable with `Ctrl+Shift+T` or the status-bar picker.
 
 ## Install
 
-Grab the latest installer from the [**Releases page**](https://github.com/BND-1/horseMD/releases/latest).
+Grab the latest installer from the [**Releases page**](https://github.com/cycyeasy1-svg/EasyMarkdown/releases/latest).
 
 > ℹ️ Builds aren't code-signed yet, so Windows / macOS will warn on first launch — it's **not malware and not actually damaged**. Follow the steps below to allow it. The source is fully open; build it yourself if you prefer.
 
@@ -175,6 +175,8 @@ implementation, and the bugs/decisions log.
 - [docs/features.md](./docs/features.md) — how each feature works (mapped to files)
 - [docs/implementation-notes.md](./docs/implementation-notes.md) — root causes of key bugs, design decisions
 - [docs/development.md](./docs/development.md) — develop, build, Windows/macOS packaging, CDP e2e tests
+- [docs/release.md](./docs/release.md) — release checklist
+- [PRIVACY.md](./PRIVACY.md) / [SUPPORT.md](./SUPPORT.md) / [NOTICE.md](./NOTICE.md)
 
 ## Contributing
 
@@ -183,4 +185,5 @@ security problem? Please report it privately via [SECURITY.md](./SECURITY.md).
 
 ## License
 
-[MIT](./LICENSE) © 杨庭毅 ([yangsir.net](https://yangsir.net))
+[MIT](./LICENSE) © Easy Chen. Original open-source attribution is preserved in
+[NOTICE.md](./NOTICE.md).

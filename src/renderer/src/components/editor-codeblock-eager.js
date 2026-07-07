@@ -1,5 +1,5 @@
 // Eager-mount Milkdown's code-block node view (fixes the code-block "page
-// jump", upstream horseMD issue #25).
+// jump", historical issue #25).
 //
 // CodeMirrorBlock (@milkdown/components/code-block) lazy-mounts its CodeMirror
 // editor via a shared IntersectionObserver (rootMargin 200px): a plain <pre>

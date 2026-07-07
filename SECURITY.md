@@ -11,7 +11,7 @@ Please **do not** open a public issue for security problems.
 
 Instead, use GitHub's private reporting:
 **Security → Report a vulnerability** on the repository, or open a
-[private security advisory](https://github.com/BND-1/horseMD/security/advisories/new).
+[private security advisory](https://github.com/cycyeasy1-svg/EasyMarkdown/security/advisories/new).
 
 Include:
 - A description of the issue and its impact.

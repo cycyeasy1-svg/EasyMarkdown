@@ -1,7 +1,7 @@
 # EasyMarkdown 路线图 / Roadmap
 
 > 这里记录 EasyMarkdown 的方向与优先级。顺序大致代表优先级,但会随实际情况调整;
-> 欢迎在 [Issues](https://github.com/BND-1/horseMD/issues) 里提想法。
+> 欢迎在 [Issues](https://github.com/cycyeasy1-svg/EasyMarkdown/issues) 里提想法。
 >
 > *This is the project roadmap (Chinese-first). Items are roughly ordered by
 > priority and may change. Ideas welcome via Issues.*
@@ -37,9 +37,9 @@
 ## 🚧 近期计划(桌面端)
 
 - **macOS 签名 + 公证** —— 解决 Gatekeeper "打不开/已损坏",免去手动右键打开
-  ([#1](https://github.com/BND-1/horseMD/issues/1))
+  ([#1](https://github.com/cycyeasy1-svg/EasyMarkdown/issues/1))
 - **Front matter 支持** —— 识别顶部 YAML、渲染为独立信息块、原样往返保存
-  ([#8](https://github.com/BND-1/horseMD/issues/8))
+  ([#8](https://github.com/cycyeasy1-svg/EasyMarkdown/issues/8))
 - **Linux 版本** —— 加构建目标 + CI,并补齐 Linux 的窗口/标题栏等适配(暂缓)
 - 持续打磨:更多键盘快捷键、查找替换、导出选项等
 
@@ -78,5 +78,5 @@
 
 ## 参与
 
-有想法或需求?欢迎到 [Issues](https://github.com/BND-1/horseMD/issues) 提;
+有想法或需求?欢迎到 [Issues](https://github.com/cycyeasy1-svg/EasyMarkdown/issues) 提;
 变更记录见 [CHANGELOG.md](./CHANGELOG.md)。

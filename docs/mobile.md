@@ -127,7 +127,7 @@ npx cap open ios|android   # 出包 / 真机调试
 `package.json` 加 `build:mobile`、`cap:*` 脚本。`.gitignore` 忽略 `dist-mobile/`
 及原生构建产物(`ios/App/Pods`、`android/.gradle` 等;平台目录是否入库后续定)。
 
-`appId` 建议 `net.yangsir.horsemd`;应用名 EasyMarkdown;图标/启动屏复用 `build/icon.png`。
+`appId` 建议 `com.easymarkdown.app`;应用名 EasyMarkdown;图标/启动屏复用 `build/icon.png`。
 
 ## 7. 文件关联("用 EasyMarkdown 打开 .md")
 
@@ -164,8 +164,8 @@ npx cap open ios|android   # 出包 / 真机调试
 ### Android —— 出可下载的签名 APK
 1. **生成 keystore(一次性,务必备份;丢了就无法用同一身份更新 App)**:
    ```bash
-   keytool -genkeypair -v -keystore android/app/horsemd.keystore \
-     -alias horsemd -keyalg RSA -keysize 2048 -validity 10000 \
+   keytool -genkeypair -v -keystore android/app/easymarkdown.keystore \
+     -alias easymarkdown -keyalg RSA -keysize 2048 -validity 10000 \
      -dname "CN=EasyMarkdown, O=EasyMarkdown, C=CN"
    ```
    按提示设一个口令(自己记牢)。
@@ -182,7 +182,7 @@ npx cap open ios|android   # 出包 / 真机调试
 
 ### iOS —— TestFlight / App Store(需 Apple 开发者账号 $99/年)
 1. 注册 [Apple Developer Program](https://developer.apple.com/programs/)。
-2. 在 [App Store Connect](https://appstoreconnect.apple.com) 新建一个 App 记录(Bundle ID = `com.horsemd.app`)。
+2. 在 [App Store Connect](https://appstoreconnect.apple.com) 新建一个 App 记录(Bundle ID = `com.easymarkdown.app`)。
 3. Xcode:`npx cap sync ios` → 打开 `ios/App/App.xcodeproj` → 设好 Team(付费账号)、版本号/构建号 → 顶部设备选 **Any iOS Device** → **Product → Archive**。
 4. Archive 完成 → **Distribute App** → **TestFlight & App Store** → 上传。之后在 App Store Connect 里发 TestFlight 测试或提交审核上架。
 

@@ -34,7 +34,7 @@ ELECTRON_BUILDER_BINARIES_MIRROR=https://npmmirror.com/mirrors/electron-builder-
 
 ```jsonc
 "build": {
-  "appId": "com.horsemd.app",
+  "appId": "com.easymarkdown.app",
   "productName": "EasyMarkdown",
   "files": ["out/**/*"],
   "icon": "build/icon.ico",

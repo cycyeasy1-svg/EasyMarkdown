@@ -1008,7 +1008,7 @@ ipcMain.handle('update:check', async () => {
     // whole main process for an unsigned app launched by Finder/launchd (observed
     // as an instant crash on open). net.fetch goes through Chromium's resolver,
     // which fails gracefully instead of crashing.
-    const res = await net.fetch('https://api.github.com/repos/BND-1/horseMD/releases/latest', {
+    const res = await net.fetch('https://api.github.com/repos/cycyeasy1-svg/EasyMarkdown/releases/latest', {
       headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'EasyMarkdown-Updater' }
     })
     if (!res.ok) return { ok: false }
@@ -1018,7 +1018,7 @@ ipcMain.handle('update:check', async () => {
       ok: true,
       latest,
       current: app.getVersion(),
-      url: data.html_url || 'https://github.com/BND-1/horseMD/releases',
+      url: data.html_url || 'https://github.com/cycyeasy1-svg/EasyMarkdown/releases',
       // The release notes (Markdown) so the prompt can show "what's new". Capped
       // so a huge changelog can't bloat the IPC payload / the toast.
       name: typeof data.name === 'string' ? data.name : '',

@@ -28,4 +28,4 @@ Allow: /
 User-agent: Google-Extended
 Allow: /
 
-Sitemap: https://horsemd.yangsir.net/sitemap.xml
+Sitemap: https://cycyeasy1-svg.github.io/EasyMarkdown/sitemap.xml

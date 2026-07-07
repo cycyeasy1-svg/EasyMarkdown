@@ -1,17 +1,17 @@
 {
-  "name": "horse",
+  "name": "easymarkdown",
   "productName": "EasyMarkdown",
-  "version": "1.0.12",
+  "version": "1.0.13",
   "description": "EasyMarkdown Markdown Editor",
-  "author": "mini_md",
+  "author": "Easy Chen",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/BND-1/horseMD.git"
+    "url": "https://github.com/cycyeasy1-svg/EasyMarkdown.git"
   },
-  "homepage": "https://github.com/BND-1/horseMD#readme",
+  "homepage": "https://github.com/cycyeasy1-svg/EasyMarkdown#readme",
   "bugs": {
-    "url": "https://github.com/BND-1/horseMD/issues"
+    "url": "https://github.com/cycyeasy1-svg/EasyMarkdown/issues"
   },
   "main": "out/main/index.js",
   "type": "module",
@@ -85,8 +85,8 @@
     "publish": [
       {
         "provider": "github",
-        "owner": "BND-1",
-        "repo": "horseMD"
+        "owner": "cycyeasy1-svg",
+        "repo": "EasyMarkdown"
       }
     ],
     "mac": {
