@@ -11,7 +11,8 @@ import {
   insertColumnInLine,
   removeColumnInLine,
   buildTableRow,
-  replaceBlockLines
+  replaceBlockLines,
+  detectDocLang
 } from '../keep-parser.js'
 import { inlineRichStyles } from './editor-copy.js'
 import { dirOf } from './editor-images.js'
@@ -184,6 +185,13 @@ function KeepEditor({
       blocksRef.current = blocks
       viewLinesRef.current = viewLines
       computeTableIdx(blocks)
+
+      // Kana present → lang="ja" on the container so :lang(ja) switches the
+      // writing font to the Japanese stack (--font-write-ja). Re-evaluated per
+      // render, so an edit that adds/removes the only Japanese text updates it.
+      const docLang = detectDocLang(viewLines)
+      if (docLang) host.setAttribute('lang', docLang)
+      else host.removeAttribute('lang')
 
       cancelAfterPaint()
       cancelChunks()

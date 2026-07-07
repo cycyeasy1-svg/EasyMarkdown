@@ -19,6 +19,7 @@ import '@milkdown/crepe/theme/common/style.css'
 import '@milkdown/crepe/theme/frame.css'
 import '@milkdown/crepe/theme/common/link-tooltip.css'
 import { BLOCK_TYPES, blockById, currentBlockId } from '../blocks.js'
+import { detectDocLang } from '../keep-parser.js'
 import { useI18n } from '../i18n.jsx'
 import { fireToast } from '../ui.js'
 import { renderHtmlNodeView, convertBlock, mergeInlineHtmlRemarkPlugin } from './editor-html.js'
@@ -462,13 +463,26 @@ function Editor({
       if (levelTimer) clearTimeout(levelTimer)
     })
 
+    // Kana present → lang="ja" on the host so .milkdown:lang(ja) switches the
+    // writing font to the Japanese stack (--font-write-ja). Kept in sync on
+    // every content update (the regex short-circuits on the first kana hit).
+    const syncDocLang = (md) => {
+      const docLang = detectDocLang(md || '')
+      if (docLang) host.setAttribute('lang', docLang)
+      else host.removeAttribute('lang')
+    }
+    syncDocLang(initialContent)
+
     // IMPORTANT: register listeners BEFORE create(). Crepe wires them during
     // create(), so registering afterwards means `markdownUpdated` never fires —
     // which left tab.content (outline, word count, dirty state, and saves!)
     // frozen at the initial value while the editor was actually edited.
     crepe.on((api) => {
       api.markdownUpdated((_ctx, md) => {
-        if (ready) onChange?.(md, false)
+        if (ready) {
+          onChange?.(md, false)
+          syncDocLang(md)
+        }
       })
     })
 

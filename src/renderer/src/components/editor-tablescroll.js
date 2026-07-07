@@ -90,6 +90,10 @@ export function enhanceKeepTables(host, scroller, { onFilterClick, onHeaderEdit 
     // A visual duplicate of the live header — keep it out of the accessibility
     // tree (and out of find/copy intent) so it isn't announced twice.
     floatEl.setAttribute('aria-hidden', 'true')
+    // The clone is appended OUTSIDE the doc container, so it doesn't inherit the
+    // doc's lang="ja" — copy it so :lang(ja) picks the same writing font.
+    const hostLang = host.getAttribute('lang')
+    if (hostLang) floatEl.setAttribute('lang', hostLang)
 
     const fTop = document.createElement('div')
     fTop.className = 'km-float-scrolltop'

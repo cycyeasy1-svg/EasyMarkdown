@@ -17,7 +17,8 @@ import {
   insertColumnInLine,
   removeColumnInLine,
   buildTableRow,
-  extractHeadings
+  extractHeadings,
+  detectDocLang
 } from '../../../src/renderer/src/keep-parser.js'
 import { inlineRichStyles } from '../../../src/renderer/src/components/editor-copy.js'
 import { isRelativePath } from '../../../src/renderer/src/components/editor-images.js'
@@ -205,6 +206,12 @@ function rerender() {
   })
   blocks = r.blocks
   const html = r.html
+
+  // Kana present → lang="ja" on the container so :lang(ja) switches the writing
+  // font to the Japanese stack (--font-write-ja). Mirrors KeepEditor.jsx.
+  const docLang = detectDocLang(lines)
+  if (docLang) host.setAttribute('lang', docLang)
+  else host.removeAttribute('lang')
 
   const paint = () => {
     host.innerHTML = html

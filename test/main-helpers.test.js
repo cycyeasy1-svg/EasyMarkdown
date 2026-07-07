@@ -3,7 +3,28 @@
 // watching "/" (which floods EACCES and aborts the whole main process on
 // launch), so their behavior must not drift unnoticed.
 import { describe, it, expect } from 'vitest'
-import { MD_EXTS, MD_RE, isAbsolutePath, isRestrictedRoot, imageNameParts, searchContentLines } from '../src/main/helpers.js'
+import {
+  MD_EXTS,
+  MD_RE,
+  isAbsolutePath,
+  isRestrictedRoot,
+  imageNameParts,
+  searchContentLines,
+  docLangAttr
+} from '../src/main/helpers.js'
+
+describe('docLangAttr', () => {
+  it('returns a lang="ja" attribute when the exported HTML contains kana', () => {
+    expect(docLangAttr('<p>これは日本語の資料です</p>')).toBe(' lang="ja"')
+    expect(docLangAttr('<p>カタカナ</p>')).toBe(' lang="ja"')
+  })
+  it('returns empty for Han-only / Latin / empty content', () => {
+    expect(docLangAttr('<p>中文文档</p>')).toBe('')
+    expect(docLangAttr('<p>English</p>')).toBe('')
+    expect(docLangAttr('')).toBe('')
+    expect(docLangAttr(null)).toBe('')
+  })
+})
 
 describe('MD_EXTS / MD_RE', () => {
   it('lists the supported extensions', () => {

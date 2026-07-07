@@ -26,11 +26,23 @@ html {
 
   /* Typography */
   --font-ui: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  --font-read: 'Libre Baskerville', 'Georgia', 'Times New Roman', serif;
   /* Writing font — matches the EasyMarkdown website (website/styles.css). */
   --font-write: 'Helvetica Neue', Helvetica, Arial, 'PingFang SC', 'Hiragino Sans GB',
     'Source Han Sans SC', 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
-  --font-mono: 'Space Grotesk', 'JetBrains Mono', ui-monospace, 'SFMono-Regular', Consolas, monospace;
+  /* Japanese writing font — applied per document via `lang="ja"` on the doc
+     container (kana detected by detectDocLang in keep-parser.js). Same Latin
+     head as --font-write, then Japanese system fonts (Hiragino on macOS;
+     Yu Gothic Medium first on Windows — its Regular weight renders thin —
+     with Meiryo as the safe fallback), then the Chinese stack for any glyph
+     the Japanese fonts lack. Mirrored by keep.css (VSCode) and PDF_CSS (main). */
+  --font-write-ja: 'Helvetica Neue', Helvetica, Arial, 'Hiragino Kaku Gothic ProN',
+    'Hiragino Sans', 'Yu Gothic Medium', 'Yu Gothic', Meiryo, 'Noto Sans JP',
+    'PingFang SC', 'Microsoft YaHei', sans-serif;
+  /* NB: no proportional faces here — code alignment depends on it. 'Noto Sans
+     Mono CJK JP' (before the generic) keeps CJK inside code on a mono face
+     when installed. */
+  --font-mono: 'JetBrains Mono', ui-monospace, 'SFMono-Regular', Consolas,
+    'Noto Sans Mono CJK JP', monospace;
 
   /* Spacing & Radii */
   --radius-sm: 5px;
@@ -3180,6 +3192,12 @@ body.dark .milkdown {
   /* Overall zoom — see .km-doc. Magnifies the rich-editor document content. */
   zoom: var(--editor-zoom, 1);
 }
+/* Japanese document (lang="ja" set on .editor-host by Editor.jsx when the
+   content contains kana): Japanese glyph forms for the writing font. */
+.milkdown:lang(ja) {
+  --crepe-font-title: var(--font-write-ja);
+  --crepe-font-default: var(--font-write-ja);
+}
 .milkdown .ProseMirror {
   /* Body font size is user-adjustable (status bar). Headings/code use em, so the
      whole document scales from this one value. Falls back to 16px. */
@@ -3852,6 +3870,14 @@ body.dark .milkdown {
   /* The app sets body { user-select: none }; re-enable text selection here so the
      rendered preview supports drag-select + Ctrl/Cmd+C (keep-mode rich copy). */
   user-select: text;
+}
+/* Japanese document (lang="ja" set by KeepEditor when the content contains
+   kana): Japanese glyph forms. .km-float-header is the cloned table header,
+   which lives OUTSIDE .km-doc (appended to .pane-center) — editor-tablescroll
+   copies the host's lang onto it so this selector still matches. */
+.km-doc:lang(ja),
+.km-float-header:lang(ja) {
+  font-family: var(--font-write-ja);
 }
 body.hm-full-width .km-doc {
   max-width: none;

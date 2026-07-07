@@ -19,6 +19,21 @@
 
 import { isRelativePath, resolveToFileUrl } from './components/editor-images.js'
 
+// ── language sniff (per-document writing font) ──
+// Kana is a definitive Japanese signal (Han characters are shared with Chinese,
+// so they are NOT). Callers put the result on the doc container's `lang`
+// attribute; CSS `:lang(ja)` then switches the writing font to the Japanese
+// stack (--font-write-ja) so kanji get Japanese glyph forms instead of the
+// Chinese-font fallback. Covers hiragana, katakana and halfwidth katakana.
+// (main/helpers.js docLangAttr mirrors this regex for the PDF/HTML export —
+// keep the two in sync.)
+const KANA_RE = /[ぁ-ゖァ-ヺｦ-ﾝ]/
+export function detectDocLang(text) {
+  const lines = Array.isArray(text) ? text : [text]
+  for (const line of lines) if (KANA_RE.test(line)) return 'ja'
+  return ''
+}
+
 // ── escaping ──
 export function escapeHtml(s) {
   return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')

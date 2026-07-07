@@ -155,6 +155,18 @@ docs/                  architecture / features / implementation-notes / developm
   chunk); `.milkdown .ProseMirror p` in app.css also sets `font-size` explicitly.
   Keep that import order, and if app.css typography stops applying in rich mode,
   check injection order first.
+- **Per-document Japanese font**: the writing font defaults to the Chinese stack
+  (`--font-write`); a document containing **kana** gets `lang="ja"` on its
+  container (`detectDocLang` in `keep-parser.js` — kana is the signal, Han
+  characters are not) and `:lang(ja)` switches it to `--font-write-ja` so kanji
+  render with Japanese glyph forms. Wired in KeepEditor (rerender), Editor.jsx
+  (mount + `markdownUpdated`), the VSCode webview, and the PDF/HTML/print export
+  (`docLangAttr` in `main/helpers.js` — a deliberate mirror of the kana regex,
+  since main can't import renderer modules). The keep-mode floating table header
+  is appended outside `.km-doc`, so `editor-tablescroll.js` copies the host's
+  `lang` onto it. When editing fonts, keep the four stacks in sync:
+  `--font-write-ja` in app.css + keep.css, `.doc:lang(ja)` in `PDF_CSS`, and the
+  two kana regexes.
 - **Table-cell line breaks** (`editor-tablebreak.js`): GFM cells are single-line,
   so a break must round-trip as `<br>`. A keymap inserts a hardbreak; a custom
   remark stringify `break` handler emits `<br>` **only inside `tableCell`** (else

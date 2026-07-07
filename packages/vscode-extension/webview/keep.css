@@ -27,7 +27,14 @@
   --shadow-lg: 0 8px 28px rgba(0, 0, 0, 0.18);
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
   --font-write: var(--vscode-font-family, -apple-system, "Segoe UI", Roboto, sans-serif);
-  --font-mono: var(--vscode-editor-font-family, Consolas, Monaco, monospace);
+  /* Japanese writing font — applied per document via lang="ja" (kana detected by
+     keep-parser's detectDocLang). Explicit stack: --vscode-font-family is the
+     UI font and gives no Japanese glyph-form guarantee. Mirrors --font-write-ja
+     in the app's app.css — keep the two in sync. */
+  --font-write-ja: 'Helvetica Neue', Helvetica, Arial, 'Hiragino Kaku Gothic ProN',
+    'Hiragino Sans', 'Yu Gothic Medium', 'Yu Gothic', Meiryo, 'Noto Sans JP',
+    'PingFang SC', 'Microsoft YaHei', sans-serif;
+  --font-mono: var(--vscode-editor-font-family, Consolas, Monaco), 'Noto Sans Mono CJK JP', monospace;
   --editor-max-width: 800px;
   --editor-font-size: 16px;
   --editor-line-height: 1.85;
@@ -123,6 +130,13 @@ body.hm-theme-warm-dark {
   color: var(--text);
   font-family: var(--font-write);
   zoom: var(--editor-zoom, 1);
+}
+/* Japanese document (lang="ja" set by the webview when the content contains
+   kana): Japanese glyph forms. .km-float-header is the cloned table header —
+   it lives outside .km-doc; editor-tablescroll copies the host's lang onto it. */
+.km-doc:lang(ja),
+.km-float-header:lang(ja) {
+  font-family: var(--font-write-ja);
 }
 /* Full-width preset. The layout popover's applyPageWidth('full') adds
    body.hm-full-width but intentionally leaves --editor-max-width untouched,

@@ -88,6 +88,15 @@ export function searchContentLines(content, query, options = {}, cap = 50) {
   return { matches: out, error: '' }
 }
 
+// Language attribute for the exported/printed `.doc` wrapper: kana in the
+// document HTML → ` lang="ja"` so PDF_CSS's `.doc:lang(ja)` switches to the
+// Japanese font stack (Japanese glyph forms for kanji). Kana is a definitive
+// Japanese signal; Han characters are shared with Chinese, so they are not.
+// (Mirrors detectDocLang in src/renderer/src/keep-parser.js — keep in sync;
+// duplicated because main must not import renderer modules.)
+const KANA_RE = /[ぁ-ゖァ-ヺｦ-ﾝ]/
+export const docLangAttr = (html) => (KANA_RE.test(String(html ?? '')) ? ' lang="ja"' : '')
+
 // Split a desired image filename into a filesystem-safe { stem, ext }, stripping
 // path/reserved chars. The fs collision check (appending -1, -2…) lives in
 // uniqueImageFile in index.js — this is just the pure naming part.

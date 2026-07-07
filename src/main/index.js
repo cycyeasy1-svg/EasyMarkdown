@@ -4,7 +4,14 @@ import { dirname, join, basename, extname, resolve, sep } from 'node:path'
 import fs from 'node:fs/promises'
 import { existsSync, statSync, constants as fsConstants } from 'node:fs'
 import chokidar from 'chokidar'
-import { MD_EXTS, MD_RE, isRestrictedRoot, imageNameParts, searchContentLines } from './helpers.js'
+import {
+  MD_EXTS,
+  MD_RE,
+  isRestrictedRoot,
+  imageNameParts,
+  searchContentLines,
+  docLangAttr
+} from './helpers.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -37,6 +44,13 @@ const PDF_CSS = `
     font-size: 14.5px; line-height: 1.75; color: #2a2620;
     -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility;
     word-wrap: break-word;
+  }
+  /* Japanese document (docLangAttr put lang="ja" on .doc): Japanese glyph forms.
+     Mirrors --font-write-ja in app.css — keep the two stacks in sync. */
+  .doc:lang(ja) {
+    font-family: 'Helvetica Neue', Helvetica, Arial, 'Hiragino Kaku Gothic ProN',
+      'Hiragino Sans', 'Yu Gothic Medium', 'Yu Gothic', Meiryo, 'Noto Sans JP',
+      'PingFang SC', 'Microsoft YaHei', sans-serif;
   }
   .doc > :first-child { margin-top: 0 !important; }
   .doc h1, .doc h2, .doc h3, .doc h4, .doc h5, .doc h6 {
@@ -353,7 +367,7 @@ ipcMain.handle('export:pdf', async (_e, { html, defaultName }) => {
   })
   if (res.canceled || !res.filePath) return { canceled: true }
 
-  const doc = `<!doctype html><html><head><meta charset="utf-8"><style>${PDF_CSS}</style></head><body><div class="doc">${html}</div></body></html>`
+  const doc = `<!doctype html><html><head><meta charset="utf-8"><style>${PDF_CSS}</style></head><body><div class="doc"${docLangAttr(html)}>${html}</div></body></html>`
 
   const tmp = join(app.getPath('temp'), `easymarkdown-export-${Date.now()}.html`)
   await fs.writeFile(tmp, doc, 'utf8')
@@ -423,7 +437,7 @@ ipcMain.handle('export:html', async (_e, { html, defaultName, title }) => {
     `<meta name="viewport" content="width=device-width, initial-scale=1">` +
     `<title>${escapeHtml(title)}</title>` +
     `<style>${PDF_CSS}${HTML_EXPORT_CSS}</style></head>` +
-    `<body><div class="doc">${body}</div></body></html>`
+    `<body><div class="doc"${docLangAttr(body)}>${body}</div></body></html>`
   await fs.writeFile(res.filePath, doc, 'utf8')
   shell.openPath(res.filePath)
   return { path: res.filePath }
@@ -519,7 +533,7 @@ ipcMain.handle('search:cancel', () => {
 // rendering pipeline as export:pdf, but ends in webContents.print() so the
 // user picks a printer / paper / copies natively.
 ipcMain.handle('print:html', async (_e, { html }) => {
-  const doc = `<!doctype html><html><head><meta charset="utf-8"><style>${PDF_CSS}</style></head><body><div class="doc">${html}</div></body></html>`
+  const doc = `<!doctype html><html><head><meta charset="utf-8"><style>${PDF_CSS}</style></head><body><div class="doc"${docLangAttr(html)}>${html}</div></body></html>`
   const tmp = join(app.getPath('temp'), `easymarkdown-print-${Date.now()}.html`)
   await fs.writeFile(tmp, doc, 'utf8')
   const win = new BrowserWindow({ show: false, webPreferences: { webSecurity: false } })
