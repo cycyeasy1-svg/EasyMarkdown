@@ -6,19 +6,62 @@
 
 [English](./README.en.md) · **简体中文**
 
-一款温暖、现代的 **Markdown 编辑器** —— 一个更顺手的 Typora 替代品，核心理念是
-Typora 做反了的那件事：**每个文件都作为标签页在同一个窗口里打开**，而不是新开一个
-程序。左侧文件树浏览整个文件夹，标签页之间随手切换，在干净的所见即所得编辑器里
-书写。
+一款温暖、现代的 **Markdown 编辑器**：左侧文件树装下整个文件夹，每个文档都是同一
+窗口里的一个标签页；写作时既可以用干净的所见即所得，也可以用 EasyMarkdown 独有的
+**保持模式** —— 渲染归渲染，保存时对你的原文**零差分**，一个字符都不重排。
+
+> 📜 **关于本项目**：EasyMarkdown 基于开源项目
+> [horseMD](https://github.com/BND-1/horseMD)（作者 Evan Yang / 杨庭毅，MIT 协议）
+> **二次开发**。在继承其单窗口多标签、所见即所得编辑等基础之上，本项目新增了
+> **保持模式（零差分编辑）**、**VS Code 扩展**、**日文排版支持**、**工作区全文搜索**
+> 等一系列能力，并作为独立产品持续维护 —— 差异详见下文「[相对原项目的新特性](#-easymarkdown-相对原项目的新特性)」。
+> 原始版权与署名依 MIT 协议保留在 [LICENSE](./LICENSE) 与 [NOTICE.md](./NOTICE.md)，应用内「关于」处亦保留原作者署名。
 
 ![EasyMarkdown —— 文件夹工作区、标签页与所见即所得实时渲染](./docs/screenshots/hero_light.png)
 
 ## 为什么是 EasyMarkdown
 
-大多数 Markdown 编辑器逼你二选一：要么漂亮的所见即所得，要么真正的多文件工作流。
-EasyMarkdown 两个都给你：一个**单窗口**装下整个文件夹的文件树、每个打开的文档都是一个
-**标签页**，编辑器基于 [Milkdown](https://milkdown.dev/)（ProseMirror）原地实时
-预览。一套代码同时跑在 **Windows 和 macOS** 上，整个界面**中英文**实时可切。
+大多数 Markdown 编辑器逼你做两次二选一：要么漂亮的所见即所得，要么真正的多文件
+工作流；要么顺滑的编辑体验，要么保住文件原有的格式。EasyMarkdown 全都要：
+**单窗口**装下整个文件夹的文件树、每个文档都是一个**标签页**；富文本模式基于
+[Milkdown](https://milkdown.dev/)（ProseMirror）原地实时预览，**保持模式**则以你的
+原文为正本、保存零差分。一套代码同时跑在 **Windows 和 macOS** 上，界面
+**中 / 英 / 日**三语实时可切。
+
+## ✨ EasyMarkdown 相对原项目的新特性
+
+以下能力是 EasyMarkdown 在 horseMD 基础上独立开发的，也是两个项目的主要区别：
+
+**保持模式 —— 源码保真的零差分编辑器（`.md` 默认打开方式）**
+
+- 所见即所得引擎（Typora / Milkdown 一类）保存时会**整篇重写**你的文件：列表缩进、
+  空行、转义、表格对齐都可能被重排。保持模式反其道而行：渲染只是视图，
+  **以原文为正本，保存零差分** —— 特别适合被 Git 管理、或需要与他人协作的文档
+- 块级**内容编辑** —— 单击一个块直接改内容，或「在此打开源码」只编辑那一段源码
+- **表格重度增强** —— 列筛选（值搜索 / 全选反选 / 多表筛选徽章 / 一键清除本表或全文档筛选）、
+  行列插入删除、按单元格 / 行 / 列 / 整表复制、宽表浮动表头
+- **标题折叠**、GFM 任务列表、YAML frontmatter 渲染成结构化卡片
+- 状态栏一键在**保持 ⇄ Milkdown** 之间切换，按文档记忆；Mermaid 渲染两种模式共享缓存，切换秒开
+
+**VS Code 扩展**（[`packages/vscode-extension`](./packages/vscode-extension)）
+
+- 把保持模式带进 VS Code：作为 Markdown 编辑器使用，支持图片粘贴、链接跳转、
+  与源码的滚动同步、查找替换、表格列筛选、标题折叠、大纲
+
+**日文排版支持**
+
+- 界面与原生菜单 **中 / 英 / 日** 三语（原项目为中 / 英双语）
+- 含假名的文档自动切换**日文字体栈**，汉字按日文字形渲染 —— 编辑器、保持模式、
+  PDF / HTML 导出、打印全链路生效
+
+**工作区与工程化**
+
+- **工作区全文搜索**（`Ctrl/Cmd+Shift+F`）—— 跨文件搜索、按文件分组、边搜边出
+- **多根工作区** —— 同时挂多个文件夹
+- **源码模式行号与折叠**、大文档加载骨架屏
+- 自动保存、标签固定、系统打印、HTML 导出、统一设置面板等一批 UX 打磨
+- 大文档性能专项（渲染节流、启动提速、输入零卡顿），并补齐 ESLint、vitest 单元测试、
+  Playwright E2E 的完整工程化体系
 
 ## 功能
 
@@ -137,14 +180,11 @@ EasyMarkdown 两个都给你：一个**单窗口**装下整个文件夹的文件
 
 > 签名与公证在计划中 —— 见 [CHANGELOG](./CHANGELOG.md)。
 
-## 社群 & 支持
+## 反馈 & 支持
 
-用得顺手的话，欢迎来玩 🐎 一起交流 Markdown 写作、提需求、报 bug。
-
-| 加我微信 · 拉你进群 | 微信群（直接扫码） | 请我喝杯咖啡 ☕ |
-| :---: | :---: | :---: |
-| <img src="./docs/community/wechat-personal.jpg" width="220" alt="作者微信"> | <img src="./docs/community/wechat-group.jpg" width="220" alt="EasyMarkdown 交流群"> | <img src="./docs/community/coffee.jpg" width="220" alt="请作者喝咖啡"> |
-| 加好友备注「EasyMarkdown」，拉你进群，也欢迎直接交流 | 扫码进群（群码会定期更新，**过期就加左边的微信**） | 觉得好用，请作者喝杯咖啡，是持续更新的最大动力 |
+- 🐛 **报 bug / 提需求**：[GitHub Issues](https://github.com/cycyeasy1-svg/EasyMarkdown/issues)（需要附带的信息见 [SUPPORT.md](./SUPPORT.md)）
+- 🔒 **安全问题**：请勿公开提 Issue，按 [SECURITY.md](./SECURITY.md) 私下报告
+- ⭐ 觉得好用的话，点个 Star 就是对项目最大的支持
 
 ## 开发
 
@@ -180,6 +220,11 @@ Electron + Vite + React 外壳，编辑器引擎用 **Milkdown Crepe**（基于 
 欢迎提 Issue 和 PR —— 见 [CONTRIBUTING.md](./CONTRIBUTING.md)。发现安全问题？
 请通过 [SECURITY.md](./SECURITY.md) 私下报告。
 
-## 许可证
+## 许可证与致谢
 
-[MIT](./LICENSE) © Easy Chen。原始开源项目归属信息见 [NOTICE.md](./NOTICE.md)。
+[MIT](./LICENSE) © Easy Chen。
+
+EasyMarkdown 源自开源项目 [BND-1/horseMD](https://github.com/BND-1/horseMD)
+（© 杨庭毅 / Evan Yang，MIT 协议），感谢原作者的出色工作。依 MIT 协议要求，
+原始版权与许可声明完整保留在 [LICENSE](./LICENSE) 与 [NOTICE.md](./NOTICE.md)，
+应用内「关于」处也保留了原作者署名。

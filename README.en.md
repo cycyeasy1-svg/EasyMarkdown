@@ -6,21 +6,82 @@
 
 **English** · [简体中文](./README.md)
 
-A calm, modern **Markdown editor** — a Typora alternative built around the one
-thing Typora gets wrong: **every file opens as a tab in the same window**, not a
-new app instance. Browse a whole folder in the sidebar, flip between files in
-tabs, and write in a clean WYSIWYG editor.
+A calm, modern **Markdown editor**: a file tree holds your whole folder, every
+document is a tab in the same window, and you write in either a clean WYSIWYG
+canvas or EasyMarkdown's signature **keep mode** — rendering is just a view, and
+saving produces a **zero-diff** result that never reflows your original text.
+
+> 📜 **About this project**: EasyMarkdown is a **derivative work** based on the
+> open-source project [horseMD](https://github.com/BND-1/horseMD) (by Evan Yang
+> / 杨庭毅, MIT licensed). On top of its single-window / multi-tab / WYSIWYG
+> foundation, this project adds **keep mode (zero-diff editing)**, a **VS Code
+> extension**, **Japanese typography support**, **workspace-wide full-text
+> search**, and more — see
+> "[What's new compared to the original](#-whats-new-compared-to-the-original-project)"
+> below. The original copyright and attribution are preserved in
+> [LICENSE](./LICENSE) and [NOTICE.md](./NOTICE.md), as the MIT License requires.
 
 ![EasyMarkdown — folder workspace, tabs, and live WYSIWYG rendering](./docs/screenshots/hero_light.png)
 
 ## Why EasyMarkdown
 
-Most Markdown editors make you choose between a beautiful WYSIWYG canvas and a
-real multi-file workflow. EasyMarkdown gives you both: a **single window** that holds
-your whole folder in a file tree, every open document in a **tab**, and an
-in-place live-preview editor powered by [Milkdown](https://milkdown.dev/)
-(ProseMirror). It runs on **Windows and macOS** from one codebase, and the whole
-interface speaks both **English and 中文**.
+Most Markdown editors make you choose twice: a beautiful WYSIWYG canvas *or* a
+real multi-file workflow; a smooth editing experience *or* a file that keeps its
+original formatting. EasyMarkdown refuses both trade-offs: a **single window**
+holds your whole folder in a file tree with every document in a **tab**; the
+rich-text mode is an in-place live-preview editor powered by
+[Milkdown](https://milkdown.dev/) (ProseMirror), while **keep mode** treats your
+original text as the source of truth and saves with zero diff. It runs on
+**Windows and macOS** from one codebase, and the interface speaks **English,
+中文, and 日本語**.
+
+## ✨ What's new compared to the original project
+
+The following was developed independently in EasyMarkdown on top of horseMD —
+it's what sets the two projects apart:
+
+**Keep mode — a source-faithful, zero-diff editor (the default for `.md`)**
+
+- WYSIWYG engines (Typora, Milkdown, …) **rewrite your whole file** on save:
+  list indentation, blank lines, escapes, and table alignment can all get
+  reflowed. Keep mode inverts that: rendering is just a view — **your original
+  text is the source of truth, and saving is zero-diff**. Ideal for documents
+  under Git or shared with collaborators
+- Block-level **in-place editing** — click a block to edit its content, or
+  "open source here" to edit just that block's Markdown
+- **Heavily enhanced tables** — column filters (value search / select all /
+  per-table badges / one-click clear for a table or the whole document),
+  row & column insert/delete, copy by cell / row / column / table, floating
+  header for wide tables
+- **Heading folding**, GFM task lists, YAML frontmatter rendered as a
+  structured card
+- One-click **keep ⇄ Milkdown** toggle in the status bar, remembered per
+  document; Mermaid diagrams share a render cache across both modes
+
+**VS Code extension** ([`packages/vscode-extension`](./packages/vscode-extension))
+
+- Brings keep mode into VS Code as a Markdown editor: image paste, links,
+  scroll sync with the source, find & replace, table column filters, heading
+  folding, and an outline
+
+**Japanese typography**
+
+- UI and native menus in **English / 中文 / 日本語** (the original is bilingual)
+- Documents containing kana automatically switch to a **Japanese font stack**,
+  so kanji render with Japanese glyph forms — in the editor, keep mode,
+  PDF / HTML export, and print
+
+**Workspace & engineering**
+
+- **Workspace full-text search** (`Ctrl/Cmd+Shift+F`) — across files, grouped
+  per file, streaming in as found
+- **Multi-root workspaces** — mount several folders at once
+- **Source-mode line numbers & folding**, loading skeleton for large documents
+- A batch of UX work: autosave, tab pinning, system print, HTML export, a
+  unified settings panel
+- Large-document performance work (render throttling, faster startup, lag-free
+  typing) plus a full engineering baseline: ESLint, vitest unit tests, and
+  Playwright E2E
 
 ## Features
 
@@ -29,7 +90,7 @@ interface speaks both **English and 中文**.
 - Seamless **WYSIWYG live preview** — type Markdown, see it render in place
 - Slash menu (`/`) for inserting blocks; smart lists, selection toolbar, link tooltips
 - Tables (**with in-cell line breaks**), fenced **code blocks with syntax highlighting**, **LaTeX math**, **Mermaid diagrams**, images, task lists, blockquotes
-- **Configurable image host** — paste / drop / upload an image and it runs your upload command (Typora-style), inserting the returned URL
+- **Pasted images persist locally** — paste / drop / upload an image and it's written into the document's `assets/` folder with a relative path (Typora-style); nothing dies on reload
 - **Source mode** toggle (`Ctrl/Cmd+/`) for raw Markdown — keeps scroll position
 - **Plain-text files (`.txt`) open in a fast plain editor** — no markdown reflow, instant on huge files
 - Rich-text copy with inline styles (paste into WeChat / email / Notion keeps formatting)
@@ -139,14 +200,11 @@ Grab the latest installer from the [**Releases page**](https://github.com/cycyea
 
 > Signing & notarization are planned — see the [CHANGELOG](./CHANGELOG.md).
 
-## Community & support
+## Feedback & support
 
-If EasyMarkdown works well for you, come say hi 🐎 — talk Markdown, request features, report bugs.
-
-| Add me on WeChat | WeChat group | Buy me a coffee ☕ |
-| :---: | :---: | :---: |
-| <img src="./docs/community/wechat-personal.jpg" width="220" alt="Author's WeChat"> | <img src="./docs/community/wechat-group.jpg" width="220" alt="EasyMarkdown WeChat group"> | <img src="./docs/community/coffee.jpg" width="220" alt="Buy the author a coffee"> |
-| Add me (note "EasyMarkdown") and I'll pull you into the group | Scan to join (group QR refreshes periodically — **if expired, add me on the left**) | If it's useful, treat the author to a coffee — the best fuel for updates |
+- 🐛 **Bugs / feature requests**: [GitHub Issues](https://github.com/cycyeasy1-svg/EasyMarkdown/issues) — see [SUPPORT.md](./SUPPORT.md) for what to include
+- 🔒 **Security issues**: please don't open a public issue — report privately via [SECURITY.md](./SECURITY.md)
+- ⭐ If EasyMarkdown works well for you, a star is the best support
 
 ## Develop
 
@@ -183,7 +241,13 @@ implementation, and the bugs/decisions log.
 Issues and PRs are welcome — see [CONTRIBUTING.md](./CONTRIBUTING.md). Found a
 security problem? Please report it privately via [SECURITY.md](./SECURITY.md).
 
-## License
+## License & acknowledgements
 
-[MIT](./LICENSE) © Easy Chen. Original open-source attribution is preserved in
-[NOTICE.md](./NOTICE.md).
+[MIT](./LICENSE) © Easy Chen.
+
+EasyMarkdown is derived from the open-source project
+[BND-1/horseMD](https://github.com/BND-1/horseMD) (© 杨庭毅 / Evan Yang, MIT
+licensed) — many thanks to the original author for the excellent groundwork. As
+the MIT License requires, the original copyright and license notice are fully
+preserved in [LICENSE](./LICENSE) and [NOTICE.md](./NOTICE.md), and the in-app
+About area retains the original author's credit.
