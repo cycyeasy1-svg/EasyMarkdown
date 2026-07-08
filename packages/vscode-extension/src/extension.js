@@ -4,13 +4,40 @@ const { KeepEditorProvider, MODE_KEY } = require('./keepEditorProvider')
 const KEEP_VIEW_TYPE = 'easymarkdown.keep'
 const MD_RE = /\.(md|markdown)$/i
 
+function isMarkdownFileUri(uri) {
+  return uri instanceof vscode.Uri && uri.scheme === 'file' && MD_RE.test(uri.path)
+}
+
+function isDiffInput(input) {
+  return input instanceof vscode.TabInputTextDiff
+}
+
+function diffInputHasUri(input, uri) {
+  if (!isDiffInput(input) || !(uri instanceof vscode.Uri)) return false
+  const key = uri.toString()
+  return input.original.toString() === key || input.modified.toString() === key
+}
+
+function isUriInOpenDiff(uri) {
+  for (const group of vscode.window.tabGroups.all) {
+    for (const tab of group.tabs) {
+      if (diffInputHasUri(tab.input, uri)) return true
+    }
+  }
+  return false
+}
+
 // Resolve the Markdown file the user is acting on. From the editor-title menu the
 // command is invoked WITH the resource Uri; from the palette / keybinding it is
 // not, so fall back to the active tab (works for both the text editor and our
 // custom editor — TabInputText and TabInputCustom both carry `.uri`).
 function activeResourceUri(uriArg) {
-  if (uriArg instanceof vscode.Uri) return uriArg
   const input = vscode.window.tabGroups.activeTabGroup?.activeTab?.input
+  if (uriArg instanceof vscode.Uri) {
+    if (diffInputHasUri(input, uriArg)) return undefined
+    return uriArg
+  }
+  if (isDiffInput(input)) return undefined
   if (input && input.uri instanceof vscode.Uri) return input.uri
   return vscode.window.activeTextEditor?.document.uri
 }
@@ -28,6 +55,7 @@ function keepLensTitle() {
 // the text editor (the source), so it never shows inside the keep custom editor.
 const keepCodeLensProvider = {
   provideCodeLenses(document) {
+    if (!isMarkdownFileUri(document.uri) || isUriInOpenDiff(document.uri)) return []
     const top = new vscode.Range(0, 0, 0, 0)
     return [
       new vscode.CodeLens(top, {
@@ -39,10 +67,10 @@ const keepCodeLensProvider = {
   }
 }
 
-// Auto-follow the last EXPLICITLY chosen mode, in both directions. Keep is the
-// platform default editor (priority: "default"), so with preferred mode 'keep'
-// (or none) nothing needs converting; with preferred mode 'source', auto-opened
-// keep tabs are reopened as text. The 'text → keep' direction still matters for
+// Auto-follow the last EXPLICITLY chosen mode, in both directions. Keep is
+// contributed as an optional custom editor so VSCode's diff editor can keep
+// using source text; normal Markdown tabs are switched here when the preferred
+// mode is keep. The text-to-keep direction still matters for
 // tabs VSCode hands to the text editor (e.g. an Explorer click REPLACING an
 // existing tab's editor — that surfaces as a `changed` event, not `opened`,
 // which is why both are handled; missing `changed` was the old "clicking an
@@ -60,10 +88,14 @@ function watchTabsForKeep(context, suppressed) {
 
   const classify = (tab) => {
     const input = tab && tab.input
-    if (input instanceof vscode.TabInputText && input.uri && MD_RE.test(input.uri.path)) {
+    if (input instanceof vscode.TabInputText && isMarkdownFileUri(input.uri)) {
       return { uri: input.uri, kind: 'text' }
     }
-    if (input instanceof vscode.TabInputCustom && input.viewType === KEEP_VIEW_TYPE) {
+    if (
+      input instanceof vscode.TabInputCustom &&
+      input.viewType === KEEP_VIEW_TYPE &&
+      isMarkdownFileUri(input.uri)
+    ) {
       return { uri: input.uri, kind: 'keep' }
     }
     return null
@@ -80,8 +112,7 @@ function watchTabsForKeep(context, suppressed) {
     // Unknown prev (e.g. a session-restored tab whose first event is a dirty
     // change) is not a swap — just record it.
     if (!isOpen && (prev === undefined || prev === c.kind)) return
-    if (!rememberOn()) return
-    const pref = context.globalState.get(MODE_KEY) || 'keep'
+    const pref = rememberOn() ? context.globalState.get(MODE_KEY) || 'keep' : 'keep'
     const want = pref === 'source' ? 'text' : 'keep'
     if (c.kind === want) return
     const uriKey = c.uri.toString()
@@ -98,13 +129,25 @@ function watchTabsForKeep(context, suppressed) {
       .then(release, release)
   }
 
-  return vscode.window.tabGroups.onDidChangeTabs((e) => {
+  const syncOpenTabs = () => {
+    for (const group of vscode.window.tabGroups.all) {
+      for (const tab of group.tabs) handle(tab, true)
+    }
+  }
+
+  const changeSub = vscode.window.tabGroups.onDidChangeTabs((e) => {
     e.closed.forEach((tab) => {
       const c = classify(tab)
       if (c) lastKind.delete(keyOf(tab, c))
     })
     e.opened.forEach((t) => handle(t, true))
     e.changed.forEach((t) => handle(t, false))
+  })
+
+  const initTimer = setTimeout(syncOpenTabs, 0)
+  return new vscode.Disposable(() => {
+    clearTimeout(initTimer)
+    changeSub.dispose()
   })
 }
 
@@ -123,7 +166,7 @@ function activate(context) {
     watchTabsForKeep(context, suppressed),
     vscode.commands.registerCommand('easymarkdown.openWithKeep', async (uriArg) => {
       const uri = activeResourceUri(uriArg)
-      if (uri) {
+      if (isMarkdownFileUri(uri)) {
         await context.globalState.update(MODE_KEY, 'keep')
         holdSuppress(uri)
         await vscode.commands.executeCommand('vscode.openWith', uri, KEEP_VIEW_TYPE)
@@ -133,7 +176,7 @@ function activate(context) {
       const uri = activeResourceUri(uriArg)
       // 'default' reopens with VSCode's built-in text editor (source mode), and
       // source becomes the preferred mode for the next file.
-      if (uri) {
+      if (isMarkdownFileUri(uri)) {
         await context.globalState.update(MODE_KEY, 'source')
         holdSuppress(uri)
         await vscode.commands.executeCommand('vscode.openWith', uri, 'default')
@@ -146,7 +189,7 @@ function activate(context) {
       // deliberately does NOT change the preferred mode; the suppression window
       // stops the watcher from reverting the side panel when the preference is
       // source.
-      if (uri) {
+      if (isMarkdownFileUri(uri)) {
         holdSuppress(uri)
         await vscode.commands.executeCommand(
           'vscode.openWith',

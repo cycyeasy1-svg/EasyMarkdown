@@ -41,7 +41,7 @@
           { "filenamePattern": "*.md" },
           { "filenamePattern": "*.markdown" }
         ],
-        "priority": "default"
+        "priority": "option"
       }
     ],
     "configuration": {
@@ -89,12 +89,12 @@
       "editor/title": [
         {
           "command": "easymarkdown.openWithKeep",
-          "when": "resourceExtname =~ /\\.(md|markdown)$/ && activeCustomEditorId != easymarkdown.keep",
+          "when": "resourceExtname =~ /\\.(md|markdown)$/ && activeCustomEditorId != easymarkdown.keep && !inDiffEditor",
           "group": "navigation@9"
         },
         {
           "command": "easymarkdown.openKeepToSide",
-          "when": "editorLangId == markdown && activeCustomEditorId != easymarkdown.keep",
+          "when": "editorLangId == markdown && activeCustomEditorId != easymarkdown.keep && !inDiffEditor",
           "group": "navigation@10"
         },
         {
@@ -106,39 +106,39 @@
       "editor/context": [
         {
           "command": "easymarkdown.openWithKeep",
-          "when": "editorLangId == markdown",
+          "when": "editorLangId == markdown && !inDiffEditor",
           "group": "navigation@9"
         },
         {
           "command": "easymarkdown.openKeepToSide",
-          "when": "editorLangId == markdown",
+          "when": "editorLangId == markdown && !inDiffEditor",
           "group": "navigation@10"
         }
       ],
       "editor/title/context": [
         {
           "command": "easymarkdown.openWithKeep",
-          "when": "resourceExtname =~ /\\.(md|markdown)$/",
+          "when": "resourceExtname =~ /\\.(md|markdown)$/ && !inDiffEditor",
           "group": "navigation@9"
         },
         {
           "command": "easymarkdown.openKeepToSide",
-          "when": "resourceExtname =~ /\\.(md|markdown)$/",
+          "when": "resourceExtname =~ /\\.(md|markdown)$/ && !inDiffEditor",
           "group": "navigation@10"
         }
       ],
       "commandPalette": [
         {
           "command": "easymarkdown.openWithKeep",
-          "when": "resourceExtname =~ /\\.(md|markdown)$/"
+          "when": "resourceExtname =~ /\\.(md|markdown)$/ && !inDiffEditor"
         },
         {
           "command": "easymarkdown.openWithText",
-          "when": "resourceExtname =~ /\\.(md|markdown)$/"
+          "when": "resourceExtname =~ /\\.(md|markdown)$/ && !inDiffEditor"
         },
         {
           "command": "easymarkdown.openKeepToSide",
-          "when": "resourceExtname =~ /\\.(md|markdown)$/"
+          "when": "resourceExtname =~ /\\.(md|markdown)$/ && !inDiffEditor"
         }
       ]
     },
@@ -147,13 +147,13 @@
         "command": "easymarkdown.openWithKeep",
         "key": "ctrl+shift+m",
         "mac": "cmd+shift+m",
-        "when": "resourceExtname =~ /\\.(md|markdown)$/ && activeCustomEditorId != easymarkdown.keep"
+        "when": "resourceExtname =~ /\\.(md|markdown)$/ && activeCustomEditorId != easymarkdown.keep && !inDiffEditor"
       },
       {
         "command": "easymarkdown.openWithText",
         "key": "ctrl+shift+m",
         "mac": "cmd+shift+m",
-        "when": "activeCustomEditorId == easymarkdown.keep"
+        "when": "activeCustomEditorId == easymarkdown.keep && !inDiffEditor"
       }
     ]
   },
