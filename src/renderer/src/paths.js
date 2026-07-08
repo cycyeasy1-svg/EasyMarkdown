@@ -40,6 +40,25 @@ export const sanitizeWorkspaces = (input, legacy) => {
 export const baseName = (p) => (p ? p.split(/[\\/]/).pop() : 'Untitled')
 export const dirName = (p) => (p ? p.replace(/[\\/][^\\/]*$/, '') : '')
 export const joinPath = (dir, name) => `${dir.replace(/[\\/]+$/, '')}/${name}`
+const isWindowsPath = (p) => /^[a-zA-Z]:\//.test(p) || p.startsWith('//')
+
+export function pathInWorkspace(path, workspaces) {
+  if (!path) return false
+  const rawPath = normPath(path).replace(/\/+$/, '')
+  if (!rawPath) return false
+  for (const ws of workspaces || []) {
+    const rootPath = typeof ws === 'string' ? ws : ws?.rootPath
+    if (!rootPath) continue
+    const rawRoot = normPath(rootPath).replace(/\/+$/, '') || '/'
+    const caseInsensitive = isWindowsPath(rawPath) || isWindowsPath(rawRoot)
+    const file = caseInsensitive ? rawPath.toLowerCase() : rawPath
+    const root = caseInsensitive ? rawRoot.toLowerCase() : rawRoot
+    if (root === '/' ? file.startsWith('/') : file === root || file.startsWith(root + '/')) {
+      return true
+    }
+  }
+  return false
+}
 
 // Files that open in the rich Markdown editor. Anything else with a path (e.g.
 // .txt) is treated as plain text and opened in the fast textarea — feeding plain

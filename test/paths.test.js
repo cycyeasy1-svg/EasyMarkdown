@@ -10,6 +10,7 @@ import {
   baseName,
   dirName,
   joinPath,
+  pathInWorkspace,
   isMarkdownName,
   isPlainTextDoc,
   isValidName,
@@ -93,6 +94,26 @@ describe('baseName / dirName / joinPath', () => {
     expect(joinPath('/a/b', 'c.md')).toBe('/a/b/c.md')
     expect(joinPath('/a/b/', 'c.md')).toBe('/a/b/c.md')
     expect(joinPath('C:\\a\\', 'c.md')).toBe('C:\\a/c.md')
+  })
+})
+
+describe('pathInWorkspace', () => {
+  it('matches files under a POSIX workspace root with path boundaries', () => {
+    const workspaces = [{ rootPath: '/notes', rootName: 'notes' }]
+    expect(pathInWorkspace('/notes/today.md', workspaces)).toBe(true)
+    expect(pathInWorkspace('/notes/deep/today.md', workspaces)).toBe(true)
+    expect(pathInWorkspace('/notes-archive/today.md', workspaces)).toBe(false)
+  })
+
+  it('matches Windows workspace roots case-insensitively', () => {
+    const workspaces = [{ rootPath: 'C:\\Users\\me\\Notes', rootName: 'Notes' }]
+    expect(pathInWorkspace('c:/users/me/notes/today.md', workspaces)).toBe(true)
+    expect(pathInWorkspace('C:\\Users\\me\\NotesExtra\\today.md', workspaces)).toBe(false)
+  })
+
+  it('accepts the persisted string-root shape used in older session tests', () => {
+    expect(pathInWorkspace('/work/a.md', ['/work'])).toBe(true)
+    expect(pathInWorkspace('/other/a.md', ['/work'])).toBe(false)
   })
 })
 

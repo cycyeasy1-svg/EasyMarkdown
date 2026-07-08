@@ -42,7 +42,7 @@ import {
   isPlainTextDoc, isHeavyDoc, genId, LS, loadSession, buildSessionTabs,
   sessionSnapshotEqual, MD_DOC_RE,
   rememberRecent, removeRecentPath, clearUnpinnedRecents, toggleRecentPinned,
-  reorderTabsList, toggleTabPinnedInList
+  reorderTabsList, toggleTabPinnedInList, pathInWorkspace
 } from './paths.js'
 import {
   countSourceLines,
@@ -572,6 +572,8 @@ export default function App() {
   // handlers that must not capture a stale `tabs` closure.
   const tabsRef = useRef(tabs)
   tabsRef.current = tabs
+  const workspacesRef = useRef(workspaces)
+  workspacesRef.current = workspaces
 
   // Set as soon as the user explicitly opens a file (a non-silent openPaths —
   // e.g. a double-clicked file at launch arriving via `open-paths`). Session
@@ -911,13 +913,20 @@ export default function App() {
     }
   }, [])
 
-  const openPaths = useCallback(async (paths, silent = false) => {
+  const focusSidebarForOpenedPath = useCallback((path) => {
+    if (!path || !MD_DOC_RE.test(path)) return
+    setSidebarOpen(true)
+    setSidebarMode(pathInWorkspace(path, workspacesRef.current) ? 'files' : 'outline')
+  }, [])
+
+  const openPaths = useCallback(async (paths, silent = false, options = {}) => {
     if (!paths || !paths.length) return null
     // An explicit open (anything but the silent session restore) means the user
     // wants *this* file in front — record it synchronously so the restore effect
     // won't activate the previous session's tab on top of it.
     if (!silent) explicitOpenRef.current = true
     let lastId = null
+    let lastPath = null
     const seen = new Set()
     const remember = (fp) => {
       setRecents((prev) =>
@@ -936,6 +945,7 @@ export default function App() {
         // see the real document, not an empty buffer.
         if (existing.loading) await fillTab(existing.id)
         lastId = existing.id
+        lastPath = path
         remember(path)
         continue
       }
@@ -945,6 +955,7 @@ export default function App() {
         const concurrent = tabsRef.current.find((t) => (t.path || '').replace(/\\/g, '/') === norm)
         if (concurrent) {
           lastId = concurrent.id
+          lastPath = path
           remember(path)
           continue
         }
@@ -962,6 +973,7 @@ export default function App() {
         }
         tabsRef.current = [...tabsRef.current, newTab] // keep snapshot current for the next iteration
         setTabs((prev) => [...prev, newTab])
+        lastPath = path
         remember(path)
       } catch (e) {
         // File was moved/deleted (e.g. a stale "recent" entry). Drop it from the
@@ -981,9 +993,10 @@ export default function App() {
     if (lastId) {
       setActiveId(lastId)
       setHome(false)
+      if (!silent && options.followSidebar) focusSidebarForOpenedPath(lastPath)
     }
     return lastId
-  }, [fillTab])
+  }, [fillTab, focusSidebarForOpenedPath])
 
   const newTab = useCallback(() => {
     const id = genId()
@@ -1784,7 +1797,7 @@ export default function App() {
       if (isMobile) setSidebarOpen(false) // jump straight to Home, don't leave the drawer over it
     },
     new: newTab,
-    open: async () => openPaths(await window.api.openFiles()),
+    open: async () => openPaths(await window.api.openFiles(), false, { followSidebar: true }),
     openFolder,
     save: () => {
       const id = pickEditableId()
@@ -1896,7 +1909,7 @@ export default function App() {
 
   useEffect(() => {
     const offMenu = window.api.onMenu((cmd) => handlers.current[cmd]?.())
-    const offOpen = window.api.onOpenPaths((paths) => openPaths(paths))
+    const offOpen = window.api.onOpenPaths((paths) => openPaths(paths, false, { followSidebar: true }))
     // A folder path arriving from Explorer's "Open with EasyMarkdown" folder menu.
     const offFolder = window.api.onOpenFolderPath?.((dir) => {
       // never open a relative path as a workspace; add as a new root (kept alongside any existing ones)
@@ -1963,7 +1976,7 @@ export default function App() {
       // Each dropped folder is added as a new root, alongside any already open.
       dirs.forEach((d) => addWorkspace(window.api.pathForFile(d)))
       const paths = docFiles.map((f) => window.api.pathForFile(f)).filter(Boolean)
-      if (paths.length) openPaths(paths)
+      if (paths.length) openPaths(paths, false, { followSidebar: true })
     }
     window.addEventListener('dragover', onDragOver, true)
     window.addEventListener('drop', onDrop, true)
@@ -3375,7 +3388,7 @@ export default function App() {
               onNew={newTab}
               onOpen={() => handlers.current.open()}
               onOpenFolder={openFolder}
-              onOpenRecent={(p) => openPaths([p])}
+              onOpenRecent={(p) => openPaths([p], false, { followSidebar: true })}
               onRemoveRecent={(p) => setRecents((prev) => removeRecentPath(prev, p))}
               onClearRecents={() => setRecents((prev) => clearUnpinnedRecents(prev))}
               onTogglePinRecent={(p) => setRecents((prev) => toggleRecentPinned(prev, p))}
