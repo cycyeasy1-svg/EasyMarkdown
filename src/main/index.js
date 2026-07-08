@@ -248,6 +248,11 @@ function createWindow() {
     }
   })
 
+  // Enter the default maximized state while the window is still hidden. If we
+  // wait until ready-to-show, Windows can expose the 1280x820 restore bounds for
+  // a frame before the maximize transition completes.
+  mainWindow.maximize()
+
   // A cold boot can hold first paint back for many seconds (Defender scans the
   // unsigned exe + asar on the first run after a reboot, on a cold disk cache).
   // With show:false + ready-to-show only, that reads as "double-click did
@@ -256,7 +261,7 @@ function createWindow() {
   // so the user sees the app IS starting.
   const showFallbackTimer = setTimeout(() => {
     if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.isVisible()) {
-      mainWindow.maximize()
+      if (!mainWindow.isMaximized()) mainWindow.maximize()
       focusMainWindow()
     }
   }, 3000)
@@ -266,7 +271,7 @@ function createWindow() {
     // Open maximized by default so the user doesn't have to click the
     // maximize button on every launch. The 1280×820 size above is the
     // restore size once they un-maximize.
-    mainWindow.maximize()
+    if (!mainWindow.isMaximized()) mainWindow.maximize()
     focusMainWindow()
     const { files, folders } = extractArgs(process.argv)
     if (folders.length) sendOpen('open-folder', folders[0])
