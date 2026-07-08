@@ -164,9 +164,11 @@ docs/                  architecture / features / implementation-notes / developm
   (`docLangAttr` in `main/helpers.js` — a deliberate mirror of the kana regex,
   since main can't import renderer modules). The keep-mode floating table header
   is appended outside `.km-doc`, so `editor-tablescroll.js` copies the host's
-  `lang` onto it. When editing fonts, keep the four stacks in sync:
-  `--font-write-ja` in app.css + keep.css, `.doc:lang(ja)` in `PDF_CSS`, and the
-  two kana regexes.
+  `lang` onto it. The JA stack is quality-ordered **Noto Sans JP → BIZ UDPGothic
+  → Hiragino (macOS) → Yu Gothic Medium → Meiryo** (Noto is the modern-Japanese
+  screen default; on-Windows fallbacks lead with BIZ UD since Yu Gothic renders
+  thin). When editing fonts, keep the four stacks in sync: `--font-write-ja` in
+  app.css + keep.css, `.doc:lang(ja)` in `PDF_CSS`, and the two kana regexes.
 - **Table-cell line breaks** (`editor-tablebreak.js`): GFM cells are single-line,
   so a break must round-trip as `<br>`. A keymap inserts a hardbreak; a custom
   remark stringify `break` handler emits `<br>` **only inside `tableCell`** (else

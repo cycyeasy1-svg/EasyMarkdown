@@ -354,6 +354,8 @@ export function makeCapacitorApi() {
     // app close (no "close window" on mobile)
     confirmAppClose: () => {},
     cancelAppClose: () => {},
+    // launch-file handshake (desktop main queues open-paths until this; no-op here)
+    rendererReady: () => {},
 
     // events
     onOpenPaths,

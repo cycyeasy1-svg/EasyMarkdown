@@ -31,13 +31,21 @@ html {
     'Source Han Sans SC', 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
   /* Japanese writing font — applied per document via `lang="ja"` on the doc
      container (kana detected by detectDocLang in keep-parser.js). Same Latin
-     head as --font-write, then Japanese system fonts (Hiragino on macOS;
-     Yu Gothic Medium first on Windows — its Regular weight renders thin —
-     with Meiryo as the safe fallback), then the Chinese stack for any glyph
-     the Japanese fonts lack. Mirrored by keep.css (VSCode) and PDF_CSS (main). */
-  --font-write-ja: 'Helvetica Neue', Helvetica, Arial, 'Hiragino Kaku Gothic ProN',
-    'Hiragino Sans', 'Yu Gothic Medium', 'Yu Gothic', Meiryo, 'Noto Sans JP',
-    'PingFang SC', 'Microsoft YaHei', sans-serif;
+     head as --font-write, then Japanese fonts in QUALITY order:
+       • Noto Sans JP  — the de-facto modern-Japanese screen font (= Source Han
+         Sans); best on-screen look and the target we may bundle later.
+       • BIZ UDPGothic — Win10 1809+ built-in UD gothic; clearer & fuller than
+         Yu Gothic for long reading, and has a real Bold face (Noto's static
+         packaging often faux-bolds), so it's the preferred Windows fallback.
+       • Hiragino      — macOS gold standard (never on Windows, so it just wins
+         on Mac and is transparently skipped elsewhere).
+       • Yu Gothic Medium / Meiryo — last Windows fallbacks (Yu Gothic's default
+         weight renders thin; Medium mitigates that).
+     Then the Chinese stack for any glyph the Japanese fonts lack. Mirrored by
+     keep.css (VSCode) and PDF_CSS (main) — keep all three in sync. */
+  --font-write-ja: 'Helvetica Neue', Helvetica, Arial, 'Noto Sans JP', 'BIZ UDPGothic',
+    'Hiragino Kaku Gothic ProN', 'Hiragino Sans', 'Yu Gothic Medium', 'Yu Gothic',
+    Meiryo, 'PingFang SC', 'Microsoft YaHei', sans-serif;
   /* NB: no proportional faces here — code alignment depends on it. 'Noto Sans
      Mono CJK JP' (before the generic) keeps CJK inside code on a mono face
      when installed. */
@@ -4772,6 +4780,17 @@ body.hm-has-custom-theme .km-doc {
   border-radius: var(--radius-sm);
 }
 .hm-set-theme-actions button:hover { background: var(--hover); color: var(--text); }
+/* Generic action button on a settings row (e.g. System → set default opener). */
+.hm-set-btn {
+  flex: none;
+  padding: 5px 12px;
+  font-size: 12px;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  white-space: nowrap;
+}
+.hm-set-btn:hover { background: var(--hover); color: var(--text); }
 
 /* Tab strip: pin + drag-reorder affordances */
 .tab .tab-pin {

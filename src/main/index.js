@@ -4,13 +4,15 @@ import { dirname, join, basename, extname, resolve, sep } from 'node:path'
 import fs from 'node:fs/promises'
 import { existsSync, statSync, constants as fsConstants } from 'node:fs'
 import chokidar from 'chokidar'
+import { execFile, spawn } from 'node:child_process'
 import {
   MD_EXTS,
   MD_RE,
   isRestrictedRoot,
   imageNameParts,
   searchContentLines,
-  docLangAttr
+  docLangAttr,
+  winDefaultOpenerRegOps
 } from './helpers.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -46,11 +48,12 @@ const PDF_CSS = `
     word-wrap: break-word;
   }
   /* Japanese document (docLangAttr put lang="ja" on .doc): Japanese glyph forms.
-     Mirrors --font-write-ja in app.css — keep the two stacks in sync. */
+     Quality order — Noto Sans JP → BIZ UDPGothic → Hiragino → Yu Gothic Medium
+     → Meiryo. Mirrors --font-write-ja in app.css — keep the two stacks in sync. */
   .doc:lang(ja) {
-    font-family: 'Helvetica Neue', Helvetica, Arial, 'Hiragino Kaku Gothic ProN',
-      'Hiragino Sans', 'Yu Gothic Medium', 'Yu Gothic', Meiryo, 'Noto Sans JP',
-      'PingFang SC', 'Microsoft YaHei', sans-serif;
+    font-family: 'Helvetica Neue', Helvetica, Arial, 'Noto Sans JP', 'BIZ UDPGothic',
+      'Hiragino Kaku Gothic ProN', 'Hiragino Sans', 'Yu Gothic Medium', 'Yu Gothic',
+      Meiryo, 'PingFang SC', 'Microsoft YaHei', sans-serif;
   }
   .doc > :first-child { margin-top: 0 !important; }
   .doc h1, .doc h2, .doc h3, .doc h4, .doc h5, .doc h6 {
@@ -129,8 +132,8 @@ if (!gotLock) {
   app.on('second-instance', (_e, argv) => {
     const { files, folders } = extractArgs(argv)
     focusMainWindow()
-    if (folders.length) sendToRenderer('open-folder', folders[0])
-    if (files.length) sendToRenderer('open-paths', files)
+    if (folders.length) sendOpen('open-folder', folders[0])
+    if (files.length) sendOpen('open-paths', files)
   })
 }
 
@@ -180,6 +183,28 @@ function sendToRenderer(channel, payload) {
   }
 }
 
+// ---- Launch-file delivery: queue until the renderer is listening ----
+// webContents.send is fire-and-forget: an 'open-paths'/'open-folder' sent
+// before the renderer has mounted its IPC listeners is silently dropped. That
+// race is widest exactly when it hurts — a cold boot (Defender scanning the
+// unsigned exe, cold disk cache) where ready-to-show / a second double-click
+// fires while React is still loading, or before the window even exists. So
+// launch-file sends go through this queue and flush when the renderer says
+// 'app:renderer-ready' (App.jsx mount, after it registers the listeners).
+let rendererReady = false
+const pendingOpens = []
+function sendOpen(channel, payload) {
+  if (rendererReady && mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send(channel, payload)
+  } else {
+    pendingOpens.push([channel, payload])
+  }
+}
+ipcMain.on('app:renderer-ready', () => {
+  rendererReady = true
+  for (const [channel, payload] of pendingOpens.splice(0)) sendToRenderer(channel, payload)
+})
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1280,
@@ -223,15 +248,35 @@ function createWindow() {
     }
   })
 
+  // A cold boot can hold first paint back for many seconds (Defender scans the
+  // unsigned exe + asar on the first run after a reboot, on a cold disk cache).
+  // With show:false + ready-to-show only, that reads as "double-click did
+  // nothing" and invites a second click. Show the window (splash-matched
+  // backgroundColor) after a few seconds even if the renderer hasn't painted,
+  // so the user sees the app IS starting.
+  const showFallbackTimer = setTimeout(() => {
+    if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.isVisible()) {
+      mainWindow.maximize()
+      focusMainWindow()
+    }
+  }, 3000)
+
   mainWindow.once('ready-to-show', () => {
+    clearTimeout(showFallbackTimer)
     // Open maximized by default so the user doesn't have to click the
     // maximize button on every launch. The 1280×820 size above is the
     // restore size once they un-maximize.
     mainWindow.maximize()
     focusMainWindow()
     const { files, folders } = extractArgs(process.argv)
-    if (folders.length) sendToRenderer('open-folder', folders[0])
-    if (files.length) sendToRenderer('open-paths', files)
+    if (folders.length) sendOpen('open-folder', folders[0])
+    if (files.length) sendOpen('open-paths', files)
+  })
+
+  // A reload (e.g. Ctrl+R in dev) tears the renderer's listeners down — treat
+  // it as not-ready again so launch-file sends queue instead of vanishing.
+  mainWindow.webContents.on('did-start-loading', () => {
+    rendererReady = false
   })
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
@@ -305,12 +350,8 @@ function createWindow() {
 // macOS: opening a file from Finder
 app.on('open-file', (event, path) => {
   event.preventDefault()
-  if (mainWindow) {
-    focusMainWindow()
-    sendToRenderer('open-paths', [path])
-  } else {
-    app.whenReady().then(() => sendToRenderer('open-paths', [path]))
-  }
+  focusMainWindow()
+  sendOpen('open-paths', [path])
 })
 
 app.whenReady().then(() => {
@@ -1233,6 +1274,41 @@ ipcMain.handle('app:setLang', (_e, lang) => {
   if (next === menuLang) return
   menuLang = next
   buildMenu()
+})
+
+// "Set as default Markdown app" (Settings → System). Windows 10+ blocks
+// programmatic UserChoice writes (hash-protected), so the legitimate flow is:
+// (1) make sure this exe is registered as a per-user handler — the NSIS
+// installer already registers per-machine, this also covers zip/portable
+// builds; (2) open the system "how do you want to open .md files?" picker on a
+// scratch file so the user confirms once with "always". Skipped when not
+// packaged (process.execPath is the bare electron.exe in dev — registering it
+// would associate .md with a broken command). macOS has no supported API at
+// all → return { manual: true } and the renderer shows Finder instructions.
+ipcMain.handle('app:setDefaultOpener', async () => {
+  if (process.platform !== 'win32') return { ok: false, manual: true }
+  try {
+    if (app.isPackaged) {
+      for (const args of winDefaultOpenerRegOps(process.execPath, ['md', 'markdown', 'mdx'])) {
+        await new Promise((resolve, reject) =>
+          execFile('reg.exe', args, (err) => (err ? reject(err) : resolve()))
+        )
+      }
+    }
+    const scratch = join(app.getPath('userData'), 'set-default-opener.md')
+    await fs.writeFile(scratch, '# EasyMarkdown\n')
+    // OpenAs_RunDLL treats the REST OF THE COMMAND LINE as the file name and
+    // does not strip quotes — verbatim args stop Node from quoting a path that
+    // contains spaces (e.g. a user name with a space).
+    spawn('rundll32.exe', ['shell32.dll,OpenAs_RunDLL', scratch], {
+      detached: true,
+      stdio: 'ignore',
+      windowsVerbatimArguments: true
+    }).unref()
+    return { ok: true }
+  } catch (e) {
+    return { ok: false, error: String(e?.message || e) }
+  }
 })
 
 // Toggle Chromium's built-in spellchecker (opt-in preference; default off).

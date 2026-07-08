@@ -10,8 +10,30 @@ import {
   isRestrictedRoot,
   imageNameParts,
   searchContentLines,
-  docLangAttr
+  docLangAttr,
+  WIN_MD_PROGID,
+  winDefaultOpenerRegOps
 } from '../src/main/helpers.js'
+
+describe('winDefaultOpenerRegOps', () => {
+  const exe = 'C:\\Program Files\\EasyMarkdown\\EasyMarkdown.exe'
+  it('registers a per-user (HKCU) ProgId with a quoted open command', () => {
+    const ops = winDefaultOpenerRegOps(exe, ['md'])
+    expect(ops.every(([verb, key]) => verb === 'add' && key.startsWith('HKCU\\Software\\Classes\\'))).toBe(true)
+    expect(ops.every((args) => args.includes('/f'))).toBe(true)
+    const command = ops.find(([, key]) => key.endsWith('\\shell\\open\\command'))
+    expect(command).toContain(`"${exe}" "%1"`)
+  })
+  it('adds OpenWithProgids + class default per extension', () => {
+    const ops = winDefaultOpenerRegOps(exe, ['md', 'markdown'])
+    for (const ext of ['md', 'markdown']) {
+      const openWith = ops.find(([, key]) => key === `HKCU\\Software\\Classes\\.${ext}\\OpenWithProgids`)
+      expect(openWith).toContain(WIN_MD_PROGID)
+      const def = ops.find(([, key, flag]) => key === `HKCU\\Software\\Classes\\.${ext}` && flag === '/ve')
+      expect(def).toContain(WIN_MD_PROGID)
+    }
+  })
+})
 
 describe('docLangAttr', () => {
   it('returns a lang="ja" attribute when the exported HTML contains kana', () => {

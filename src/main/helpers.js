@@ -97,6 +97,32 @@ export function searchContentLines(content, query, options = {}, cap = 50) {
 const KANA_RE = /[ぁ-ゖァ-ヺｦ-ﾝ]/
 export const docLangAttr = (html) => (KANA_RE.test(String(html ?? '')) ? ' lang="ja"' : '')
 
+// reg.exe argument lists that register `exePath` as a per-user (HKCU, no admin)
+// handler for the given Markdown extensions, so "set as default opener" works
+// for zip/portable builds too (the NSIS installer already registers a
+// per-machine class). Windows 10+ refuses programmatic UserChoice writes, so
+// this only *registers* the app — index.js then opens the system "open with"
+// picker for the user's one confirming click. Pure (arg building only) so it
+// can be unit-tested; index.js executes the lists via reg.exe.
+export const WIN_MD_PROGID = 'EasyMarkdown.Markdown'
+export function winDefaultOpenerRegOps(exePath, exts) {
+  const classes = 'HKCU\\Software\\Classes'
+  const progKey = `${classes}\\${WIN_MD_PROGID}`
+  const ops = [
+    ['add', progKey, '/ve', '/t', 'REG_SZ', '/d', 'Markdown Document', '/f'],
+    ['add', `${progKey}\\DefaultIcon`, '/ve', '/t', 'REG_SZ', '/d', `${exePath},0`, '/f'],
+    ['add', `${progKey}\\shell\\open\\command`, '/ve', '/t', 'REG_SZ', '/d', `"${exePath}" "%1"`, '/f']
+  ]
+  for (const ext of exts) {
+    // Make the app appear in the picker's list for this extension, and set the
+    // per-user class default — the latter only takes effect when the user has
+    // never picked a handler (no UserChoice); the picker covers the rest.
+    ops.push(['add', `${classes}\\.${ext}\\OpenWithProgids`, '/v', WIN_MD_PROGID, '/t', 'REG_NONE', '/f'])
+    ops.push(['add', `${classes}\\.${ext}`, '/ve', '/t', 'REG_SZ', '/d', WIN_MD_PROGID, '/f'])
+  }
+  return ops
+}
+
 // Split a desired image filename into a filesystem-safe { stem, ext }, stripping
 // path/reserved chars. The fs collision check (appending -1, -2…) lives in
 // uniqueImageFile in index.js — this is just the pure naming part.

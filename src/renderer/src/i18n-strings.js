@@ -232,6 +232,16 @@ export const STRINGS = {
     'settings.autosaveDesc': 'Write saved files to disk automatically about 2 s after you stop typing.',
     'settings.spellcheck': 'Spellcheck',
     'settings.spellcheckDesc': 'Underline misspelled words; right-click for suggestions.',
+    'settings.sectionSystem': 'System',
+    'settings.defaultOpener': 'Default app for Markdown files',
+    'settings.defaultOpenerDescWin':
+      'Opens the Windows "how do you want to open .md files?" picker — choose EasyMarkdown and pick "Always".',
+    'settings.defaultOpenerDescMac':
+      'In Finder, right-click any .md file → Get Info → "Open with" → choose EasyMarkdown → click "Change All…".',
+    'settings.defaultOpenerButton': 'Set as default…',
+    'settings.defaultOpenerHint': 'In the system dialog, choose EasyMarkdown and confirm "Always".',
+    'settings.defaultOpenerFail':
+      'Could not open the system dialog — set it manually in Windows Settings → Default apps.',
     'cmd.settings': 'Open Settings',
 
     // workspace full-text search
@@ -555,6 +565,15 @@ export const STRINGS = {
     'settings.autosaveDesc': '已保存过的文件在停止输入约 2 秒后自动写盘。',
     'settings.spellcheck': '拼写检查',
     'settings.spellcheckDesc': '为拼写错误的单词加下划线，右键查看建议。',
+    'settings.sectionSystem': '系统',
+    'settings.defaultOpener': 'Markdown 默认打开方式',
+    'settings.defaultOpenerDescWin':
+      '调出系统"打开方式"选择框，选中 EasyMarkdown 并选择"始终"即可设为默认。',
+    'settings.defaultOpenerDescMac':
+      '在访达中右键任意 .md 文件 → 显示简介 → "打开方式"选择 EasyMarkdown → 点击"全部更改…"。',
+    'settings.defaultOpenerButton': '设为默认…',
+    'settings.defaultOpenerHint': '请在系统弹窗中选择 EasyMarkdown，并确认"始终使用此应用"。',
+    'settings.defaultOpenerFail': '无法调出系统对话框，请到 Windows 设置 → 默认应用中手动设置。',
     'cmd.settings': '打开设置',
 
     // workspace full-text search
@@ -881,6 +900,16 @@ export const STRINGS = {
     'settings.autosaveDesc': '保存済みファイルは入力停止から約 2 秒後に自動で書き込みます。',
     'settings.spellcheck': 'スペルチェック',
     'settings.spellcheckDesc': 'スペルミスの単語に下線を表示し、右クリックで候補を表示します。',
+    'settings.sectionSystem': 'システム',
+    'settings.defaultOpener': 'Markdown の既定のアプリ',
+    'settings.defaultOpenerDescWin':
+      'Windows の「開き方を選択」ダイアログを表示します。EasyMarkdown を選び「常に」を選択してください。',
+    'settings.defaultOpenerDescMac':
+      'Finder で .md ファイルを右クリック → 情報を見る → 「このアプリケーションで開く」で EasyMarkdown を選び「すべてを変更…」をクリックします。',
+    'settings.defaultOpenerButton': '既定に設定…',
+    'settings.defaultOpenerHint': 'システムのダイアログで EasyMarkdown を選び、「常に」を確認してください。',
+    'settings.defaultOpenerFail':
+      'システムダイアログを開けませんでした。Windows の設定 → 既定のアプリから設定してください。',
     'cmd.settings': '設定を開く',
 
     // workspace full-text search

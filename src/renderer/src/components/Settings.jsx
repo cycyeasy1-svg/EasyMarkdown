@@ -3,6 +3,7 @@ import { Icon } from './icons.jsx'
 import { useI18n, LANGS } from '../i18n.jsx'
 import { THEMES } from '../themes.js'
 import { TypographyGroups } from './TypographyControls.jsx'
+import { fireToast } from '../ui.js'
 
 // One labeled row with a toggle switch on the right.
 function SwitchRow({ label, desc, checked, onChange }) {
@@ -45,6 +46,16 @@ export default function Settings({
 }) {
   const { lang, t, setLang } = useI18n()
   const caps = window.api.capabilities || {}
+  const isMac = window.api.platform === 'darwin'
+
+  // "Set as default Markdown app" — Windows pops the system "open with" picker
+  // (main registers the exe first); macOS has no API, so the row's description
+  // carries the Finder steps and there is no button.
+  const onSetDefaultOpener = async () => {
+    const res = await window.api.setDefaultOpener?.()
+    if (res?.ok) fireToast(t('settings.defaultOpenerHint'), { duration: 7000 })
+    else if (!res?.manual) fireToast(t('settings.defaultOpenerFail'), { kind: 'error', duration: 7000 })
+  }
 
   // Esc closes; re-scan the themes folder on open so new CSS files show up.
   useEffect(() => {
@@ -154,6 +165,26 @@ export default function Settings({
               </button>
             </div>
           </div>
+
+          {/* ── System (default Markdown opener) ── */}
+          {caps.defaultOpener && (
+            <div className="hm-set-section">
+              <div className="hm-set-section-title">{t('settings.sectionSystem')}</div>
+              <div className="hm-set-row">
+                <div className="hm-set-text">
+                  <div className="hm-set-label">{t('settings.defaultOpener')}</div>
+                  <div className="hm-set-desc">
+                    {t(isMac ? 'settings.defaultOpenerDescMac' : 'settings.defaultOpenerDescWin')}
+                  </div>
+                </div>
+                {!isMac && (
+                  <button className="hm-set-btn" onClick={onSetDefaultOpener}>
+                    {t('settings.defaultOpenerButton')}
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
 
           {/* ── Language ── */}
           <div className="hm-set-section">

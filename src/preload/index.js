@@ -112,10 +112,19 @@ const api = {
   // toggle the built-in spellchecker (settings preference)
   setSpellcheck: (enabled) => ipcRenderer.invoke('spell:set', enabled),
 
+  // "set as default Markdown app": Windows registers + opens the system picker
+  // and resolves { ok }; macOS resolves { manual: true } (no supported API) and
+  // the renderer shows Finder instructions instead.
+  setDefaultOpener: () => ipcRenderer.invoke('app:setDefaultOpener'),
+
   // app close: main asks before closing so the renderer can warn about unsaved
   // changes, then calls confirmAppClose() to proceed or cancelAppClose() to abort.
   confirmAppClose: () => ipcRenderer.send('app:confirm-close'),
   cancelAppClose: () => ipcRenderer.send('app:cancel-close'),
+
+  // Tell main the IPC listeners below are registered — main queues launch-time
+  // 'open-paths'/'open-folder' sends until this arrives (see sendOpen in main).
+  rendererReady: () => ipcRenderer.send('app:renderer-ready'),
 
   // events from main
   onOpenPaths: on('open-paths'),
@@ -145,7 +154,8 @@ const api = {
     nativeMenus: true,
     externalShell: true,
     revealInFolder: true,
-    splitView: true
+    splitView: true,
+    defaultOpener: true
   }
 }
 

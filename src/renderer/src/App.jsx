@@ -1916,6 +1916,9 @@ export default function App() {
         window.api.cancelAppClose?.()
       }
     })
+    // Listeners are registered — let main flush any launch files it queued (on
+    // a cold start this point can be reached long after ready-to-show fired).
+    window.api.rendererReady?.()
     return () => {
       offMenu()
       offOpen()

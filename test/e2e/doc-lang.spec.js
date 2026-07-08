@@ -12,10 +12,11 @@ test('a Japanese document marks its keep-mode container lang="ja"', async () => 
     await page.locator('.tab', { hasText: 'japanese.md' }).click()
     const doc = page.locator('.km-doc[lang="ja"]')
     await expect(doc).toBeVisible()
-    // :lang(ja) actually resolves to the Japanese stack (Yu Gothic / Hiragino
-    // ahead of the Chinese fonts), not the default --font-write.
+    // :lang(ja) actually resolves to the Japanese stack (Noto Sans JP leads it),
+    // not the default --font-write (whose CJK fonts are all Chinese — SC/PingFang,
+    // never a JP face), so "Noto Sans JP" is a clean discriminator.
     const family = await doc.evaluate((el) => getComputedStyle(el).fontFamily)
-    expect(family).toMatch(/Yu Gothic|Hiragino/)
+    expect(family).toMatch(/Noto Sans JP/)
   } finally {
     await cleanup()
   }
