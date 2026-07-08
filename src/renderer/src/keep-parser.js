@@ -121,6 +121,60 @@ export function inline(text, baseDir) {
   return parts.join('<br>')
 }
 
+const TABLE_COL_MIN_EM = 6
+const TABLE_COL_HEADER_MAX_EM = 22
+const TABLE_COL_MAX_EM = 44
+const WIDE_CHAR_RE =
+  /[\u1100-\u115f\u2329\u232a\u2e80-\u303f\u3040-\u30ff\u3100-\u312f\u3130-\u318f\u31a0-\u31ff\u3400-\u9fff\uf900-\ufaff\uff01-\uff60\uffe0-\uffe6]/
+
+function clamp(n, min, max) {
+  return Math.max(min, Math.min(max, n))
+}
+
+function stripWidthMarkup(text) {
+  return String(text)
+    .replace(/!\[([^\]]*)\]\([^)]+\)/g, '$1')
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+    .replace(/`([^`]+)`/g, '$1')
+    .replace(/&(?:#x?[0-9a-f]+|[a-z][a-z0-9]*);/gi, 'x')
+    .replace(/[*_~]/g, '')
+    .trim()
+}
+
+function measureTextEm(text) {
+  let units = 0
+  for (const ch of Array.from(stripWidthMarkup(text))) {
+    if (/\s/.test(ch)) units += 0.35
+    else if (WIDE_CHAR_RE.test(ch)) units += 1
+    else units += 0.58
+  }
+  return units
+}
+
+export function estimateTableColumnWidths(headers, dataRows = []) {
+  const widths = headers.map((h) =>
+    clamp(Math.ceil(measureTextEm(h) + 4), TABLE_COL_MIN_EM, TABLE_COL_HEADER_MAX_EM)
+  )
+
+  dataRows.forEach((row) => {
+    for (let ci = 0; ci < headers.length; ci++) {
+      const raw = ci < row.cells.length ? row.cells[ci] : ''
+      if (!raw) continue
+      const segments = String(raw).split(/<br\s*\/?>/i)
+      const brCount = Math.max(0, segments.length - 1)
+      const maxSegment = segments.reduce((max, segment) => Math.max(max, measureTextEm(segment)), 0)
+      const total = measureTextEm(segments.join(' '))
+      const contentWidth = Math.max(
+        maxSegment,
+        total * (brCount ? 0.42 : 0.72) + Math.min(brCount, 6) * 1.2
+      )
+      widths[ci] = Math.max(widths[ci], clamp(Math.ceil(contentWidth + 2), TABLE_COL_MIN_EM, TABLE_COL_MAX_EM))
+    }
+  })
+
+  return widths.map((width) => clamp(width, TABLE_COL_MIN_EM, TABLE_COL_MAX_EM))
+}
+
 // Split a table row on unescaped pipes, trimming the outer empties.
 export function splitRow(line) {
   const t = String(line).trim()
@@ -566,7 +620,18 @@ function renderList(b, viewLines, baseDir, opts = {}) {
 
 function renderTable(b, tableIdx, filterState, forExport, baseDir) {
   const headers = b.headers
-  let html = '<div class="km-table-wrap"><table class="km-table" data-ti="' + tableIdx + '"><thead><tr>'
+  const colWidths = estimateTableColumnWidths(headers, b.dataRows)
+  const tableWidth = Math.ceil(colWidths.reduce((sum, width) => sum + width, 0))
+  let html =
+    '<div class="km-table-wrap"><table class="km-table" data-ti="' +
+    tableIdx +
+    '" style="--km-table-min-width:' +
+    tableWidth +
+    'em"><colgroup>'
+  colWidths.forEach((width) => {
+    html += '<col style="width:' + width + 'em">'
+  })
+  html += '</colgroup><thead><tr>'
   headers.forEach((h, ci) => {
     const active =
       !forExport && filterState[tableIdx] && filterState[tableIdx][ci] && filterState[tableIdx][ci].size > 0

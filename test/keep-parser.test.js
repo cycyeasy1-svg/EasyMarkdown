@@ -16,6 +16,7 @@ import {
   buildTableRow,
   extractHeadings,
   renderBlockInner,
+  estimateTableColumnWidths,
   detectDocLang
 } from '../src/renderer/src/keep-parser.js'
 
@@ -208,6 +209,37 @@ describe('table cell/column edits (raw-line, byte-preserving)', () => {
   it('buildTableRow matches the reference row pipe style and column count', () => {
     expect(buildTableRow(2, '| x | y |')).toBe('|  |  |')
     expect(buildTableRow(2, 'x | y')).toBe('  |  ')
+  })
+})
+
+describe('table column width hints', () => {
+  it('gives long multi-line cells more width than empty sibling columns', () => {
+    const widths = estimateTableColumnWidths(
+      ['State', 'Action', 'Placeholder'],
+      [
+        {
+          cells: [
+            '',
+            'Event: screen init<br>rootDto.screen.input.afterPortfolio.longNestedValue<br>next step',
+            ''
+          ]
+        }
+      ]
+    )
+    expect(widths[1]).toBeGreaterThan(widths[0])
+    expect(widths[1]).toBeGreaterThan(widths[2])
+  })
+
+  it('renders a colgroup and table min-width for keep-mode tables', () => {
+    const lines = [
+      '| State | Action | Placeholder |',
+      '|---|---|---|',
+      '|  | Event: screen init<br>rootDto.screen.input.afterPortfolio.longNestedValue |  |'
+    ]
+    const html = renderBlockInner(parseDoc(lines)[0], 0, lines, {})
+    expect(html).toContain('style="--km-table-min-width:')
+    expect(html).toContain('<colgroup><col style="width:')
+    expect(html).toContain('</colgroup><thead>')
   })
 })
 
