@@ -27,6 +27,8 @@
     "test:e2e": "electron-vite build && playwright test",
     "dist": "electron-vite build && node scripts/gen-readme.mjs && electron-builder",
     "dist:dir": "electron-vite build && node scripts/gen-readme.mjs && electron-builder --dir",
+    "pack:zip": "node scripts/pack.mjs",
+    "pack": "npm run dist:dir && node scripts/pack.mjs",
     "build:mobile": "vite build --config vite.mobile.config.mjs",
     "cap:sync": "npm run build:mobile && cap sync",
     "cap:ios": "npm run build:mobile && cap sync ios && cap open ios",
@@ -79,6 +81,10 @@
       {
         "from": "build/README.dist.md",
         "to": "README.md"
+      },
+      {
+        "from": "RELEASE_NOTES.md",
+        "to": "RELEASE_NOTES.md"
       }
     ],
     "icon": "build/icon.ico",

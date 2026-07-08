@@ -39,3 +39,6 @@ build/README.dist.md
 
 # device build (xcodebuild -derivedDataPath)
 ios/App/build-device/
+
+# release-pack local config (zip password — never commit)
+scripts/pack.config.local.json
