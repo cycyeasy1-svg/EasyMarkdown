@@ -118,13 +118,37 @@ function watchTabsForKeep(context, suppressed) {
     const uriKey = c.uri.toString()
     if (suppressed.has(uriKey)) return
     suppressed.add(uriKey)
+    const original = tab
+    // A single Explorer click opens the file as a PREVIEW (italic) tab. Each
+    // group has ONE preview slot, shared across editor kinds, so re-opening as a
+    // preview reuses that slot: keep swaps in for the source text IN PLACE — no
+    // second tab, no flash. (We must keep priority `option` so VSCode's diff
+    // editor isn't hijacked, which means the source text always opens first;
+    // this preview reuse is what hides that transition.)
+    const wasPreview = !!tab.isPreview
     const release = () => setTimeout(() => suppressed.delete(uriKey), 500)
     vscode.commands
-      .executeCommand(
-        'vscode.openWith',
-        c.uri,
-        want === 'keep' ? KEEP_VIEW_TYPE : 'default',
-        tab.group?.viewColumn
+      .executeCommand('vscode.openWith', c.uri, want === 'keep' ? KEEP_VIEW_TYPE : 'default', {
+        viewColumn: tab.group?.viewColumn,
+        preview: wasPreview
+      })
+      .then(
+        () => {
+          // Preview slot was reused — nothing to clean up (closing `original`
+          // here would close the freshly-swapped-in editor, same slot).
+          if (wasPreview) return
+          // A permanent (double-clicked / pinned) tab has no shared slot, so
+          // `openWith` ADDS a tab: text + keep coexist for one uri, and both
+          // collide on the single `lastKind` key (uri|viewColumn) — closing one
+          // then makes the watcher re-open it forever. Close the now-redundant
+          // original so exactly one tab of the wanted kind survives. If openWith
+          // replaced in place, `original` already reflects `want` and we skip.
+          const oc = classify(original)
+          if (oc && oc.kind !== want) {
+            return Promise.resolve(vscode.window.tabGroups.close(original)).catch(() => {})
+          }
+        },
+        () => {}
       )
       .then(release, release)
   }

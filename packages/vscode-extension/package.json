@@ -2,7 +2,7 @@
   "name": "easymarkdown",
   "displayName": "EasyMarkdown",
   "description": "Source-backed live preview + inline editing for Markdown (tables, column filters, heading fold, outline) with a zero-diff result. A VSCode edition of EasyMarkdown's keep mode.",
-  "version": "1.3.2",
+  "version": "1.3.4",
   "publisher": "easy-chen",
   "author": {
     "name": "Easy Chen"
