@@ -29,5 +29,10 @@ export function resolveToFileUrl(baseDir, src) {
   }
   const joined = segs.join('/')
   const url = isWin ? 'file:///' + joined : 'file://' + (joined.startsWith('/') ? joined : '/' + joined)
-  return encodeURI(url)
+  // encodeURI escapes a literal `%` to `%25`, so a src that already carries a valid
+  // escape — `assets/a%20b.png`, the spec-compliant way to write a space — came out
+  // as `%2520` and 404'd. Collapse those back. A lone `%` not followed by two hex
+  // digits (a file literally named `100%.png`) has no `%25XX` to match, so it stays
+  // escaped, which is what we want.
+  return encodeURI(url).replace(/%25([0-9A-Fa-f]{2})/g, '%$1')
 }

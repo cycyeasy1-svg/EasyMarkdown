@@ -219,6 +219,9 @@ export const STRINGS = {
     'settings.paraSpacingPreset.standard': 'Standard',
     'settings.paraSpacingPreset.relaxed': 'Relaxed',
     'settings.paraSpacingPreset.loose': 'Loose',
+    'settings.blankLineSpacing': 'Honor blank lines',
+    'settings.blankLineSpacingDesc':
+      'Keep mode only. Markdown collapses a run of blank lines into a single paragraph break; turn this on to render each extra blank line as extra space. Display only — the file is never modified.',
 
     // unified settings modal
     'settings.title': 'Settings',
@@ -552,6 +555,9 @@ export const STRINGS = {
     'settings.paraSpacingPreset.standard': '标准',
     'settings.paraSpacingPreset.relaxed': '宽松',
     'settings.paraSpacingPreset.loose': '松散',
+    'settings.blankLineSpacing': '保留连续空行',
+    'settings.blankLineSpacingDesc':
+      '仅保持模式。Markdown 会把连续空行折叠成一个段落分隔；开启后，多出来的每个空行都渲染为一行留白。只影响显示，不会改动文件内容。',
 
     // unified settings modal
     'settings.title': '设置',
@@ -887,6 +893,9 @@ export const STRINGS = {
     'settings.paraSpacingPreset.standard': '標準',
     'settings.paraSpacingPreset.relaxed': 'ゆったり',
     'settings.paraSpacingPreset.loose': '広め',
+    'settings.blankLineSpacing': '連続する空行を活かす',
+    'settings.blankLineSpacingDesc':
+      'キープモードのみ。Markdown は連続した空行を 1 つの段落区切りにまとめますが、これを有効にすると余分な空行がそのまま余白として描画されます。表示だけの設定で、ファイルは変更されません。',
 
     // unified settings modal
     'settings.title': '設定',

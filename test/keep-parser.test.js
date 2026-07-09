@@ -16,6 +16,7 @@ import {
   buildTableRow,
   extractHeadings,
   renderBlockInner,
+  renderDoc,
   estimateTableColumnWidths,
   detectDocLang
 } from '../src/renderer/src/keep-parser.js'
@@ -67,16 +68,22 @@ describe('inline', () => {
     expect(inline('`a` then 0 and `b`')).toBe('<code>a</code> then 0 and <code>b</code>')
   })
   it('keeps inline code contents literal — escaped, with no entity decode or bold', () => {
-    // escapeHtml runs on the whole segment before code spans are pulled out, so a
-    // code span's `&` is already `&amp;` and stays that way (never decoded back).
     expect(inline('`&nbsp; **x**`')).toBe('<code>&amp;nbsp; **x**</code>')
   })
-  it('renders links and neutralizes javascript: schemes', () => {
+  it('renders links and refuses javascript: schemes', () => {
     expect(inline('[ok](https://a.com)')).toBe(
       '<a href="https://a.com" target="_blank" rel="noopener">ok</a>'
     )
-    expect(inline('[x](javascript:void)')).toBe(
-      '<a href="" target="_blank" rel="noopener">x</a>'
+    // markdown-it's validateLink rejects the destination outright, so the whole
+    // construct stays inert source text — strictly safer than the old empty href.
+    expect(inline('[x](javascript:void)')).toBe('[x](javascript:void)')
+  })
+  it('keeps a link title and a URL containing parentheses', () => {
+    expect(inline('[a](http://x "t")')).toBe(
+      '<a href="http://x" title="t" target="_blank" rel="noopener">a</a>'
+    )
+    expect(inline('[a](http://x/(y))')).toBe(
+      '<a href="http://x/(y)" target="_blank" rel="noopener">a</a>'
     )
   })
   it('renders an image with an absolute URL src', () => {
@@ -90,8 +97,8 @@ describe('inline', () => {
   it('leaves a relative image path as-is when no baseDir is given', () => {
     expect(inline('![a](./p.png)')).toBe('<img src="./p.png" alt="a">')
   })
-  it('blanks a javascript: image src but allows data: URLs', () => {
-    expect(inline('![x](javascript:alert)')).toBe('<img src="" alt="x">')
+  it('refuses a javascript: image src but allows data: URLs', () => {
+    expect(inline('![x](javascript:alert)')).toBe('![x](javascript:alert)')
     expect(inline('![x](data:image/png;base64,AAAA)')).toBe('<img src="data:image/png;base64,AAAA" alt="x">')
   })
   it('does not leave a stray ! before an image (regression)', () => {
@@ -102,8 +109,58 @@ describe('inline', () => {
     expect(inline('a<br/>b')).toBe('a<br>b')
   })
   it('decodes well-formed entities but keeps a bare & literal', () => {
-    expect(inline('a&nbsp;b')).toBe('a&nbsp;b')
+    // markdown-it decodes the reference to the character itself (U+00A0), where the
+    // old regex renderer re-emitted the `&nbsp;` entity. Same rendered glyph.
+    expect(inline('a&nbsp;b')).toBe('a b')
     expect(inline('Tom & Jerry')).toBe('Tom &amp; Jerry')
+  })
+
+  // ── syntax the hand-rolled regex renderer used to drop on the floor ──
+  it('renders GFM strikethrough', () => {
+    expect(inline('~~gone~~')).toBe('<s>gone</s>')
+  })
+  it('renders underscore emphasis (CommonMark, not just the asterisk form)', () => {
+    expect(inline('_em_ and __strong__')).toBe('<em>em</em> and <strong>strong</strong>')
+  })
+  it('honors backslash escapes', () => {
+    expect(inline('\\*not em\\*')).toBe('*not em*')
+  })
+  it('autolinks a bare https:// URL but leaves README.md alone', () => {
+    expect(inline('see https://a.com now')).toBe(
+      'see <a href="https://a.com" target="_blank" rel="noopener">https://a.com</a> now'
+    )
+    // `.md` is a real ccTLD — fuzzyLink would turn every filename in prose into a link.
+    expect(inline('see README.md now')).toBe('see README.md now')
+  })
+  it('escapes raw inline HTML instead of injecting it', () => {
+    expect(inline('<u>u</u> <script>x</script>')).toBe(
+      '&lt;u&gt;u&lt;/u&gt; &lt;script&gt;x&lt;/script&gt;'
+    )
+  })
+  it('unescapes a GFM-escaped pipe inside a table cell', () => {
+    expect(inline('a \\| b')).toBe('a | b')
+  })
+
+  // ── ==highlight== (no spec anywhere; rules shared with the rich editor) ──
+  it('renders ==text== as a yellow mark, including inside CJK prose', () => {
+    expect(inline('这是==高亮==的')).toBe(
+      '这是<mark class="hm-highlight hm-hl-yellow">高亮</mark>的'
+    )
+  })
+  it('parses markup inside a highlight', () => {
+    expect(inline('==**a**==')).toBe(
+      '<mark class="hm-highlight hm-hl-yellow"><strong>a</strong></mark>'
+    )
+  })
+  it('renders the colored <mark class="hm-hl-…"> form the rich editor writes', () => {
+    expect(inline('<mark class="hm-hl-red">红</mark>')).toBe(
+      '<mark class="hm-highlight hm-hl-red">红</mark>'
+    )
+  })
+  it('never highlights inside a code span, or across === / CriticMarkup', () => {
+    expect(inline('`==x==`')).toBe('<code>==x==</code>')
+    expect(inline('=== a = b')).toBe('=== a = b')
+    expect(inline('{==text==}')).toBe('{==text==}')
   })
 })
 
@@ -157,15 +214,22 @@ describe('parseDoc', () => {
   })
   it('keeps a bullet list as a single block (only numbered lists split)', () => {
     const blocks = parseDoc(['- a', '- b', '- c'])
-    expect(blocks).toEqual([{ type: 'list', start: 0, end: 2 }])
+    expect(blocks).toEqual([{ type: 'list', start: 0, end: 2, loose: false }])
   })
   it('splits a numbered list into one block per top-level item (番号 granularity)', () => {
     const blocks = parseDoc(['1. first', '   - detail', '2. second', '3. third'])
     expect(blocks).toEqual([
-      { type: 'list', start: 0, end: 1 },
-      { type: 'list', start: 2, end: 2 },
-      { type: 'list', start: 3, end: 3 }
+      { type: 'list', start: 0, end: 1, loose: false },
+      { type: 'list', start: 2, end: 2, loose: false },
+      { type: 'list', start: 3, end: 3, loose: false }
     ])
+  })
+  it('marks a list loose when a blank line separates its items', () => {
+    // The parse already kept the run together (continuous numbering); it just used
+    // to discard the blank line, so the user saw no change at all.
+    expect(parseDoc(['- a', '', '- b'])).toEqual([{ type: 'list', start: 0, end: 2, loose: true }])
+    // Blank lines trailing the list are trimmed off, and are not "interior".
+    expect(parseDoc(['- a', '- b', ''])).toEqual([{ type: 'list', start: 0, end: 1, loose: false }])
   })
   it('breaks an indented table inside a list item out as its own table block', () => {
     const blocks = parseDoc([
@@ -308,6 +372,40 @@ describe('GFM task-list items', () => {
     const lines = ['- a', '- b']
     const html = renderBlockInner(parseDoc(lines)[0], 0, lines, {})
     expect(html).toContain('<ul><li>a</li><li>b</li></ul>')
+  })
+})
+
+describe('loose list rendering', () => {
+  const listHtml = (lines) => renderBlockInner(parseDoc(lines)[0], 0, lines, {})
+
+  it('adds km-loose to a list whose items are separated by a blank line', () => {
+    expect(listHtml(['- a', '', '- b'])).toContain('<ul class="km-loose">')
+    expect(listHtml(['- a', '- b'])).toContain('<ul>')
+  })
+  it('leaves a nested sublist tight even inside a loose parent', () => {
+    const html = listHtml(['- a', '  - x', '  - y', '', '- b'])
+    expect(html).toContain('<ul class="km-loose">')
+    expect(html).toContain('<li>a<ul><li>x</li>') // the sublist gets no class
+  })
+})
+
+describe('blank-line spacing (opt-in, display only)', () => {
+  const gapsOf = (lines, opts) =>
+    [...renderDoc(lines, {}, opts).html.matchAll(/--km-gap:(\d+)/g)].map((m) => m[1])
+
+  it('emits nothing when the setting is off, however many blank lines there are', () => {
+    expect(gapsOf(['a', '', '', '', 'b'])).toEqual([])
+  })
+  it('emits nothing for the single blank line every parser needs as a separator', () => {
+    expect(gapsOf(['a', '', 'b'], { blankLineSpacing: true })).toEqual([])
+  })
+  it('counts each blank line beyond the separator', () => {
+    expect(gapsOf(['a', '', '', 'b'], { blankLineSpacing: true })).toEqual(['1'])
+    expect(gapsOf(['a', '', '', '', 'b'], { blankLineSpacing: true })).toEqual(['2'])
+  })
+  it('measures the gap from the previous block even when that block trimmed trailing blanks', () => {
+    // The list block ends at line 0; the blanks it swallowed still count.
+    expect(gapsOf(['- a', '', '', '', 'p'], { blankLineSpacing: true })).toEqual(['2'])
   })
 })
 

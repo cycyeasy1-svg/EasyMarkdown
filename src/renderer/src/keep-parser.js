@@ -1,7 +1,16 @@
 // Keep-mode (source-backed) parser & renderer — ported from the approved
 // prototype (E:\AI\20260624\md-prototype.html). Pure functions only: no React,
-// no DOM mutation, so they're safe to import anywhere and easy to swap later for
-// a remark(position)-based parser behind the same interface.
+// no DOM mutation, so they're safe to import anywhere.
+//
+// ── Block layer is ours; inline layer is markdown-it ──
+// parseDoc() hand-rolls the BLOCK scan because keep mode needs something no
+// off-the-shelf parser hands over cheaply: every block's exact [start,end] range
+// in the source, so an edit can rewrite those lines and leave the rest of the file
+// byte-identical. Everything INSIDE a block is display-only and never round-trips,
+// so `inline()` delegates to markdown-it (CommonMark + GFM). Don't re-add regex
+// syntax handling here — that's what left `~~del~~`, `_em_`, autolinks and
+// `==highlight==` silently unrendered. Non-standard syntax that both editors must
+// agree on lives in ../highlight-syntax.js.
 //
 // ── Line-ending responsibility boundary (the whole point of keep mode) ──
 // The "正本" (source of truth) is `rawLines` — the file split on '\n', WITH any
@@ -17,7 +26,10 @@
 // exclusion disagree, `i` stops advancing, and the parse loops forever →
 // `RangeError: Invalid array length`. (A real trap hit in the prototype.)
 
+import MarkdownIt from 'markdown-it'
+
 import { isRelativePath, resolveToFileUrl } from './components/editor-images.js'
+import { HIGHLIGHT_STICKY_RE, MARK_HTML_STICKY_RE } from './highlight-syntax.js'
 
 // ── language sniff (per-document writing font) ──
 // Kana is a definitive Japanese signal (Han characters are shared with Chinese,
@@ -46,79 +58,115 @@ export function escapeAttr(s) {
     .replace(/>/g, '&gt;')
 }
 
-// Re-enable HTML character references after escaping. escapeHtml turned every `&`
-// into `&amp;`, which makes a source `&nbsp;` render as the literal text "&nbsp;"
-// instead of a space. Turn an escaped, *well-formed* entity (`&amp;nbsp;`,
-// `&amp;#160;`, `&amp;copy;`) back into a real reference so the browser decodes it,
-// while a bare `&` (no trailing `;`) stays `&amp;` and shows as a literal "&".
-// Safe: a decoded reference like `&lt;` renders as the character "<", never as a
-// tag — the browser does not re-parse entity text as HTML.
-function decodeEntityRefs(s) {
-  return s.replace(/&amp;(#x?[0-9a-f]+|[a-z][a-z0-9]*);/gi, '&$1;')
-}
-
-// Build a safe `href` from a link target that was ALREADY HTML-escaped (the whole
-// segment ran through escapeHtml first, so `&`→`&amp;`, `<`→`&lt;`). We must NOT
-// re-run escapeAttr — that would double-escape `&amp;` into `&amp;amp;`. We only
-// (1) neutralize `"` so the URL can't break out of the attribute, and (2) blank a
-// `javascript:`/`data:`/`vbscript:` scheme so a crafted link can't run code on
-// click (keep mode renders real <a> via innerHTML).
-function safeHref(escapedHref) {
-  const probe = escapedHref.replace(/&amp;/gi, '&').trim().toLowerCase()
+// Blank a link target whose scheme could execute code on click — keep mode paints
+// real <a>/<img> through innerHTML. `data:` is refused for links but allowed for
+// images, so an inline base64 image still renders.
+function safeHref(rawHref) {
+  const probe = rawHref.trim().toLowerCase()
   if (/^(javascript|data|vbscript):/.test(probe)) return ''
-  return escapedHref.replace(/"/g, '&quot;')
+  return escapeAttr(rawHref)
 }
 
-// Build a display `src` for an image. The path arrives ALREADY HTML-escaped (the
-// segment ran through escapeHtml). A document-relative path is resolved against
+// Build a display `src` for an image. A document-relative path is resolved against
 // the doc folder as a file:// URL (display-only, like Milkdown's image node view —
-// the source keeps the original relative path); http(s)/data/file URLs pass
-// through. A `javascript:`/`vbscript:` scheme is blanked; `data:` is allowed so
-// inline base64 images still render; `"` is neutralized so it can't break out.
-function safeImgSrc(escapedSrc, baseDir) {
-  const raw = escapedSrc.trim()
-  if (baseDir && isRelativePath(raw)) return resolveToFileUrl(baseDir, raw).replace(/"/g, '&quot;')
-  const probe = raw.replace(/&amp;/gi, '&').toLowerCase()
-  if (/^(javascript|vbscript):/.test(probe)) return ''
-  return raw.replace(/"/g, '&quot;')
+// the source keeps the original relative path); http(s)/data/file URLs pass through.
+function safeImgSrc(rawSrc, baseDir) {
+  const raw = rawSrc.trim()
+  if (baseDir && isRelativePath(raw)) return escapeAttr(resolveToFileUrl(baseDir, raw))
+  if (/^(javascript|vbscript):/i.test(raw)) return ''
+  return escapeAttr(raw)
 }
 
-// Inline rendering: preserve <br>, render bold / italic / inline code / images /
-// links, everything else HTML-escaped. Display-only — never feeds back into the
-// source. `baseDir` (the document's folder) resolves relative image paths.
+// ── inline rendering ──
+// The block layer above is ours: parseDoc owns the source line map, and that map is
+// what makes zero-diff editing possible. Everything INSIDE a block, though, is
+// display-only — it never feeds back into the source — so it goes through a real
+// CommonMark + GFM parser rather than hand-rolled regexes. The regex renderer this
+// replaced silently dropped `~~strike~~`, `_em_`, `__strong__`, autolinks,
+// backslash escapes, link titles and `==highlight==`, mangled URLs containing `)`,
+// and grew a new hole with every syntax someone tried. markdown-it implements the
+// specs instead: https://spec.commonmark.org/ + https://github.github.com/gfm/.
+//
+// Every option below is load-bearing:
+//   html: false    keep mode paints with innerHTML, so raw HTML in the document must
+//                  never reach the DOM. Two fragments are still honored, explicitly:
+//                  a literal `<br>` (how a GFM table cell encodes a line break — see
+//                  editor-tablebreak.js) is split off before parsing, and
+//                  `<mark class="hm-hl-…">` (how the rich editor stringifies a red or
+//                  blue highlight — editor-highlight.js) is claimed by the inline rule
+//                  below. Nothing else gets through.
+//   linkify        GFM autolinks a bare `https://…`. fuzzyLink stays OFF: it also
+//                  linkifies any bare `word.tld`, and `.md` is a real ccTLD, so every
+//                  `README.md` mentioned in prose turned into a hyperlink.
+//   normalizeLink  neutered to identity. markdown-it percent-encodes URLs and
+//                  resolveToFileUrl() runs encodeURI() again, so `%` became `%25` and
+//                  every non-ASCII relative image path 404'd.
+const md = new MarkdownIt({ html: false, linkify: true, breaks: false, typographer: false })
+md.normalizeLink = (url) => url
+md.normalizeLinkText = (text) => text
+md.linkify.set({ fuzzyLink: false, fuzzyEmail: false, fuzzyIP: false })
+
+// `==highlight==` and its colored `<mark class="hm-hl-…">` form. Registered as an
+// inline RULE, not a pre-pass on the raw string: markdown-it runs the `backticks`
+// rule first, so a code span like `` `==x==` `` is already tokenized and our rule
+// never sees it — exactly the protection the old placeholder dance provided by hand.
+// Syntax rules come from highlight-syntax.js, shared verbatim with the rich editor.
+md.inline.ruler.before('emphasis', 'hm_highlight', (state, silent) => {
+  const ch = state.src.charCodeAt(state.pos)
+  const yellow = ch === 0x3d /* = */
+  if (!yellow && ch !== 0x3c /* < */) return false
+  const re = yellow ? HIGHLIGHT_STICKY_RE : MARK_HTML_STICKY_RE
+  re.lastIndex = state.pos
+  const m = re.exec(state.src)
+  if (!m) return false
+  // Yellow captures (delimiter, content); the colored form captures (color, content).
+  const color = yellow ? 'yellow' : m[1]
+  const content = m[2]
+  if (!silent) {
+    state.push('highlight_open', 'mark', 1).attrSet('class', 'hm-highlight hm-hl-' + color)
+    // Parse the content as inline markdown, so `==**a**==` highlights bold text
+    // instead of showing literal asterisks. The syntax regex forbids `=` inside the
+    // content, so a highlight can never nest inside a highlight — no recursion.
+    state.md.inline.parse(content, state.md, state.env, state.tokens)
+    state.push('highlight_close', 'mark', -1)
+  }
+  state.pos += m[0].length
+  return true
+})
+
+// Images resolve document-relative paths against the doc folder; links open
+// externally and refuse executable schemes. Both bypass markdown-it's default
+// renderers so escaping happens exactly once, here.
+md.renderer.rules.image = (tokens, idx, options, env, self) => {
+  const token = tokens[idx]
+  const src = safeImgSrc(token.attrGet('src') || '', env && env.baseDir)
+  const alt = self.renderInlineAsText(token.children || [], options, env)
+  const title = token.attrGet('title')
+  return (
+    '<img src="' + src + '" alt="' + escapeAttr(alt) + '"' +
+    (title ? ' title="' + escapeAttr(title) + '"' : '') +
+    '>'
+  )
+}
+md.renderer.rules.link_open = (tokens, idx) => {
+  const title = tokens[idx].attrGet('title')
+  return (
+    '<a href="' + safeHref(tokens[idx].attrGet('href') || '') + '"' +
+    (title ? ' title="' + escapeAttr(title) + '"' : '') +
+    ' target="_blank" rel="noopener">'
+  )
+}
+
+// Render one block's inline content to HTML. `baseDir` (the document's folder)
+// resolves relative image paths. A literal `<br>` in the source is split out first
+// and re-joined after: `html:false` would otherwise escape it, and it's the only
+// way a GFM table cell can hold a line break. Callers also use it to join a
+// blockquote's / paragraph's lines.
 export function inline(text, baseDir) {
-  const parts = String(text)
+  return String(text)
     .split(/<br\s*\/?>/i)
-    .map((seg) => {
-      let s = escapeHtml(seg)
-      // Pull inline code out first (placeholders) so neither entity decoding nor
-      // the bold/italic passes touch a code span's literal contents — `` `&nbsp;` ``
-      // must stay literal, like in standard Markdown.
-      // Use a NUL sentinel (\x00…\x00) as the placeholder, never a space-wrapped
-      // number: literal prose like "以下 2 区域" would otherwise be mistaken for a
-      // placeholder on restore and render as <code>undefined</code>.
-      const codes = []
-      s = s.replace(/`([^`]+)`/g, (m, c) => {
-        codes.push(c)
-        return '\x00' + (codes.length - 1) + '\x00'
-      })
-      s = decodeEntityRefs(s)
-      s = s.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
-      s = s.replace(/(?<!\*)\*([^*]+)\*(?!\*)/g, '<em>$1</em>')
-      // Images BEFORE links — otherwise the link regex grabs the `[alt](src)` part
-      // and leaves a stray `!`.
-      s = s.replace(
-        /!\[([^\]]*)\]\(([^)]+)\)/g,
-        (m, alt, src) => '<img src="' + safeImgSrc(src, baseDir) + '" alt="' + alt.replace(/"/g, '&quot;') + '">'
-      )
-      s = s.replace(
-        /\[([^\]]+)\]\(([^)]+)\)/g,
-        (m, label, href) => '<a href="' + safeHref(href) + '" target="_blank" rel="noopener">' + label + '</a>'
-      )
-      s = s.replace(/\x00(\d+)\x00/g, (m, i) => '<code>' + codes[+i] + '</code>')
-      return s
-    })
-  return parts.join('<br>')
+    .map((seg) => md.renderInline(seg, { baseDir }))
+    .join('<br>')
 }
 
 const TABLE_COL_MIN_EM = 6
@@ -214,10 +262,20 @@ export function parseDoc(lines) {
   // Emit a 'list' sub-block for the line range [s,e], trimming blank lines off
   // both ends (so a segment never starts/ends on a loose-list gap). Used to split
   // a list run into per-numbered-item blocks and around any nested table.
+  //
+  // A blank line SURVIVING that trim is interior, which by CommonMark makes the
+  // list "loose": its items render with paragraph spacing instead of hugging each
+  // other. We record the flag here and let renderList add the class — the parse
+  // already keeps a loose list together (see the blank-line branch below), it just
+  // used to throw the information away, so a user who typed a blank line between
+  // two bullets saw literally no change.
   const pushListSeg = (s, e) => {
     while (e >= s && lines[e].trim() === '') e--
     while (s <= e && lines[s].trim() === '') s++
-    if (s <= e) out.push({ type: 'list', start: s, end: e })
+    if (s > e) return
+    let loose = false
+    for (let k = s + 1; k < e; k++) if (lines[k].trim() === '') loose = true
+    out.push({ type: 'list', start: s, end: e, loose })
   }
   let i = 0
   while (i < lines.length) {
@@ -593,13 +651,16 @@ function renderList(b, viewLines, baseDir, opts = {}) {
   let html = ''
   const stack = [] // open lists, innermost last: { indent, ordered }
   const openList = (it) => {
+    // Looseness is a property of the list, and only the outermost one here carries
+    // the block's blank-line evidence — a nested sublist keeps its tight spacing.
+    const cls = !stack.length && b.loose ? ' class="km-loose"' : ''
     stack.push({ indent: it.indent, ordered: it.ordered })
     // Honor the first item's number (CommonMark: a list's start = its first
     // item's marker). `<ol>` alone always restarts at 1, so "3. / 4." rendered
     // as 1. / 2. — emit start="3" when it isn't the default.
     const open = it.ordered
-      ? '<ol' + (it.start != null && it.start !== 1 ? ' start="' + it.start + '"' : '') + '>'
-      : '<ul>'
+      ? '<ol' + cls + (it.start != null && it.start !== 1 ? ' start="' + it.start + '"' : '') + '>'
+      : '<ul' + cls + '>'
     html += open + liOpen(it)
   }
   const closeList = () => {
@@ -782,6 +843,14 @@ export function renderBlockInner(b, bi, viewLines, opts = {}) {
 // unbroken across chunks; the returned `tableIdx` threads into the next slice.
 // `opts` mirrors renderBlockInner's (srcEditLabel / collapseLabel / forExport /
 // filterState / baseDir); `tableIdx` is supplied per block here, not by the caller.
+//   opts.blankLineSpacing — honor RUNS of blank lines as deliberate vertical space.
+//     CommonMark collapses any number of blank lines between two blocks into one
+//     block boundary, so `a\n\n\n\nb` and `a\n\nb` render identically everywhere
+//     (GitHub, VSCode preview, this app's rich editor). Keep mode is the one place
+//     that CAN honor them — the source is the正本 and rendering never rewrites it —
+//     so this opt-in setting turns each blank line beyond the first into one extra
+//     line of space. Display-only: `data-gap` drives a CSS margin, the bytes on
+//     disk are untouched.
 export function renderBlockRange(blocks, viewLines, from, to, startTableIdx = 0, opts = {}) {
   let tableIdx = startTableIdx
   let html = ''
@@ -792,7 +861,16 @@ export function renderBlockRange(blocks, viewLines, from, to, startTableIdx = 0,
     // Heading blocks carry their level so KeepEditor can compute the section range
     // (every following block until the next heading of the same or higher level).
     const hlevel = b.type === 'heading' ? ' data-hlevel="' + b.level + '"' : ''
-    html += '<div class="km-block"' + hlevel + ' data-bi="' + bi + '">' + innerHtml + '</div>'
+    // Blank lines between this block and the previous one. One of them is the block
+    // separator every parser requires; the rest are the user's, and `--km-gap` counts
+    // them. (Blocks trimmed of trailing blanks — lists — still report the true gap,
+    // since it's measured from the previous block's `end`.)
+    let gap = ''
+    if (opts.blankLineSpacing && bi > 0) {
+      const extra = b.start - blocks[bi - 1].end - 2
+      if (extra > 0) gap = ' data-gap="' + extra + '" style="--km-gap:' + extra + '"'
+    }
+    html += '<div class="km-block"' + hlevel + gap + ' data-bi="' + bi + '">' + innerHtml + '</div>'
   }
   return { html, tableIdx }
 }
@@ -803,6 +881,7 @@ export function renderBlockRange(blocks, viewLines, from, to, startTableIdx = 0,
 //   opts.collapseLabel — label for the per-heading collapse/expand toggle
 //   opts.forExport    — omit edit affordances (buttons / filter ▼) for PDF
 //   opts.baseDir      — document folder, for resolving relative image paths
+//   opts.blankLineSpacing — see renderBlockRange
 export function renderDoc(rawLines, filterState = {}, opts = {}) {
   const viewLines = toViewLines(rawLines)
   const blocks = parseDoc(viewLines)
@@ -812,7 +891,8 @@ export function renderDoc(rawLines, filterState = {}, opts = {}) {
     collapseLabel: opts.collapseLabel,
     filterState,
     baseDir: opts.baseDir,
-    interactiveTasks: !!opts.interactiveTasks
+    interactiveTasks: !!opts.interactiveTasks,
+    blankLineSpacing: !!opts.blankLineSpacing
   })
   return { html: html || '<div class="km-empty"></div>', blocks, viewLines }
 }

@@ -3945,6 +3945,17 @@ body.hm-full-width .km-doc {
 .km-block:has(> .km-src-edit):hover {
   background: var(--hover);
 }
+/* Blank-line spacing (opt-in; settings.blankLineSpacing). Every Markdown parser
+   collapses a run of blank lines into a single block boundary, so `a\n\n\n\nb` and
+   `a\n\nb` look the same — in the rich editor, on GitHub, everywhere. Keep mode is
+   the one place that can honor them, because the source is the正本 and rendering
+   never rewrites it. renderBlockRange stamps --km-gap with the blank-line count
+   BEYOND the one that acts as the separator; each buys one line of space.
+   The margin collapses with the child <p>'s own 0.8em, so this is the resulting
+   gap, not an addition to it. */
+.km-doc > .km-block[data-gap] {
+  margin-top: calc(var(--km-gap, 0) * var(--editor-line-height, 1.8) * 1em * var(--editor-para-scale, 1));
+}
 .km-block > *:first-child {
   margin-top: 0;
 }
@@ -4185,6 +4196,28 @@ body.hm-full-width .km-doc {
 .km-doc li > ul,
 .km-doc li > ol { margin: 0.2em 0; }
 .km-doc li { margin: 0.2em 0; }
+/* Loose list (CommonMark): items separated by a blank line in the source breathe
+   like paragraphs instead of hugging. parseDoc records `loose`; renderList puts
+   km-loose on the OUTERMOST list only, so a nested sublist stays tight. Without
+   this, typing a blank line between two bullets changed nothing at all — the parse
+   kept the list together (so numbering stays continuous) and the renderer then
+   threw the blank line away. */
+.km-doc ul.km-loose > li,
+.km-doc ol.km-loose > li { margin: calc(0.8em * var(--editor-para-scale, 1)) 0; }
+/* `==highlight==`, and the `<mark class="hm-hl-…">` form the rich editor writes for
+   red/blue. Same palette as the .milkdown marks above — one document must not
+   change color when you switch editing modes. */
+.km-doc mark {
+  color: inherit;
+  padding: 0.05em 0.15em;
+  border-radius: 2px;
+  background: #fff3a3;
+}
+.km-doc mark.hm-hl-red { background: #ffc6c6; }
+.km-doc mark.hm-hl-blue { background: #bcd9ff; }
+body.dark .km-doc mark { background: #7a6c12; }
+body.dark .km-doc mark.hm-hl-red { background: #7a3434; }
+body.dark .km-doc mark.hm-hl-blue { background: #2f4a6b; }
 .km-doc a {
   color: var(--accent);
   text-decoration: none;

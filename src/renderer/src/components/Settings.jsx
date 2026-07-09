@@ -128,6 +128,12 @@ export default function Settings({
           <div className="hm-set-section">
             <div className="hm-set-section-title">{t('settings.sectionTypography')}</div>
             <TypographyGroups {...typographyProps} />
+            <SwitchRow
+              label={t('settings.blankLineSpacing')}
+              desc={t('settings.blankLineSpacingDesc')}
+              checked={settings.blankLineSpacing}
+              onChange={(v) => updateSettings({ blankLineSpacing: v })}
+            />
           </div>
 
           {/* ── Appearance ── */}

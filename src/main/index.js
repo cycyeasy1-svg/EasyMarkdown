@@ -73,6 +73,16 @@ const PDF_CSS = `
   .doc ul, .doc ol { margin: 0.8em 0; padding-left: 1.6em; }
   .doc li { margin: 0.32em 0; }
   .doc li::marker { color: #c86b35; }
+  /* Keep mode's blocks come through verbatim (renderDoc with forExport), so the
+     export honors the same two source signals the screen does: a loose list (blank
+     line between items) and, when the blank-line-spacing setting is on, the --km-gap
+     that a run of blank lines stamps on the following block. */
+  .doc ul.km-loose > li, .doc ol.km-loose > li { margin: 0.85em 0; }
+  .doc .km-block[data-gap] { margin-top: calc(var(--km-gap, 0) * 1.75em); }
+  /* ==highlight== / <mark class="hm-hl-…">, same palette as the app. */
+  .doc mark { color: inherit; padding: 0.05em 0.15em; border-radius: 2px; background: #fff3a3; }
+  .doc mark.hm-hl-red { background: #ffc6c6; }
+  .doc mark.hm-hl-blue { background: #bcd9ff; }
   .doc blockquote {
     margin: 1em 0; padding: 0.5em 1.1em; border-left: 3px solid #c86b35;
     background: rgba(200,107,53,.06); color: #6b655c; border-radius: 0 6px 6px 0;
@@ -1258,10 +1268,16 @@ function buildMenu() {
         // Content-only zoom (not Electron's whole-window webFrame zoom): the
         // renderer scales just the editor document. Keep the familiar
         // accelerators so Cmd/Ctrl +/-/0 feel native.
+        //
+        // zoomReset deliberately carries NO accelerator: a menu accelerator does
+        // not consume the keydown, so Cmd/Ctrl+0 would reach the rich editor's
+        // own Ctrl+0 (heading → paragraph) as well, and one keypress would do
+        // two unrelated things. The renderer binds Cmd/Ctrl+0 in the capture
+        // phase instead and dispatches by caret location — see App.jsx.
         { label: L.zoomIn, accelerator: 'CmdOrCtrl+=', click: menuCmd('zoomIn') },
         { label: L.zoomIn, accelerator: 'CmdOrCtrl+Plus', click: menuCmd('zoomIn'), visible: false, acceleratorWorksWhenHidden: true },
         { label: L.zoomOut, accelerator: 'CmdOrCtrl+-', click: menuCmd('zoomOut') },
-        { label: L.zoomReset, accelerator: 'CmdOrCtrl+0', click: menuCmd('zoomReset') },
+        { label: L.zoomReset, click: menuCmd('zoomReset') },
         { type: 'separator' },
         roleItem('togglefullscreen', L.fullscreen),
         roleItem('toggleDevTools', L.devTools)

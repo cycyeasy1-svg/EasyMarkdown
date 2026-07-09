@@ -96,9 +96,15 @@ npm run test:e2e   # 先 electron-vite build，再 playwright test
 - **选区浮动工具栏没港**:它是 Crepe 自带气泡(`.milkdown-toolbar`,app 往里注入了 `.hm-heading-item` 标题按钮),只在**真实指针拖选**时出现,且在自动化下不可靠地布局/可点(etv 旧的 `.block-selbar` 已不存在);它的块转换走的是和 Ctrl+2/右键菜单同一条路径(Editor.jsx),已被覆盖,故有意不测。选区若要测,用**真实鼠标拖选**(`page.mouse.down/move/up`,trusted 事件能驱动 ProseMirror 选区;合成 CDP 拖拽不行)。
 - keep 模式相对图片→`file://` 已修并有 E2E(`images.md`),见下方"图片支持"。
 
-> **图片支持(keep 模式)**:`keep-parser.js` 的 `inline(text, baseDir)` 识别 `![alt](src)` 并渲染 `<img>`;相对路径用 `editor-images.js` 的 `resolveToFileUrl(baseDir, src)` 解析成显示用的 `file://`(源里仍保留相对路径,与 Milkdown 一致),`http(s)/data/file` 直通,`javascript:/vbscript:` 置空。`baseDir` 由 KeepEditor 从 `docPath`(`dirOf`)经 `renderDoc`/`renderBlockInner` 传入。单测见 `test/keep-parser.test.js`,E2E 见 `test/e2e/fixtures/images.md`。
+> **行内渲染(keep 模式)**:`keep-parser.js` 的 `inline(text, baseDir)` 由 **markdown-it** 驱动(CommonMark + GFM),不再是手写正则。块级扫描(`parseDoc`)仍是自己的 —— keep 模式需要每个块在源码里的 `[start,end]` 行范围来保证零 diff 编辑;块内容只用于显示,所以交给规范实现。**不要再往 `inline()` 里加正则语法分支**。
 >
-> 历史背景(已修):此前 `inline()` 不识别图片语法,`![x](./a.png)` 在 keep 模式(打开 .md 的默认编辑器)被渲染成多余的字面 `!` + 普通超链接,不产生 `<img>` —— 是 E2E 骨架阶段发现的真实 bug。
+> 图片:`![alt](src)` 的相对路径用 `editor-images.js` 的 `resolveToFileUrl(baseDir, src)` 解析成显示用的 `file://`(源里仍保留相对路径,与 Milkdown 一致),`http(s)/data/file` 直通;`javascript:/vbscript:` 被 markdown-it 的 `validateLink` 直接拒绝(整段退化为字面文本,比过去的空 `href` 更安全)。`baseDir` 由 KeepEditor 从 `docPath`(`dirOf`)经 `renderDoc`/`renderBlockInner` 传入。单测见 `test/keep-parser.test.js`,E2E 见 `test/e2e/fixtures/images.md` 与 `inline-syntax.md`。
+>
+> 历史背景(已修):
+> - `inline()` 曾不识别图片语法,`![x](./a.png)` 在 keep 模式被渲染成多余的字面 `!` + 普通超链接 —— E2E 骨架阶段发现的真实 bug。
+> - 同一套手写正则还吞掉了 `~~删除线~~`、`_斜体_`、`__粗体__`、自动链接、反斜杠转义、链接 title,并截断含 `)` 的 URL;`==高亮==` 只在富文本模式可用。换成 markdown-it 后一次性补齐。
+>
+> **行为变更**:链接目标里的**裸空格**(`![图](./a b.png)`)按 CommonMark 不再解析为图片,需写成 `<./a b.png>` 或 `./a%20b.png` —— 与富文本模式、GitHub 一致。同时修掉了 `resolveToFileUrl` 把已转义的 `%20` 二次编码成 `%2520` 的老 bug(两种模式都受益)。
 
 ## 自动化测试：CDP 端到端验证（旧，逐步被 Playwright 取代）
 

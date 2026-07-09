@@ -2021,6 +2021,27 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKey, true)
   }, [])
 
+  // Ctrl/Cmd+0 means two different things depending on where the caret is:
+  // inside the rich editor it turns the current block back into a paragraph
+  // (completing the Ctrl+1…6 heading set), everywhere else it resets the zoom.
+  // A menu accelerator can't express that — and it wouldn't merely lose the
+  // race, it would ALSO fire, so pressing Ctrl+0 to un-heading a block used to
+  // silently reset your zoom as well. So zoomReset carries no accelerator (see
+  // the View menu) and both meanings are resolved here, in the capture phase,
+  // by looking at where the event came from. Editor.jsx keeps its own Ctrl+0
+  // listener on view.dom; we simply decline to handle the event for it.
+  useEffect(() => {
+    const onKey = (e) => {
+      if (!(e.ctrlKey || e.metaKey) || e.shiftKey || e.altKey || e.code !== 'Digit0') return
+      if (e.target?.closest?.('.ProseMirror')) return // rich editor → convert to paragraph
+      e.preventDefault()
+      e.stopPropagation()
+      handlers.current.zoomReset()
+    }
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
+  }, [])
+
   useEffect(() => {
     const paths = (session.openPaths || []).filter(Boolean)
     const untitled = (session.untitled || []).filter((u) => u && (u.content || '').trim())
@@ -3310,6 +3331,7 @@ export default function App() {
                       inView={inView}
                       initialContent={tab.content}
                       docPath={tab.path}
+                      blankLineSpacing={settings.blankLineSpacing}
                       onChange={h.onChange}
                       onReady={h.onReady}
                       onFilterChange={h.onFilterChange}

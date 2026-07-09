@@ -14,19 +14,14 @@ import { markRule } from '@milkdown/prose'
 import { toggleMark } from '@milkdown/prose/commands'
 import { $command, $inputRule, $markAttr, $markSchema, $remark, $useKeymap } from '@milkdown/utils'
 import { findAndReplace } from 'mdast-util-find-and-replace'
+import { colorFromClass, HIGHLIGHT_COLORS, HIGHLIGHT_RE, MARK_HTML_RE } from '../highlight-syntax.js'
 
-export const HIGHLIGHT_COLORS = ['yellow', 'red', 'blue']
+// The syntax rules themselves live in `../highlight-syntax.js` (Milkdown-free) so
+// keep mode's markdown-it renderer applies the exact same ones. Re-exported here
+// because callers already import them from this module.
+export { HIGHLIGHT_COLORS, HIGHLIGHT_RE }
 
 export const highlightAttr = $markAttr('highlight')
-
-// Match ==text== without tripping on `===` / `a = b`:
-//   - not adjacent to another `=` (so `===`/trailing `=` are out)
-//   - `==}` cannot open a native highlight; that sequence is the close of
-//     source-readable review markup: `{==text==}{>>comment<<}`.
-//   - content non-empty, no `=`, no leading/trailing whitespace
-// CJK has no word boundaries, so we don't require whitespace around the `==`
-// (Typora behaves the same): `这是==高亮==的` works.
-export const HIGHLIGHT_RE = /(?<![={])(==)(?!\})([^=\s][^=]*[^=\s]|[^=\s])\1(?![=])/g
 
 export const highlightSchema = $markSchema('highlight', (ctx) => ({
   attrs: {
@@ -65,14 +60,6 @@ export const highlightSchema = $markSchema('highlight', (ctx) => ({
     }
   }
 }))
-
-function colorFromClass(cls) {
-  for (const c of HIGHLIGHT_COLORS) if ((' ' + cls + ' ').includes(' hm-hl-' + c + ' ')) return c
-  return 'yellow'
-}
-
-// Parse a complete `<mark class="hm-hl-COLOR">…</mark>` fragment into {color,text}.
-const MARK_HTML_RE = /^<mark\s+class="hm-hl-(yellow|red|blue)"\s*>([\s\S]*?)<\/mark>$/
 
 // Parse direction (remark): `==text==` in a text node → highlight node, and a
 // balanced inline-HTML `<mark class="hm-hl-…">text</mark>` → highlight node.

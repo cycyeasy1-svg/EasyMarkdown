@@ -304,6 +304,21 @@ body.hm-full-width .km-doc {
 .km-doc li > ul,
 .km-doc li > ol { margin: 0.2em 0; }
 .km-doc li { margin: 0.2em 0; }
+/* Loose list (CommonMark): blank-line-separated items breathe. Outermost list only. */
+.km-doc ul.km-loose > li,
+.km-doc ol.km-loose > li { margin: calc(0.8em * var(--editor-para-scale, 1)) 0; }
+/* `==highlight==` and the colored `<mark class="hm-hl-…">` form. Mirrors app.css. */
+.km-doc mark {
+  color: inherit;
+  padding: 0.05em 0.15em;
+  border-radius: 2px;
+  background: #fff3a3;
+}
+.km-doc mark.hm-hl-red { background: #ffc6c6; }
+.km-doc mark.hm-hl-blue { background: #bcd9ff; }
+body.dark .km-doc mark { background: #7a6c12; }
+body.dark .km-doc mark.hm-hl-red { background: #7a3434; }
+body.dark .km-doc mark.hm-hl-blue { background: #2f4a6b; }
 .km-doc a {
   color: var(--accent);
   text-decoration: none;

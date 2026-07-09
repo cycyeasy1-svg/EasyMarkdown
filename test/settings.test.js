@@ -42,7 +42,8 @@ describe('loadSettings / saveSettings', () => {
       paragraphSpacing: 1.2,
       spellcheck: true,
       autosave: true,
-      defaultEditorMode: 'rich'
+      defaultEditorMode: 'rich',
+      blankLineSpacing: true
     }
     saveSettings(saved)
     expect(loadSettings()).toEqual(saved)
@@ -66,16 +67,19 @@ describe('loadSettings / saveSettings', () => {
       paragraphSpacing: 2,
       spellcheck: false,
       autosave: false,
-      defaultEditorMode: 'keep'
+      defaultEditorMode: 'keep',
+      blankLineSpacing: false
     })
   })
   it('coerces the boolean flags strictly', () => {
-    saveSettings({ spellcheck: 'yes', autosave: 1 })
+    saveSettings({ spellcheck: 'yes', autosave: 1, blankLineSpacing: 'on' })
     expect(loadSettings().spellcheck).toBe(false)
     expect(loadSettings().autosave).toBe(false)
-    saveSettings({ spellcheck: true, autosave: true })
+    expect(loadSettings().blankLineSpacing).toBe(false)
+    saveSettings({ spellcheck: true, autosave: true, blankLineSpacing: true })
     expect(loadSettings().spellcheck).toBe(true)
     expect(loadSettings().autosave).toBe(true)
+    expect(loadSettings().blankLineSpacing).toBe(true)
   })
   it('normalizes defaultEditorMode to keep|rich', () => {
     saveSettings({ defaultEditorMode: 'weird' })

@@ -92,7 +92,14 @@ export const DEFAULT_SETTINGS = {
   autosave: false,
   // Which editor a newly-opened .md tab starts in: the source-preserving keep
   // editor (default) or the Milkdown WYSIWYG. Per-tab toggle still overrides.
-  defaultEditorMode: 'keep'
+  defaultEditorMode: 'keep',
+  // Keep mode only: render a RUN of blank lines as that much vertical space, one
+  // extra line per blank line beyond the block separator. Off by default because it
+  // deliberately departs from CommonMark — every other renderer (GitHub, VSCode
+  // preview, this app's own rich editor) collapses them — and because writers who
+  // habitually leave two blank lines before a heading would see their documents
+  // suddenly loosen. Purely visual: the source bytes never change.
+  blankLineSpacing: false
 }
 
 const round1 = (n) => Math.round(n * 10) / 10
@@ -142,7 +149,8 @@ export function loadSettings() {
       ),
       spellcheck: raw.spellcheck === true,
       autosave: raw.autosave === true,
-      defaultEditorMode: raw.defaultEditorMode === 'rich' ? 'rich' : 'keep'
+      defaultEditorMode: raw.defaultEditorMode === 'rich' ? 'rich' : 'keep',
+      blankLineSpacing: raw.blankLineSpacing === true
     }
   } catch {
     return { ...DEFAULT_SETTINGS }

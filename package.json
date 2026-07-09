@@ -1,7 +1,7 @@
 {
   "name": "easymarkdown",
   "productName": "EasyMarkdown",
-  "version": "1.0.13",
+  "version": "1.1.0",
   "description": "EasyMarkdown Markdown Editor",
   "author": "Easy Chen",
   "license": "MIT",
@@ -27,6 +27,9 @@
     "test:e2e": "electron-vite build && playwright test",
     "dist": "electron-vite build && node scripts/gen-readme.mjs && electron-builder",
     "dist:dir": "electron-vite build && node scripts/gen-readme.mjs && electron-builder --dir",
+    "version:check": "node scripts/bump-version.mjs --check",
+    "version:bump": "node scripts/bump-version.mjs",
+    "pack:check": "node scripts/pack.mjs --preflight",
     "pack:zip": "node scripts/pack.mjs",
     "pack": "npm run dist:dir && node scripts/pack.mjs",
     "build:mobile": "vite build --config vite.mobile.config.mjs",
@@ -45,6 +48,7 @@
     "@capawesome/capacitor-file-picker": "^8.0.2",
     "@milkdown/crepe": "^7.6.5",
     "chokidar": "^4.0.3",
+    "markdown-it": "^14.3.0",
     "mdast-util-find-and-replace": "^3.0.2",
     "mermaid": "^11.15.0",
     "remark-frontmatter": "^5.0.0"

@@ -50,6 +50,7 @@ function KeepEditor({
   inView = true,
   initialContent,
   docPath,
+  blankLineSpacing = false,
   onChange,
   onReady,
   onOutline,
@@ -60,6 +61,8 @@ function KeepEditor({
   const { t, lang } = useI18n()
   const tRef = useRef(t)
   tRef.current = t
+  const blankLineSpacingRef = useRef(blankLineSpacing)
+  blankLineSpacingRef.current = blankLineSpacing
   const onOpenSourceRef = useRef(onOpenSource)
   onOpenSourceRef.current = onOpenSource
   const onOpenDocLinkRef = useRef(onOpenDocLink)
@@ -97,6 +100,10 @@ function KeepEditor({
   // called when the pane RE-ENTERS view, since blocks streamed while it was hidden
   // measured 0 height (display:none) and may have missed their km-multiline class.
   const remeasureRef = useRef(null)
+  // Full repaint from rawLines. Set inside the mount effect; called when a render
+  // OPTION (not the document) changes — only blankLineSpacing so far, which is
+  // baked into each block's markup and so can't be re-styled in place.
+  const rerenderRef = useRef(null)
 
   useEffect(() => {
     const host = hostRef.current
@@ -158,7 +165,8 @@ function KeepEditor({
       srcEditLabel: tRef.current('keep.editSource'),
       collapseLabel: tRef.current('keep.toggleSection'),
       filterState: filterStateRef.current,
-      baseDir: dirOf(docPathRef.current)
+      baseDir: dirOf(docPathRef.current),
+      blankLineSpacing: blankLineSpacingRef.current
     })
     // Running table index at the start of each block (tables key filter state by
     // index, so a chunk must continue the count). Rebuilt per render.
@@ -601,13 +609,14 @@ function KeepEditor({
       // jank.) A header cell keeps its filter ▼, so patch only its content span.
       if (td && host.contains(td)) {
         td.setAttribute('data-raw', val)
+        const baseDir = dirOf(docPathRef.current) // else a relative image in the cell won't resolve
         if (td.tagName === 'TH') {
           const span = td.querySelector('.km-th-content')
-          if (span) span.innerHTML = inline(val)
+          if (span) span.innerHTML = inline(val, baseDir)
           // Mirror the edit onto the floating-header clone so it stays identical.
           tableScrollRef.current?.refreshContent()
         } else {
-          td.innerHTML = inline(val)
+          td.innerHTML = inline(val, baseDir)
         }
       } else {
         rerender() // cell somehow detached — fall back to a full re-render
@@ -1436,6 +1445,7 @@ function KeepEditor({
     remeasureRef.current = () => {
       if (pendingFrom === Infinity) applyMultilineFlagsRange(0, blocksRef.current.length)
     }
+    rerenderRef.current = () => rerender()
 
     host.addEventListener('dblclick', onDblClick)
     host.addEventListener('click', onClick)
@@ -1457,7 +1467,15 @@ function KeepEditor({
       getDocHTML: () => {
         flushRemaining() // the by-index embed copy below needs every live placeholder present
         const tmp = document.createElement('div')
-        tmp.innerHTML = renderDoc(rawLinesRef.current, {}, { forExport: true, baseDir: dirOf(docPathRef.current) }).html
+        tmp.innerHTML = renderDoc(
+          rawLinesRef.current,
+          {},
+          {
+            forExport: true,
+            baseDir: dirOf(docPathRef.current),
+            blankLineSpacing: blankLineSpacingRef.current
+          }
+        ).html
         // Embeds now render lazily (only when scrolled near view), so the live host
         // may not hold a diagram the export needs. Fill mermaid from the shared
         // session cache first (covers anything ever rendered), then copy the live
@@ -1531,6 +1549,18 @@ function KeepEditor({
       remeasureRef.current?.()
     }
   }, [inView])
+
+  // Blank-line spacing is baked into the block markup (`data-gap`), not just styled,
+  // so flipping the setting has to repaint. Skip the mount pass — the []-deps effect
+  // above already rendered with the current value.
+  const spacingMountedRef = useRef(false)
+  useEffect(() => {
+    if (!spacingMountedRef.current) {
+      spacingMountedRef.current = true
+      return
+    }
+    rerenderRef.current?.()
+  }, [blankLineSpacing])
 
   // Hot-swap the static "edit source" labels when the UI language changes. The
   // doc HTML is rendered once on mount (rerender lives in a []-deps effect), so

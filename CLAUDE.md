@@ -134,6 +134,40 @@ docs/                  architecture / features / implementation-notes / developm
   `peekMermaidSvg` (sync peek) render diagrams OUTSIDE ProseMirror for
   `KeepEditor`, so a diagram drawn in one paints instantly in the other. A block
   holding 2+ diagrams is split into one block each by `createMermaidSplitPlugin`.
+- **Keep mode splits block vs inline parsing, on purpose.** `parseDoc` hand-rolls
+  the **block** scan because keep mode needs each block's exact `[start,end]` source
+  line range — that map is what lets an edit rewrite only those lines (the zero-diff
+  guarantee). Block *content* is display-only, so `inline()` hands it to
+  **markdown-it** (`html:false`; linkify with `fuzzyLink:false` — `.md` is a real
+  ccTLD, so fuzzy matching hyperlinked every `README.md` in prose; `normalizeLink` =
+  identity, else its percent-encoding collides with `resolveToFileUrl`'s `encodeURI`).
+  **Never add regex syntax handling back into `inline()`** — the hand-rolled version
+  silently dropped `~~strike~~`, `_em_`, `__strong__`, autolinks, backslash escapes
+  and link titles, and mangled URLs containing `)`. The two fragments markdown-it must
+  not see are handled around it: a literal `<br>` (split off before parsing — the only
+  way a GFM table cell holds a line break, see `editor-tablebreak.js`) and
+  `<mark class="hm-hl-…">` (claimed by the `hm_highlight` inline rule). That rule runs
+  *after* `backticks`, so a code span like `` `==x==` `` is already tokenized and stays
+  literal.
+- **Non-standard syntax lives in one file.** `==highlight==` is in **neither**
+  CommonMark nor GFM — it's a Typora/Obsidian extension with no spec, so its exact
+  rules (the `{==` CriticMarkup guard, no `=` inside, CJK-friendly boundaries) live
+  once in `src/renderer/src/highlight-syntax.js` and are consumed by BOTH
+  `editor-highlight.js` (remark, rich mode) and `keep-parser.js` (markdown-it — keep
+  mode, VSCode webview, PDF export). Keep that module **Milkdown-free**: the webview
+  bundles keep-parser and has no ProseMirror. Same constraint as
+  `editor-mermaid-core.js`. When adding another dialect (footnotes, inline `$math$`),
+  put its rules there, not in one renderer.
+- **Blank lines in keep mode.** A blank line between list items makes the list
+  **loose** (CommonMark): `parseDoc` records `loose`, `renderList` puts `km-loose` on
+  the **outermost** `<ul>/<ol>` only, so nested sublists stay tight. Separately,
+  `settings.blankLineSpacing` (opt-in, default off) makes `renderBlockRange` stamp
+  `data-gap` / `--km-gap` with the number of blank lines *beyond* the one every parser
+  needs as a block separator; CSS turns each into one line of space. Display-only —
+  the bytes on disk never change. It deliberately departs from CommonMark (and from
+  the rich editor, which collapses them), which is why it's a setting and why it's
+  keep-mode-only. The CSS must exist in **three** places: `app.css`, the webview's
+  `keep.css`, and `PDF_CSS` in `main/index.js`.
 - **Math**: enable `CrepeFeature.Latex` (off by default). Block math needs `$$` on
   their own lines — `normalizeDisplayMath` (`editor-math.js`, applied to Crepe's
   `defaultValue`) expands a single-line `$$x^2$$` into that form, skipping code

@@ -50,6 +50,14 @@ describe('resolveToFileUrl', () => {
     expect(resolveToFileUrl('/home/u/notes', '../img/x.png')).toBe('file:///home/u/img/x.png')
     expect(resolveToFileUrl('/home/u/notes', './x.png')).toBe('file:///home/u/notes/x.png')
   })
+  it('does not double-encode a src that already carries a percent escape', () => {
+    // encodeURI turns a literal `%` into `%25`, so `a%20b.png` — the spec-compliant
+    // way to write a space in a link destination — used to resolve to `a%2520b.png`
+    // and 404. A lone `%` with no valid escape after it still gets encoded.
+    expect(resolveToFileUrl('/home/u', 'pics/a%20b.png')).toBe('file:///home/u/pics/a%20b.png')
+    expect(resolveToFileUrl('/home/u', 'pics/%E5%9B%BE.png')).toBe('file:///home/u/pics/%E5%9B%BE.png')
+    expect(resolveToFileUrl('/home/u', '100%.png')).toBe('file:///home/u/100%25.png')
+  })
   it('URL-encodes spaces in the resolved path', () => {
     expect(resolveToFileUrl('/home/u', 'my pics/a b.png')).toBe('file:///home/u/my%20pics/a%20b.png')
   })

@@ -4,9 +4,9 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <script>document.documentElement.classList.add('js')</script>
-  <title>EasyMarkdown — 一个窗口，装下所有 .md 文件</title>
-  <meta name="description" content="EasyMarkdown：免费开源的 Typora 平替。标签页 + 文件树 + 所见即所得，Windows、macOS 与 Android。" />
-  <meta name="keywords" content="EasyMarkdown,Markdown 编辑器,Typora 替代,WYSIWYG,标签页,文件树,开源" />
+  <title>EasyMarkdown — 像操作 Excel 一样操作 Markdown</title>
+  <meta name="description" content="EasyMarkdown：免费开源的 Markdown 编辑器。保持模式零差分保存——未编辑的字节一个都不动；表格可按列筛选。Windows、macOS 与 VSCode 扩展。" />
+  <meta name="keywords" content="EasyMarkdown,Markdown 编辑器,零差分保存,Markdown 表格筛选,保持模式,Typora 替代,WYSIWYG,标签页,文件树,开源" />
   <link rel="icon" type="image/png" href="./assets/icon.png" />
   <link rel="canonical" href="https://cycyeasy1-svg.github.io/EasyMarkdown/" />
   <!-- 给 LLM / 爬虫的 markdown 镜像入口 -->
@@ -15,18 +15,18 @@
   <!-- Open Graph -->
   <meta property="og:type" content="website" />
   <meta property="og:site_name" content="EasyMarkdown" />
-  <meta property="og:title" content="EasyMarkdown — One window. Every file." />
-  <meta property="og:description" content="A free Typora alternative with tabs and a file-tree workspace. Open source, for Windows, macOS and Android." />
+  <meta property="og:title" content="EasyMarkdown — Edit Markdown. Touch nothing else." />
+  <meta property="og:description" content="A free, open-source Markdown editor. Keep mode saves a zero-diff result — the bytes you didn't edit stay byte-for-byte. Excel-style table filtering. Windows, macOS and a VS Code extension." />
   <meta property="og:url" content="https://cycyeasy1-svg.github.io/EasyMarkdown/" />
   <meta property="og:locale" content="zh_CN" />
   <meta property="og:locale:alternate" content="en_US" />
   <meta property="og:image" content="https://cycyeasy1-svg.github.io/EasyMarkdown/assets/og.jpg" />
   <meta property="og:image:width" content="1200" />
   <meta property="og:image:height" content="630" />
-  <meta property="og:image:alt" content="EasyMarkdown — 一个窗口，装下所有 .md 文件。免费开源的 Typora 平替。" />
+  <meta property="og:image:alt" content="EasyMarkdown — 像操作 Excel 一样操作 Markdown。免费开源，保持模式零差分保存。" />
   <meta name="twitter:card" content="summary_large_image" />
-  <meta name="twitter:title" content="EasyMarkdown — One window. Every .md file." />
-  <meta name="twitter:description" content="A free Typora alternative with tabs and a file-tree workspace. Open source, for Windows, macOS and Android." />
+  <meta name="twitter:title" content="EasyMarkdown — Edit Markdown. Touch nothing else." />
+  <meta name="twitter:description" content="A free, open-source Markdown editor. Keep mode saves a zero-diff result — the bytes you didn't edit stay byte-for-byte. Excel-style table filtering." />
   <meta name="twitter:image" content="https://cycyeasy1-svg.github.io/EasyMarkdown/assets/og.jpg" />
 
   <!-- 结构化数据 -->
@@ -38,7 +38,7 @@
     "url": "https://cycyeasy1-svg.github.io/EasyMarkdown/",
     "applicationCategory": "Productivity",
     "operatingSystem": "Windows, macOS (Apple Silicon & Intel), Android",
-    "softwareVersion": "1.0.13",
+    "softwareVersion": "1.1.0",
     "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
     "license": "https://opensource.org/licenses/MIT",
     "downloadUrl": "https://github.com/cycyeasy1-svg/EasyMarkdown/releases/latest",
@@ -49,7 +49,7 @@
       "url": "https://github.com/cycyeasy1-svg"
     },
     "sameAs": ["https://github.com/cycyeasy1-svg/EasyMarkdown"],
-    "description": "A free Typora alternative with tabs and a file-tree workspace. 免费开源的 Typora 平替：标签页 + 文件树 + 所见即所得。"
+    "description": "A free, open-source Markdown editor. Keep mode treats the original file as the source of truth and rewrites only the lines you edited, so saving leaves a zero diff; tables support Excel-style column filtering. 免费开源的 Markdown 编辑器：保持模式零差分保存，未编辑的字节一个都不动；表格支持 Excel 式列筛选。"
   }
   </script>
   <!-- 無印风：纯系统字体栈，无外部字体 -->
@@ -62,7 +62,7 @@
     <a class="nav-brand" href="#top" aria-label="EasyMarkdown">
       <img src="./assets/icon.png" alt="" width="24" height="24" />
       <span class="brand-name">EasyMarkdown</span>
-      <span class="brand-ver" id="navVersion">v1.0.13</span>
+      <span class="brand-ver" id="navVersion">v1.1.0</span>
     </a>
     <nav class="nav-links">
       <a href="#features" data-i18n="nav.features">特性</a>
@@ -182,7 +182,7 @@
       <a href="https://github.com/cycyeasy1-svg/EasyMarkdown/releases" target="_blank" rel="noopener">RELEASES</a>
       <a href="https://github.com/cycyeasy1-svg/EasyMarkdown/issues" target="_blank" rel="noopener">ISSUES</a>
     </nav>
-    <span class="footer-ver" id="footVersion">v1.0.13</span>
+    <span class="footer-ver" id="footVersion">v1.1.0</span>
   </footer>
 
   <script src="./app.js" defer></script>
