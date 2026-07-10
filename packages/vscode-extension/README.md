@@ -16,8 +16,9 @@ minimal line-range edit, so VSCode owns dirty state, undo/redo and save.
 - **Faithful inline Markdown** — GFM strikethrough, underscore emphasis,
   autolinks, link titles, escaped punctuation and `==highlight==` render in the
   keep view without changing the source.
-- **Tables** — Excel-style per-column filters, add/remove rows & columns, a
-  sticky floating header for wide tables, rich copy (cell / row / column / table).
+- **Tables** — Excel-style per-column filters, add/remove rows & columns,
+  drag-to-resize and auto-fit, temporary hide/restore controls, a sticky
+  floating header for wide tables, and rich copy (cell / row / column / table).
 - **Task lists** — `- [ ]` / `- [x]` render as real checkboxes; a click toggles
   exactly that source line.
 - **YAML frontmatter** — the `---` block at the top renders as a metadata card,
@@ -32,6 +33,8 @@ minimal line-range edit, so VSCode owns dirty state, undo/redo and save.
 - **Find & replace** — `Ctrl+F` / `Cmd+F` in-document search with match count and
   next/prev; the chevron opens a replace row (replace one / all, source-based and
   zero-diff).
+- **VSCode Search handoff** — opening a Markdown result in Keep mode carries the
+  selected match into the rendered view for precise find/highlight positioning.
 - **Scroll sync** — "Open Keep View to the Side" keeps the keep view and the
   source editor scroll-locked both ways (`easymarkdown.keep.scrollSync`).
 - **Settings** (the gear button) — color **theme** (follow VSCode, or the built-in

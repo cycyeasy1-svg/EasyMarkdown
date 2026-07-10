@@ -1,15 +1,19 @@
 # Changelog
 
 ## 1.3.4
-<!-- head: 46e7f84 -->
+<!-- head: a10639f -->
 
 - **More faithful inline Markdown** — GFM strikethrough, underscore emphasis,
   autolinks, link titles, escaped punctuation, nested URL parentheses and
   `==highlight==` now render consistently with EasyMarkdown's rich editor.
 - **Optional blank-line spacing** — the in-editor Settings panel can preserve
   deliberate runs of consecutive blank lines without changing the source.
-- **Improved table sizing** — Keep tables allocate column widths from their
-  headers and cell content, making wide specification tables easier to scan.
+- **Flexible table columns** — Keep tables start from content-aware widths and
+  support drag resizing, per-column or whole-table auto-fit, and temporary
+  hide/restore controls without changing the Markdown source.
+- **Search results stay in context** — opening a Markdown hit from VSCode Search
+  in Keep mode carries the selected match into the rendered view and highlights
+  the nearest source block when the matched syntax is not directly visible.
 - **Fix: SCM diffs stay source-based** — Keep mode no longer takes over VSCode
   diff editors or exposes mode-switch actions inside a diff.
 - **Fix: remembered-mode switching no longer leaves duplicate tabs** — preview
