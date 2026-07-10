@@ -87,3 +87,37 @@ test('blank-line spacing is off by default and adds a gap once enabled', async (
     await cleanup()
   }
 })
+
+test('repeated blank lines added inside a list survive block-edit confirmation', async () => {
+  const { page, cleanup } = await openFixture()
+  try {
+    // Enable the display option, then reproduce the reported path: edit one list
+    // block, insert several blank lines between two items, and confirm.
+    await page.locator('.statusbar button[title="设置"]').click()
+    const row = page.locator('.hm-set-row', { hasText: '保留连续空行' })
+    await row.locator('button.hm-switch').click()
+    await page.locator('.hm-settings-close').click()
+
+    const block = page.locator('.km-block', { has: page.locator('ul') })
+    await block.hover()
+    await block.locator('.km-src-edit').click()
+    await page.locator('.km-src-editor').fill('- tight one\n\n\n\n- tight two')
+    await page.locator('.km-src-actions button.ok').click()
+
+    // Three source blank lines = one normal loose-list separator + two extra
+    // display lines, attached to the following list item.
+    const spaced = page.locator('.km-doc ul > li[data-list-gap][data-gap="2"]')
+    await expect(spaced).toHaveCount(1)
+    await expect(spaced).toContainText('tight two')
+    // The list itself stays tight: only the item after the source blank run gets
+    // the large local gap. This is the regression shown in the user's screenshot.
+    await expect(page.locator('.km-doc ul.km-loose')).toHaveCount(0)
+    const first = page.locator('.km-doc ul > li').first()
+    const firstMargin = parseFloat(await first.evaluate((el) => getComputedStyle(el).marginTop))
+    const spacedMargin = parseFloat(await spaced.evaluate((el) => getComputedStyle(el).marginTop))
+    expect(firstMargin).toBeLessThan(10)
+    expect(spacedMargin).toBeGreaterThan(30)
+  } finally {
+    await cleanup()
+  }
+})

@@ -29,6 +29,7 @@ import { enhanceKeepTables } from '../../../src/renderer/src/components/editor-t
 import {
   clearFindHighlights,
   findRangesInEl,
+  findRangeIndexFromStart,
   paintFindHighlights,
   scrollRangeIntoView,
   findMatchesInText,
@@ -89,10 +90,12 @@ const host = document.getElementById('km-host')
 let lines = [] // \r-stripped source mirror
 let blocks = []
 let filterState = {} // tableIdx -> { colIdx: Set(excluded values) }
+let columnState = {} // tableIdx -> preview-only widths + hidden columns
 let baseUri = '' // webview URI of the document folder, for relative images
 let t = makeT('en')
 let ready = false
 let pendingAnchor = null // #fragment carried by a cross-file link, applied after first paint
+let pendingSearchReveal = null // source selection carried across VSCode Search -> custom editor
 let layout = { ...DEFAULT_SETTINGS } // page width / font size / zoom / line-height / para spacing
 let theme = 'auto' // 'auto' (follow VSCode) | 'warm-light' | 'warm-dark'
 let langPref = 'auto' // 'auto' | 'en' | 'zh' | 'ja' — the raw picker choice
@@ -109,6 +112,7 @@ window.addEventListener('message', (e) => {
   const msg = e.data
   if (!msg) return
   if (msg.type === 'init') {
+    columnState = {}
     baseUri = (msg.baseUri || '').replace(/\/+$/, '')
     t = makeT(msg.lang || 'en')
     langPref = msg.langPref || 'auto'
@@ -120,11 +124,14 @@ window.addEventListener('message', (e) => {
     ensureOutlineButton()
     ensureSettingsButton()
     if (msg.anchor) pendingAnchor = msg.anchor // consumed by finishRender
+    if (msg.reveal) pendingSearchReveal = msg.reveal // consumed by finishRender
     setText(msg.text || '')
   } else if (msg.type === 'scrollToAnchor') {
     scrollToAnchor(msg.slug)
   } else if (msg.type === 'scrollToLine') {
     scrollToSourceLine(msg.line | 0)
+  } else if (msg.type === 'revealSearchMatch') {
+    queueSearchReveal(msg.reveal)
   } else if (msg.type === 'update') {
     // External edit / undo / redo — reset the mirror and re-render. Any open edit
     // popover is torn down (its anchor may no longer exist).
@@ -199,7 +206,8 @@ function rerender() {
   const r = renderDoc(lines, filterState, {
     srcEditLabel: t('keep.editSource'),
     collapseLabel: t('keep.toggleSection'),
-    interactiveTasks: true // task checkboxes are clickable; onClick writes the toggle back
+    interactiveTasks: true, // task checkboxes are clickable; onClick writes the toggle back
+    blankLineSpacing: !!layout.blankLineSpacing
   })
   r.blocks.forEach((b, i) => {
     b.bi = i
@@ -245,6 +253,8 @@ function finishRender() {
   // them once the document is painted and tear the old ones down first.
   tableScroll?.destroy()
   tableScroll = enhanceKeepTables(host, host.closest('.editor-scroll'), {
+    columnState,
+    t,
     onFilterClick: (clonedBtn) => openFilterPop(clonedBtn),
     onHeaderEdit: (clonedTh) => {
       // Resolve the clicked clone to the REAL <th> (same data-line/data-ci → same
@@ -266,6 +276,11 @@ function finishRender() {
     const a = pendingAnchor
     pendingAnchor = null
     scrollToAnchor(a)
+  }
+  if (pendingSearchReveal) {
+    const reveal = pendingSearchReveal
+    pendingSearchReveal = null
+    requestAnimationFrame(() => revealSearchMatch(reveal))
   }
 }
 
@@ -889,6 +904,7 @@ function doInsertColumn(ti, colIdx) {
     }
   })
   delete filterState[ti]
+  delete columnState[ti]
   rerender()
 }
 function doDeleteColumn(ti, colIdx) {
@@ -900,6 +916,7 @@ function doDeleteColumn(ti, colIdx) {
     }
   })
   delete filterState[ti]
+  delete columnState[ti]
   rerender()
 }
 
@@ -950,6 +967,21 @@ function buildTableItems(items, ti, ri, ci, isHeader) {
   items.push('sep')
   items.push({ label: t('keep.colInsertLeft'), fn: () => doInsertColumn(ti, ci) })
   items.push({ label: t('keep.colInsertRight'), fn: () => doInsertColumn(ti, ci + 1) })
+  items.push('sep')
+  items.push({
+    label: t('keep.autoFitColumn'),
+    fn: () => tableScroll?.autoFitColumn(ti, ci)
+  })
+  items.push({
+    label: t('keep.tableAutoFit'),
+    fn: () => tableScroll?.autoFitTable(ti)
+  })
+  const columnName = (b?.headers[ci] || '').trim() || t('keep.columnNumber', { number: ci + 1 })
+  items.push({
+    label: t('keep.hideColumn', { name: columnName }),
+    fn: () => tableScroll?.hideColumn(ti, ci),
+    disabled: !tableScroll?.canHideColumn(ti, ci)
+  })
   items.push('sep')
   if (!isHeader) items.push({ label: t('keep.rowDelete'), fn: () => doDeleteRow(ti, ri) })
   items.push({
@@ -1248,8 +1280,10 @@ function postLayout() {
   vscode.postMessage({ type: 'layout', layout: layout })
 }
 function setLayout(key, value) {
+  const renderOptionChanged = key === 'blankLineSpacing' && !!layout[key] !== !!value
   layout = { ...layout, [key]: value }
   applyLayout(layout)
+  if (renderOptionChanged) rerender()
   postLayout()
 }
 
@@ -1357,6 +1391,30 @@ function buildChoiceRow(label, options, getCurrent, onPick) {
   })
   row.appendChild(chips)
   sync()
+  return row
+}
+
+// A persisted boolean rendering option. Unlike numeric typography controls,
+// blank-line spacing changes the generated block markup and therefore triggers
+// a document repaint in setLayout().
+function buildToggleRow(label, description, key) {
+  const row = document.createElement('label')
+  row.className = 'km-lo-row km-lo-toggle-row'
+  const copy = document.createElement('span')
+  copy.className = 'km-lo-toggle-copy'
+  const title = document.createElement('span')
+  title.className = 'km-lo-label'
+  title.textContent = label
+  const desc = document.createElement('span')
+  desc.className = 'km-lo-desc'
+  desc.textContent = description
+  copy.append(title, desc)
+  const checkbox = document.createElement('input')
+  checkbox.type = 'checkbox'
+  checkbox.className = 'km-lo-check'
+  checkbox.checked = !!layout[key]
+  checkbox.addEventListener('change', () => setLayout(key, checkbox.checked))
+  row.append(copy, checkbox)
   return row
 }
 
@@ -1518,6 +1576,13 @@ function openSettingsPop() {
       fmt: (v) => Number(v).toFixed(1) + 'em'
     })
   )
+  pop.appendChild(
+    buildToggleRow(
+      t('settings.blankLineSpacing'),
+      t('settings.blankLineSpacingDesc'),
+      'blankLineSpacing'
+    )
+  )
   document.body.appendChild(pop)
   settingsPop = pop
   if (settingsBtn) settingsBtn.classList.add('active')
@@ -1657,6 +1722,7 @@ let findCountEl = null
 let findRanges = []
 let findIdx = 0
 let findQuery = ''
+let findStart = null
 let replaceRow = null
 let replaceInput = null
 let replaceToggle = null
@@ -1796,6 +1862,8 @@ function replaceAll() {
 }
 function openFind() {
   ensureFindBar()
+  const scroller = host.closest('.editor-scroll')
+  findStart = scroller ? { kind: 'viewport', scroller, scrollTop: scroller.scrollTop } : null
   findBar.style.display = 'flex'
   const sel = (window.getSelection?.().toString() || '').trim()
   if (sel && sel.length <= 80 && !sel.includes('\n')) findInput.value = sel
@@ -1804,6 +1872,120 @@ function openFind() {
   if (findInput.value) runFind(findInput.value)
   else updateFindCount()
 }
+function queueSearchReveal(reveal) {
+  if (!reveal || !reveal.text) return
+  pendingSearchReveal = reveal
+  // An init-triggered render consumes this in finishRender. For an already-live
+  // retained webview there may be no render pending, so apply it on the next
+  // frame against the current DOM.
+  if (host.querySelector('.km-block')) {
+    requestAnimationFrame(() => {
+      if (pendingSearchReveal !== reveal) return
+      pendingSearchReveal = null
+      revealSearchMatch(reveal)
+    })
+  }
+}
+function sourceLineForRange(range) {
+  const node = range?.startContainer
+  const el = node?.nodeType === 3 ? node.parentElement : node
+  if (!el) return null
+  // Tables carry exact source-line metadata. Other rendered structures are
+  // scored by their enclosing block below.
+  const exact = el.closest('td[data-line], th[data-line]')
+  if (exact) {
+    const line = Number(exact.getAttribute('data-line'))
+    if (Number.isFinite(line)) return line
+  }
+  return null
+}
+function blockIndexForRange(range) {
+  const node = range?.startContainer
+  const el = node?.nodeType === 3 ? node.parentElement : node
+  const block = el?.closest('.km-block[data-bi]')
+  const bi = Number(block?.getAttribute('data-bi'))
+  return Number.isFinite(bi) ? bi : -1
+}
+function sourceOccurrenceOrdinal(query, target, startLine, endLine) {
+  const targetLine = Math.max(startLine, Math.min(target.line | 0, endLine))
+  let ordinal = 0
+  for (let li = startLine; li <= targetLine; li++) {
+    const matches = findMatchesInText(lines[li] || '', query).matches
+    if (li < targetLine) {
+      ordinal += matches.length
+      continue
+    }
+    if (!matches.length) return 0
+    let nearest = 0
+    let distance = Infinity
+    for (let i = 0; i < matches.length; i++) {
+      const d = Math.abs(matches[i].index - (target.character | 0))
+      if (d < distance) {
+        nearest = i
+        distance = d
+      }
+    }
+    return ordinal + nearest
+  }
+  return 0
+}
+function findRangeIndexForSourceTarget(ranges, query, target) {
+  if (!ranges.length || !target) return 0
+  const line = Math.max(0, target.line | 0)
+  const mapped = ranges.map((range, index) => {
+    const bi = blockIndexForRange(range)
+    const block = blocks[bi]
+    let distance = Number.MAX_SAFE_INTEGER
+    if (block) {
+      if (line < block.start) distance = block.start - line
+      else if (line > block.end) distance = line - block.end
+      else distance = 0
+    }
+    return { index, bi, block, exactLine: sourceLineForRange(range), distance }
+  })
+  const exact = mapped.filter((item) => item.exactLine === line)
+  let candidates = exact
+  if (!candidates.length) {
+    const minDistance = Math.min(...mapped.map((item) => item.distance))
+    candidates = mapped.filter((item) => item.distance === minDistance)
+  }
+  if (!candidates.length) return 0
+  const block = candidates[0].block
+  const startLine = exact.length ? line : block?.start ?? line
+  const endLine = exact.length ? line : block?.end ?? line
+  const ordinal = sourceOccurrenceOrdinal(query, target, startLine, endLine)
+  return candidates[Math.min(ordinal, candidates.length - 1)].index
+}
+function flashSourceBlock(line) {
+  let bi = blocks.findIndex((b) => line >= b.start && line <= b.end)
+  if (bi < 0) bi = blocks.findIndex((b) => b.start > line)
+  if (bi < 0) bi = blocks.length - 1
+  const el = host.querySelector('.km-block[data-bi="' + bi + '"]')
+  if (!el) return
+  el.classList.remove('km-search-reveal')
+  requestAnimationFrame(() => el.classList.add('km-search-reveal'))
+  setTimeout(() => el.classList.remove('km-search-reveal'), 1800)
+}
+function revealSearchMatch(reveal) {
+  const line = Math.max(0, reveal.line | 0)
+  scrollToSourceLine(line)
+  const query = String(reveal.text || '')
+  if (!query || query.length > 1000 || /[\r\n]/.test(query)) {
+    flashSourceBlock(line)
+    return
+  }
+  ensureFindBar()
+  findBar.style.display = 'flex'
+  findInput.value = query
+  const found = runFind(query, {
+    line,
+    character: Math.max(0, reveal.character | 0)
+  })
+  // Markdown syntax can be searchable in source while intentionally absent
+  // from the rendered view (for example a link URL). Keep the line location
+  // useful even when there is no rendered text range to paint.
+  if (!found) flashSourceBlock(line)
+}
 function closeFind() {
   if (!findBar) return
   findBar.style.display = 'none'
@@ -1811,7 +1993,7 @@ function closeFind() {
   findRanges = []
   clearFindHighlights()
 }
-function runFind(q) {
+function runFind(q, sourceTarget = null) {
   findQuery = q
   clearFindHighlights()
   const raw = q ? findRangesInEl(host, q).ranges : []
@@ -1823,10 +2005,13 @@ function runFind(q) {
       !el.closest('.km-src-edit, .km-filter-btn, .km-collapse-toggle')
     )
   })
-  findIdx = 0
+  findIdx = sourceTarget
+    ? findRangeIndexForSourceTarget(findRanges, q, sourceTarget)
+    : findRangeIndexFromStart(findRanges, findStart)
   paintFindHighlights(findRanges, findIdx)
   updateFindCount()
   if (findRanges[findIdx]) scrollRangeIntoView(findRanges[findIdx], host.closest('.editor-scroll'))
+  return findRanges.length
 }
 function stepFind(dir) {
   if (!findRanges.length) return

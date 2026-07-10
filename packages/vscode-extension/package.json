@@ -7,6 +7,11 @@
   "author": {
     "name": "Easy Chen"
   },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/cycyeasy1-svg/EasyMarkdown.git",
+    "directory": "packages/vscode-extension"
+  },
   "license": "MIT",
   "icon": "icon.png",
   "engines": {
@@ -168,6 +173,7 @@
   },
   "dependencies": {
     "katex": "^0.16.11",
+    "markdown-it": "^14.3.0",
     "mermaid": "^11.15.0"
   }
 }

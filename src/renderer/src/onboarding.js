@@ -28,7 +28,7 @@ const EN = `# EasyMarkdown — User Guide 📝
 - **Excel-style column filter** — click the **▼** on a column header, then check values or search to temporarily hide rows. Multiple columns combine with AND; the status bar shows \`Filtered X/Y\` — click it to clear every filter at once (right-click a table to clear just that one). **Display only — it never touches the file or affects saving.**
 - **Zero-diff save** — no re-formatting, no whitespace/bullet/quote churn, line endings preserved (mixed LF/CRLF kept as-is). \`git diff\` shows exactly the edits you made and nothing else.
 
-Keep mode renders headings, paragraphs, lists, tables, code blocks, quotes, horizontal rules, GFM task lists (tick them directly) and YAML frontmatter (shown as an info card), with inline **bold**, *italic*, \`code\`, links and \`<br>\`. A code block — including a \`\`\`mermaid one — stays shown as its source text in keep mode; that's expected, not a failure. For slash commands, LaTeX math, rendered Mermaid diagrams and inline image preview, switch to Milkdown mode.
+Keep mode renders headings, paragraphs, lists, tables, code blocks, quotes, horizontal rules, GFM task lists (tick them directly) and YAML frontmatter (shown as an info card), with inline **bold**, *italic*, ~~strikethrough~~, \`code\`, links, autolinks, ==highlights== and \`<br>\`. A list separated by blank lines is shown as a loose list. A code block — including a \`\`\`mermaid one — stays shown as its source text in keep mode; that's expected, not a failure. For slash commands, LaTeX math, rendered Mermaid diagrams and inline image preview, switch to Milkdown mode.
 
 ## General features
 
@@ -38,7 +38,7 @@ Keep mode renders headings, paragraphs, lists, tables, code blocks, quotes, hori
 - **Outline panel** — click a heading to jump; follows your edits live.
 - **Find / Replace** (\`Ctrl+F\` / \`Ctrl+H\`) — search and replace (one or all), or click the mode button to switch to **Go to line** and jump by line number.
 - **Workspace search** (\`Ctrl+Shift+F\`) — search across every file in the open folder, with case-sensitive, whole-word and regex options; click a hit to jump straight to that line.
-- **Settings panel** (\`Ctrl+,\`) — editing, layout, appearance and language in one place. Turn on autosave and spellcheck (both off by default), or make EasyMarkdown the default app for \`.md\` files.
+- **Settings panel** (\`Ctrl+,\`) — editing, layout, appearance and language in one place. Turn on autosave, spellcheck, or **Honor blank lines** for keep mode (all off by default), or make EasyMarkdown the default app for \`.md\` files.
 - **Export & print** — PDF (\`Ctrl+Shift+E\`), HTML (\`Ctrl+Shift+H\`, a self-contained single file with images embedded), and system print (\`Ctrl+Alt+P\`).
 - **Themes** — Warm Light / Dark plus four **Morandi** palettes (Sage, Rose, Mist, Dusk), and Typora-compatible custom \`.css\` themes.
 - **Languages** — English / 中文 / 日本語, switchable anytime (bottom-right); the app menu follows along.
@@ -90,7 +90,7 @@ const ZH = `# EasyMarkdown 使用说明 📝
 - **Excel 式列筛选** —— 点表头的 **▼**，勾选取值或搜索，临时隐藏不需要的行。多列之间为 AND；状态栏显示「筛选 X/Y」，点它可一键清除全部筛选（表格右键也能只清除该表）。**仅影响显示，绝不写入文件、不影响保存。**
 - **零差分保存** —— 不重排版，不动空白/符号/引用，行尾保留（LF/CRLF 混排原样保留）。\`git diff\` 里只出现你真正改动的那几处，别无其他。
 
-保持模式可渲染标题、段落、列表、表格、代码块、引用、分隔线、GFM 任务列表（可直接勾选）和 YAML frontmatter（显示为信息卡片），以及行内 **粗体**、*斜体*、\`代码\`、链接和 \`<br>\`。代码块——包括 \`\`\`mermaid 块——在保持模式下保持源码原样显示，这是正常的，不是渲染失败。需要斜杠菜单、LaTeX 公式、渲染后的 Mermaid 图、行内图片预览时，切到 Milkdown 模式。
+保持模式可渲染标题、段落、列表、表格、代码块、引用、分隔线、GFM 任务列表（可直接勾选）和 YAML frontmatter（显示为信息卡片），以及行内 **粗体**、*斜体*、~~删除线~~、\`代码\`、链接、自动链接、==高亮== 和 \`<br>\`。被空行隔开的列表会按宽松列表显示。代码块——包括 \`\`\`mermaid 块——在保持模式下保持源码原样显示，这是正常的，不是渲染失败。需要斜杠菜单、LaTeX 公式、渲染后的 Mermaid 图、行内图片预览时，切到 Milkdown 模式。
 
 ## 通用功能
 
@@ -100,7 +100,7 @@ const ZH = `# EasyMarkdown 使用说明 📝
 - **大纲面板** —— 点标题跳转，随编辑实时更新。
 - **查找 / 替换**（\`Ctrl+F\` / \`Ctrl+H\`）—— 文本检索与替换（单个或全部），或点模式按钮切到**按行号定位**，输入行号跳转。
 - **工作区全文搜索**（\`Ctrl+Shift+F\`）—— 在打开的文件夹内跨文件搜索，支持区分大小写、全词匹配与正则，点结果直接跳到对应行。
-- **设置面板**（\`Ctrl+,\`）—— 编辑、排版、外观、语言集中一处。可开启自动保存与拼写检查（两者默认关闭），也能把 EasyMarkdown 设为 \`.md\` 的默认打开程序。
+- **设置面板**（\`Ctrl+,\`）—— 编辑、排版、外观、语言集中一处。可开启自动保存、拼写检查与保持模式的「保留连续空行」（默认均关闭），也能把 EasyMarkdown 设为 \`.md\` 的默认打开程序。
 - **导出与打印** —— 导出 PDF（\`Ctrl+Shift+E\`）、导出 HTML（\`Ctrl+Shift+H\`，单文件自包含、图片一并内嵌）、系统打印（\`Ctrl+Alt+P\`）。
 - **多套主题** —— 暖光 / 暖夜，外加四套**莫兰迪**配色（灰绿、豆沙、雾蓝、暮），并支持 Typora 兼容的自定义 \`.css\` 主题。
 - **多语言** —— 英文 / 中文 / 日文随时切换（右下角），应用菜单一并跟随。
@@ -152,7 +152,7 @@ const JA = `# EasyMarkdown 使い方ガイド 📝
 - **Excel 風の列フィルタ** —— 列ヘッダの **▼** をクリックし、値のチェックや検索で行を一時的に隠します。複数列は AND。ステータスバーに「絞り込み X/Y」と表示され、クリックすると全フィルタを一括解除できます（表を右クリックすればその表だけ解除）。**表示専用で、ファイルには一切触れず、保存にも影響しません。**
 - **差分ゼロ保存** —— 再整形なし、空白・記号・引用の揺れなし、改行コードも保持（LF/CRLF 混在もそのまま）。\`git diff\` には実際に編集した箇所だけが現れます。
 
-キープモードは見出し・段落・リスト・表・コードブロック・引用・水平線に加え、GFM タスクリスト（そのままチェック可能）と YAML frontmatter（情報カードとして表示）を描画し、インラインの **太字**・*斜体*・\`コード\`・リンク・\`<br>\` に対応します。コードブロック（\`\`\`mermaid を含む）はキープモードではソースのまま表示されます。これは正常で、描画失敗ではありません。スラッシュコマンド、LaTeX 数式、描画された Mermaid 図、インライン画像プレビューが必要な場合は Milkdown モードに切り替えてください。
+キープモードは見出し・段落・リスト・表・コードブロック・引用・水平線に加え、GFM タスクリスト（そのままチェック可能）と YAML frontmatter（情報カードとして表示）を描画し、インラインの **太字**・*斜体*・~~取り消し線~~・\`コード\`・リンク・自動リンク・==ハイライト==・\`<br>\` に対応します。空行で区切られたリストはゆったりしたリストとして表示されます。コードブロック（\`\`\`mermaid を含む）はキープモードではソースのまま表示されます。これは正常で、描画失敗ではありません。スラッシュコマンド、LaTeX 数式、描画された Mermaid 図、インライン画像プレビューが必要な場合は Milkdown モードに切り替えてください。
 
 ## 共通機能
 
@@ -162,7 +162,7 @@ const JA = `# EasyMarkdown 使い方ガイド 📝
 - **アウトラインパネル** —— 見出しをクリックでジャンプ。編集に追従。
 - **検索 / 置換**（\`Ctrl+F\` / \`Ctrl+H\`）—— テキストの検索と置換（1 件 / 全件）、またはモードボタンで**行番号ジャンプ**に切り替え。
 - **ワークスペース全文検索**（\`Ctrl+Shift+F\`）—— 開いているフォルダ内をファイル横断で検索。大文字小文字の区別・単語単位・正規表現に対応し、結果をクリックすると該当行へ移動します。
-- **設定パネル**（\`Ctrl+,\`）—— 編集・レイアウト・外観・言語を 1 か所に集約。自動保存とスペルチェック（いずれも既定オフ）を有効化でき、\`.md\` の既定アプリを EasyMarkdown に設定することもできます。
+- **設定パネル**（\`Ctrl+,\`）—— 編集・レイアウト・外観・言語を 1 か所に集約。自動保存、スペルチェック、キープモードの「連続する空行を活かす」（いずれも既定オフ）を有効化でき、\`.md\` の既定アプリを EasyMarkdown に設定することもできます。
 - **書き出しと印刷** —— PDF（\`Ctrl+Shift+E\`）、HTML（\`Ctrl+Shift+H\`、画像を埋め込んだ自己完結の単一ファイル）、システム印刷（\`Ctrl+Alt+P\`）。
 - **テーマ** —— 暖かいライト / ダークに加え 4 種の **モランディ** パレット（セージ・ローズ・ミスト・ダスク）、Typora 互換のカスタム \`.css\` テーマにも対応。
 - **多言語** —— 英語 / 中文 / 日本語をいつでも切り替え（右下）。アプリのメニューも追従します。

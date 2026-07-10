@@ -387,6 +387,20 @@ describe('loose list rendering', () => {
     expect(html).toContain('<ul class="km-loose">')
     expect(html).toContain('<li>a<ul><li>x</li>') // the sublist gets no class
   })
+  it('preserves repeated blank-line counts between list items when enabled', () => {
+    const lines = ['1. parent', '   - child one', '', '', '', '   - child two']
+    const block = parseDoc(lines)[0]
+    expect(renderBlockInner(block, 0, lines, {})).not.toContain('data-gap=')
+    expect(renderBlockInner(block, 0, lines, { blankLineSpacing: true })).toContain(
+      '<li data-list-gap data-gap="2" style="--km-gap:2">child two'
+    )
+  })
+  it('localizes a single loose-list blank to the following item when exact spacing is enabled', () => {
+    const lines = ['- a', '', '- b']
+    const html = renderBlockInner(parseDoc(lines)[0], 0, lines, { blankLineSpacing: true })
+    expect(html).not.toContain('km-loose')
+    expect(html).toContain('<li data-list-gap data-gap="0" style="--km-gap:0">b')
+  })
 })
 
 describe('blank-line spacing (opt-in, display only)', () => {

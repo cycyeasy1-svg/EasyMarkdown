@@ -9,3 +9,4 @@ esbuild.mjs
 .gitignore
 **/*.map
 **/*.vsix
+RELEASE_NOTES.zh-CN.md

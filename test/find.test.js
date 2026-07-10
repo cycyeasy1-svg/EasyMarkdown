@@ -1,8 +1,15 @@
-// Pure find-helper logic: case-insensitive match offsets and source-line →
-// block-index mapping. The DOM-highlighting helpers (CSS Custom Highlight API)
-// are intentionally not covered here — they belong to the future E2E layer.
+// Find-helper logic: matching/replacement, location-aware result starts, and
+// source-line → block-index mapping. CSS Custom Highlight painting itself stays
+// in the E2E layer.
 import { describe, it, expect } from 'vitest'
-import { matchIndices, findMatchesInText, replaceMatchesInText, docBlocks, blockIndexForLine } from '../src/renderer/src/find.js'
+import {
+  matchIndices,
+  findMatchesInText,
+  findRangeIndexFromStart,
+  replaceMatchesInText,
+  docBlocks,
+  blockIndexForLine
+} from '../src/renderer/src/find.js'
 
 describe('matchIndices', () => {
   it('returns all case-insensitive match offsets', () => {
@@ -33,6 +40,39 @@ describe('findMatchesInText', () => {
   it('supports regular expressions and reports invalid patterns', () => {
     expect(offsets(findMatchesInText('A-1 B-22', '[A-Z]-\\d+', { regex: true }))).toEqual([[0, 3], [4, 4]])
     expect(findMatchesInText('abc', '[', { regex: true })).toMatchObject({ matches: [], error: 'regex' })
+  })
+})
+
+describe('findRangeIndexFromStart', () => {
+  it('starts at the first match at or after the Milkdown cursor and wraps', () => {
+    const ranges = [5, 10, 20].map((position) => ({
+      compareBoundaryPoints: (_how, cursor) => Math.sign(position - cursor.position)
+    }))
+    expect(
+      findRangeIndexFromStart(ranges, { kind: 'cursor', range: { position: 15 } })
+    ).toBe(2)
+    expect(
+      findRangeIndexFromStart(ranges, { kind: 'cursor', range: { position: 30 } })
+    ).toBe(0)
+  })
+
+  it('starts at the first rendered keep-mode match in or below the captured viewport', () => {
+    const scroller = {
+      scrollTop: 100,
+      getBoundingClientRect: () => ({ top: 10 })
+    }
+    const rangeAtContentBottom = (bottom) => ({
+      getBoundingClientRect: () => ({
+        top: bottom - scroller.scrollTop + 2,
+        bottom: bottom - scroller.scrollTop + 10,
+        width: 40,
+        height: 8
+      })
+    })
+    const ranges = [rangeAtContentBottom(60), rangeAtContentBottom(120), rangeAtContentBottom(240)]
+    expect(
+      findRangeIndexFromStart(ranges, { kind: 'viewport', scroller, scrollTop: 100 })
+    ).toBe(1)
   })
 })
 

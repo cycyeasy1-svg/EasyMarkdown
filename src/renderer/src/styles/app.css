@@ -759,6 +759,93 @@ button:focus-visible,
   background: var(--accent-strong);
 }
 
+/* ---- Keep ⇄ Milkdown confirmation ---- */
+.hm-confirm-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 260;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(15, 18, 24, 0.34);
+  backdrop-filter: blur(2px);
+  animation: menuFadeIn 0.12s var(--ease-out);
+}
+.hm-mode-switch {
+  width: min(520px, 92vw);
+  padding: 20px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+}
+.hm-mode-switch-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 13px;
+}
+.hm-mode-switch-icon {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 36px;
+  height: 36px;
+  color: #b86b00;
+  background: color-mix(in srgb, #e39418 16%, transparent);
+  border-radius: 50%;
+}
+.hm-mode-switch-title {
+  color: var(--text-strong);
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.4;
+}
+.hm-mode-switch-message {
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.65;
+}
+.hm-mode-switch-actions {
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 20px;
+}
+.hm-mode-switch-actions button {
+  min-height: 34px;
+  padding: 7px 14px;
+  color: var(--text);
+  background: var(--hover);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  transition: background 0.12s, border-color 0.12s, color 0.12s;
+}
+.hm-mode-switch-actions button:hover:not(:disabled) {
+  background: var(--active);
+  border-color: var(--border);
+}
+.hm-mode-switch-actions button.primary {
+  color: #fff;
+  background: var(--accent);
+  border-color: transparent;
+}
+.hm-mode-switch-actions button.primary:hover:not(:disabled) {
+  background: var(--accent-strong);
+}
+.hm-mode-switch-actions button:disabled {
+  cursor: wait;
+  opacity: 0.62;
+}
+@media (max-width: 560px) {
+  .hm-confirm-overlay { padding: 14px; }
+  .hm-mode-switch { padding: 18px; }
+  .hm-mode-switch-actions { flex-direction: column-reverse; }
+  .hm-mode-switch-actions button { width: 100%; }
+}
+
 /* ============================================================
    Lightweight popovers (page width · image host)
    Minimal, roomy, with a sliding segmented control. Shared base
@@ -4204,6 +4291,24 @@ body.hm-full-width .km-doc {
    threw the blank line away. */
 .km-doc ul.km-loose > li,
 .km-doc ol.km-loose > li { margin: calc(0.8em * var(--editor-para-scale, 1)) 0; }
+/* With exact blank-line display enabled, render the gap ONLY on the item whose
+   source is preceded by blanks. Do not keep `km-loose` on the whole list: that
+   would turn one local blank run into increased spacing between every item.
+   The first blank gets the normal loose-item gap; each additional blank buys one
+   full line. `data-gap` stores that additional count. */
+.km-doc li[data-list-gap] {
+  margin-top: calc(
+    0.8em * var(--editor-para-scale, 1) +
+    var(--km-gap, 0) * var(--editor-line-height, 1.8) * 1em * var(--editor-para-scale, 1)
+  );
+}
+.km-list-inline-gap {
+  display: block;
+  height: calc(
+    0.8em * var(--editor-para-scale, 1) +
+    var(--km-gap, 0) * var(--editor-line-height, 1.8) * 1em * var(--editor-para-scale, 1)
+  );
+}
 /* `==highlight==`, and the `<mark class="hm-hl-…">` form the rich editor writes for
    red/blue. Same palette as the .milkdown marks above — one document must not
    change color when you switch editing modes. */
@@ -4302,6 +4407,49 @@ body.dark .km-doc mark.hm-hl-blue { background: #2f4a6b; }
 }
 
 /* Tables — Excel-style with per-column filter + double-click cell editing. */
+.km-table-frame {
+  position: relative;
+  margin: calc(1.2em * var(--editor-para-scale, 1)) 0;
+}
+.km-table-tools {
+  display: flex;
+  min-height: 26px;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-bottom: 5px;
+  opacity: 0.7;
+  transition: opacity 0.14s var(--ease-out);
+}
+.km-table-frame:hover .km-table-tools,
+.km-table-frame:focus-within .km-table-tools {
+  opacity: 1;
+}
+.km-table-tool {
+  min-height: 24px;
+  padding: 3px 8px;
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  font: inherit;
+  font-size: 11px;
+  line-height: 1.2;
+  cursor: pointer;
+  transition: color 0.12s, background 0.12s, border-color 0.12s;
+}
+.km-table-tool:hover,
+.km-table-tool:focus-visible {
+  color: var(--text);
+  background: var(--hover);
+  border-color: var(--border);
+}
+.km-table-frame .km-table-wrap {
+  margin: 0;
+}
+.km-table-frame .km-table-scrolltop {
+  margin-top: 0;
+}
 .km-table-wrap {
   /* The table flows at its natural height so the page scrolls straight through it
      (no inner wheel trap when skimming the doc). Only the X axis scrolls, for
@@ -4435,6 +4583,10 @@ body.dark .km-doc mark.hm-hl-blue { background: #2f4a6b; }
   text-align: left;
   vertical-align: top;
 }
+.km-table .km-col-hidden,
+.km-float-header .km-col-hidden {
+  display: none !important;
+}
 .km-table th {
   background: var(--hover-elevated, var(--border-soft));
   color: var(--text-strong);
@@ -4460,9 +4612,91 @@ body.dark .km-doc mark.hm-hl-blue { background: #2f4a6b; }
 }
 .km-th-flex {
   display: flex;
+  min-width: 0;
   align-items: center;
   gap: 6px;
   justify-content: space-between;
+}
+.km-th-content {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.km-th-actions {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 2px;
+}
+.km-col-hide-btn {
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  color: var(--muted);
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-sm);
+  font: inherit;
+  font-size: 13px;
+  line-height: 20px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.12s, color 0.12s, background 0.12s;
+}
+.km-table th:hover .km-col-hide-btn,
+.km-table th:focus-within .km-col-hide-btn,
+.km-float-header th:hover .km-col-hide-btn,
+.km-float-header th:focus-within .km-col-hide-btn {
+  opacity: 1;
+}
+.km-col-hide-btn:hover,
+.km-col-hide-btn:focus-visible {
+  color: var(--text);
+  background: var(--active);
+  opacity: 1;
+}
+.km-col-hide-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.22;
+}
+.km-col-resize {
+  position: absolute;
+  z-index: 6;
+  top: 0;
+  right: -5px;
+  width: 10px;
+  height: 100%;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  cursor: col-resize;
+  touch-action: none;
+}
+.km-col-resize::after {
+  position: absolute;
+  top: 20%;
+  bottom: 20%;
+  left: 4px;
+  width: 2px;
+  content: '';
+  background: var(--accent);
+  border-radius: 2px;
+  opacity: 0;
+  transform: scaleY(0.65);
+  transition: opacity 0.12s, transform 0.12s;
+}
+.km-table th:hover > .km-col-resize::after,
+.km-col-resize:hover::after,
+.km-col-resize:focus-visible::after,
+.km-column-resizing .km-col-resize::after {
+  opacity: 0.72;
+  transform: scaleY(1);
+}
+body.km-column-resizing,
+body.km-column-resizing * {
+  cursor: col-resize !important;
+  user-select: none !important;
 }
 .km-filter-btn {
   border: none;
@@ -4481,6 +4715,55 @@ body.dark .km-doc mark.hm-hl-blue { background: #2f4a6b; }
 .km-filter-btn.active {
   color: #fff;
   background: var(--accent);
+}
+.km-column-pop {
+  position: fixed;
+  z-index: 1300;
+  width: min(260px, calc(100vw - 16px));
+  max-height: min(360px, calc(100vh - 16px));
+  overflow-y: auto;
+  padding: 6px;
+  color: var(--text);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+}
+.km-column-pop-title {
+  padding: 6px 8px 5px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+}
+.km-column-pop-item {
+  display: block;
+  width: 100%;
+  padding: 7px 8px;
+  overflow: hidden;
+  color: var(--text);
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-sm);
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.35;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.km-column-pop-item:hover,
+.km-column-pop-item:focus-visible {
+  background: var(--hover);
+}
+.km-column-pop-sep {
+  height: 1px;
+  margin: 5px 3px;
+  background: var(--border-soft);
+}
+.km-column-pop-all {
+  color: var(--accent);
+  font-weight: 600;
 }
 /* Enlarged table-cell editor — a floating panel anchored to the cell (keep mode).
    position:fixed so it stays put on scroll (it may hold unsaved edits). */

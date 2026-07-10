@@ -183,6 +183,50 @@ export function findRangesInEl(root, query, options = {}, scopeRange = null) {
   }
   return { ranges: error ? [] : ranges, error }
 }
+
+// Pick the first match at or after the position where find was opened. Milkdown
+// supplies a collapsed DOM Range at the ProseMirror selection head; keep mode
+// supplies the editor's scrollTop so later query edits do not drift after the
+// previous result scrolls into view. If the anchor is past the final match, wrap
+// to the first result just like next-match navigation does.
+export function findRangeIndexFromStart(ranges, start) {
+  if (!ranges?.length || !start) return 0
+
+  if (start.kind === 'cursor' && start.range) {
+    for (let i = 0; i < ranges.length; i++) {
+      try {
+        // Range.START_TO_START is 0. Avoid reading the global Range constructor
+        // here so this helper remains unit-testable in the Node test environment.
+        if (ranges[i].compareBoundaryPoints(0, start.range) >= 0) return i
+      } catch {
+        // A rerender may detach the saved cursor range. Fall back to document start.
+        return 0
+      }
+    }
+    return 0
+  }
+
+  if (start.kind === 'viewport' && start.scroller) {
+    const scroller = start.scroller
+    const startScrollTop = Number(start.scrollTop)
+    if (!Number.isFinite(startScrollTop)) return 0
+    const scrollerRect = scroller.getBoundingClientRect?.()
+    const currentScrollTop = Number(scroller.scrollTop) || 0
+    if (!scrollerRect) return 0
+
+    for (let i = 0; i < ranges.length; i++) {
+      const rect = ranges[i].getBoundingClientRect?.()
+      // Hidden/collapsed matches have no box and cannot represent the visible
+      // screen position. Search onward for the first rendered result.
+      if (!rect || (!rect.width && !rect.height)) continue
+      const contentBottom = rect.bottom - scrollerRect.top + currentScrollTop
+      if (contentBottom >= startScrollTop) return i
+    }
+  }
+
+  return 0
+}
+
 export function paintFindHighlights(ranges, activeIdx) {
   if (!findHighlightSupported) return
   CSS.highlights.delete(FIND_HL)

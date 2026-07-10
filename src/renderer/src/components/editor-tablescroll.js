@@ -1,13 +1,15 @@
 // Keep-mode wide-table affordances.
 //
 // Per rendered `.km-table-wrap` we add:
-//   (1) a synced horizontal scrollbar ABOVE the table (in document flow), so wide
-//       columns can be scrolled sideways without first scrolling to the table's
-//       bottom; and
-//   (2) a viewport-fixed "floating" header — its OWN top scrollbar plus a clone
-//       of the `<thead>` — shown while the real header has scrolled past the top
-//       of the editor viewport, so the column names, their filter ▼, AND the
-//       horizontal scrollbar stay reachable while reading deep rows.
+//   (1) a compact table toolbar (auto-fit + hidden-column recovery);
+//   (2) draggable column edges, with double-click / keyboard auto-fit;
+//   (3) a synced horizontal scrollbar ABOVE the table; and
+//   (4) a viewport-fixed floating header with the same column controls.
+//
+// Column layout is display-only. `columnState` is owned by the caller so manual
+// widths / hidden columns survive a keep-mode DOM repaint without ever touching
+// the Markdown source. Auto-fit restores the parser-generated <col> width hints,
+// which is exactly the same calculation used for the table's initial render.
 //
 // Why JS and not plain CSS `position: sticky`: the wrapper needs `overflow-x:auto`
 // for horizontal scroll, and per the CSS overflow spec that forces `overflow-y`
@@ -15,28 +17,195 @@
 // and defeats a sticky header anchored to the *page* scroller. So we clone the
 // header into a `position: fixed` element and sync width + horizontal scroll by
 // hand. Mirrors the standalone Markdown viewer's approach.
-//
-// `scroller` is the keep doc's scroll parent (`.editor-scroll`); the float pins to
-// the top of THAT element's viewport (the app has a top bar above it), and drops
-// below the find bar while it's open so it never covers the search box.
-// `onFilterClick(clonedBtn)` is invoked when a cloned ▼ is clicked so the host can
-// open the real filter dropdown anchored to the (visible) clone.
 
-export function enhanceKeepTables(host, scroller, { onFilterClick, onHeaderEdit } = {}) {
-  const noop = { update() {}, hide() {}, destroy() {} }
+const FALLBACK_LABELS = {
+  'keep.tableAutoFit': 'Auto-fit all columns',
+  'keep.hiddenColumns': '{count} hidden columns',
+  'keep.hideColumn': 'Hide “{name}”',
+  'keep.showColumn': 'Show “{name}”',
+  'keep.showAllColumns': 'Show all columns',
+  'keep.resizeColumn': 'Drag to resize “{name}”; double-click to auto-fit',
+  'keep.autoFitColumn': 'Auto-fit this column',
+  'keep.columnNumber': 'Column {number}'
+}
+
+const MIN_COLUMN_PX = 72
+const MAX_COLUMN_PX = 1600
+
+function fallbackT(key, vars) {
+  let text = FALLBACK_LABELS[key] || key
+  if (vars) for (const name in vars) text = text.replace('{' + name + '}', vars[name])
+  return text
+}
+
+export function enhanceKeepTables(
+  host,
+  scroller,
+  { onFilterClick, onHeaderEdit, columnState = {}, t: initialT } = {}
+) {
+  const noop = {
+    update() {},
+    hide() {},
+    destroy() {},
+    refreshContent() {},
+    refreshLabels() {},
+    autoFitColumn() {},
+    autoFitTable() {},
+    hideColumn() {},
+    canHideColumn() {
+      return false
+    }
+  }
   if (!host) return noop
 
+  let translate = typeof initialT === 'function' ? initialT : fallbackT
+  const tr = (key, vars) => translate(key, vars)
   const cleanups = []
-  const floats = []
+  const controllers = new Map()
+  let activeColumnPop = null
+  let activeResizeCleanup = null
 
-  host.querySelectorAll('.km-table-wrap').forEach((wrap) => {
+  const closeColumnPop = () => {
+    if (!activeColumnPop) return
+    activeColumnPop.pop.remove()
+    activeColumnPop = null
+  }
+
+  const positionColumnPop = () => {
+    if (!activeColumnPop) return
+    const { pop, anchor } = activeColumnPop
+    if (!document.body.contains(anchor)) {
+      closeColumnPop()
+      return
+    }
+    const r = anchor.getBoundingClientRect()
+    const pw = pop.offsetWidth || 220
+    const ph = pop.offsetHeight || 0
+    let left = Math.min(r.right - pw, window.innerWidth - pw - 8)
+    left = Math.max(8, left)
+    let top = r.bottom + 6
+    if (top + ph > window.innerHeight - 8) top = Math.max(8, r.top - ph - 6)
+    pop.style.left = left + 'px'
+    pop.style.top = top + 'px'
+  }
+
+  const openColumnPop = (controller, anchor) => {
+    closeColumnPop()
+    const hidden = controller.hiddenColumns()
+    if (!hidden.length) return
+
+    const pop = document.createElement('div')
+    pop.className = 'km-column-pop'
+    pop.setAttribute('role', 'menu')
+
+    const title = document.createElement('div')
+    title.className = 'km-column-pop-title'
+    title.textContent = tr('keep.hiddenColumns', { count: hidden.length })
+    pop.appendChild(title)
+
+    hidden.forEach((ci) => {
+      const button = document.createElement('button')
+      button.type = 'button'
+      button.className = 'km-column-pop-item'
+      button.dataset.ci = String(ci)
+      button.setAttribute('role', 'menuitem')
+      button.textContent = '◉ ' + tr('keep.showColumn', { name: controller.columnName(ci) })
+      button.addEventListener('click', () => {
+        controller.showColumn(ci)
+        closeColumnPop()
+      })
+      pop.appendChild(button)
+    })
+
+    if (hidden.length > 1) {
+      const sep = document.createElement('div')
+      sep.className = 'km-column-pop-sep'
+      pop.appendChild(sep)
+      const showAll = document.createElement('button')
+      showAll.type = 'button'
+      showAll.className = 'km-column-pop-item km-column-pop-all'
+      showAll.setAttribute('role', 'menuitem')
+      showAll.textContent = tr('keep.showAllColumns')
+      showAll.addEventListener('click', () => {
+        controller.showAllColumns()
+        closeColumnPop()
+      })
+      pop.appendChild(showAll)
+    }
+
+    document.body.appendChild(pop)
+    activeColumnPop = { pop, anchor, controller }
+    positionColumnPop()
+    pop.querySelector('button')?.focus({ preventScroll: true })
+  }
+
+  const onOutsidePointer = (event) => {
+    if (!activeColumnPop) return
+    if (activeColumnPop.pop.contains(event.target) || activeColumnPop.anchor.contains(event.target)) return
+    closeColumnPop()
+  }
+  const onGlobalScroll = (event) => {
+    if (activeColumnPop?.pop.contains(event.target)) return
+    closeColumnPop()
+  }
+  document.addEventListener('pointerdown', onOutsidePointer, true)
+  window.addEventListener('scroll', onGlobalScroll, true)
+  window.addEventListener('resize', positionColumnPop)
+  cleanups.push(() => document.removeEventListener('pointerdown', onOutsidePointer, true))
+  cleanups.push(() => window.removeEventListener('scroll', onGlobalScroll, true))
+  cleanups.push(() => window.removeEventListener('resize', positionColumnPop))
+
+  host.querySelectorAll('.km-table-wrap').forEach((wrap, tableOrder) => {
     const table = wrap.querySelector('table.km-table')
     if (!table) return
     const thead = table.querySelector('thead')
+    const liveHeaders = thead ? [...thead.querySelectorAll('th')] : []
+    const liveCols = [...table.querySelectorAll(':scope > colgroup > col')]
+    if (!thead || !liveHeaders.length || liveCols.length !== liveHeaders.length) return
 
-    // One horizontal scroll position shared by every surface that scrolls the
-    // table sideways: the wrap itself, the in-flow top bar, the float's top bar,
-    // and the float's clipped header. A re-entrancy guard stops the echo loop.
+    const stateKey = table.getAttribute('data-ti') || String(tableOrder)
+    let state = columnState[stateKey]
+    if (!state || state.colCount !== liveCols.length) {
+      state = { colCount: liveCols.length, widths: {}, hidden: new Set() }
+      columnState[stateKey] = state
+    }
+    if (!(state.hidden instanceof Set)) state.hidden = new Set(state.hidden || [])
+    if (!state.widths || typeof state.widths !== 'object') state.widths = {}
+    state.hidden = new Set([...state.hidden].filter((ci) => ci >= 0 && ci < liveCols.length))
+    if (state.hidden.size >= liveCols.length) state.hidden.delete(0)
+
+    const autoWidths = liveCols.map((col) => col.style.width || '')
+    let headerNames = []
+    let cloneTable = null
+    let cloneThead = null
+    let syncTopWidth = () => {}
+    let syncWidths = () => {}
+    let updateFloat = () => {}
+
+    // Group toolbar + top scrollbar + table as one visual frame. On an in-place
+    // teardown, put the parser-owned wrapper back exactly where it started.
+    const frame = document.createElement('div')
+    frame.className = 'km-table-frame'
+    wrap.parentNode.insertBefore(frame, wrap)
+    frame.appendChild(wrap)
+    cleanups.push(() => {
+      if (frame.parentNode && wrap.parentNode === frame) {
+        frame.parentNode.insertBefore(wrap, frame)
+        frame.remove()
+      }
+    })
+
+    const tools = document.createElement('div')
+    tools.className = 'km-table-tools'
+    const autoFitButton = document.createElement('button')
+    autoFitButton.type = 'button'
+    autoFitButton.className = 'km-table-tool km-table-autofit'
+    const hiddenButton = document.createElement('button')
+    hiddenButton.type = 'button'
+    hiddenButton.className = 'km-table-tool km-table-hidden-columns'
+    tools.append(autoFitButton, hiddenButton)
+    frame.insertBefore(tools, wrap)
+
     const hGroup = []
     let hsyncing = false
     const syncH = (src) => {
@@ -48,50 +217,308 @@ export function enhanceKeepTables(host, scroller, { onFilterClick, onHeaderEdit 
     }
     const addH = (el, listen) => {
       hGroup.push(el)
-      if (listen) {
-        const fn = () => syncH(el)
-        el.addEventListener('scroll', fn, { passive: true })
-        cleanups.push(() => el.removeEventListener('scroll', fn))
-      }
+      if (!listen) return
+      const fn = () => syncH(el)
+      el.addEventListener('scroll', fn, { passive: true })
+      cleanups.push(() => el.removeEventListener('scroll', fn))
     }
     addH(wrap, true)
 
-    // ── (1) in-flow top scrollbar ───────────────────────────────────────────
     const topBar = document.createElement('div')
     topBar.className = 'km-table-scrolltop'
     const topInner = document.createElement('div')
     topInner.className = 'km-table-scrolltop-inner'
     topBar.appendChild(topInner)
-    wrap.parentNode.insertBefore(topBar, wrap)
+    frame.insertBefore(topBar, wrap)
     addH(topBar, true)
 
-    const syncTopWidth = () => {
-      const tw = table.scrollWidth
-      topInner.style.width = tw + 'px'
-      topBar.classList.toggle('km-hidden', tw <= wrap.clientWidth + 1)
+    const visibleColumns = () => liveCols.map((_, ci) => ci).filter((ci) => !state.hidden.has(ci))
+    const columnName = (ci) =>
+      headerNames[ci] || tr('keep.columnNumber', { number: Number(ci) + 1 })
+    const canHideColumn = (ci) => !state.hidden.has(Number(ci)) && visibleColumns().length > 1
+
+    const refreshLabels = () => {
+      headerNames = liveHeaders.map((th, ci) => {
+        const text = (th.querySelector('.km-th-content')?.textContent || '').trim()
+        return text || tr('keep.columnNumber', { number: ci + 1 })
+      })
+      autoFitButton.textContent = '↔ ' + tr('keep.tableAutoFit')
+      autoFitButton.title = tr('keep.tableAutoFit')
+      autoFitButton.setAttribute('aria-label', tr('keep.tableAutoFit'))
+      const hiddenCount = state.hidden.size
+      hiddenButton.hidden = hiddenCount === 0
+      hiddenButton.textContent = '◉ ' + tr('keep.hiddenColumns', { count: hiddenCount })
+      hiddenButton.title = tr('keep.hiddenColumns', { count: hiddenCount })
+      hiddenButton.setAttribute('aria-label', tr('keep.hiddenColumns', { count: hiddenCount }))
+
+      const roots = [thead, cloneThead].filter(Boolean)
+      roots.forEach((root) => {
+        root.querySelectorAll('.km-col-hide-btn').forEach((button) => {
+          const ci = Number(button.dataset.ci)
+          const label = tr('keep.hideColumn', { name: columnName(ci) })
+          button.title = label
+          button.setAttribute('aria-label', label)
+          button.disabled = !canHideColumn(ci)
+        })
+        root.querySelectorAll('.km-col-resize').forEach((button) => {
+          const ci = Number(button.dataset.ci)
+          const label = tr('keep.resizeColumn', { name: columnName(ci) })
+          button.title = label
+          button.setAttribute('aria-label', label)
+        })
+      })
     }
-    // Filtering can resize the table (auto-layout columns reflow) — re-measure.
-    const ro = new ResizeObserver(syncTopWidth)
-    ro.observe(table)
-    ro.observe(wrap)
-    syncTopWidth()
-    // topBar lives inside `host` (wiped on full re-render); remove it explicitly
-    // for in-place teardown and drop the observer.
+
+    const widthTerm = (ci) => {
+      const manual = Number(state.widths[ci])
+      if (Number.isFinite(manual) && manual > 0) return Math.round(manual) + 'px'
+      return autoWidths[ci] || Math.max(MIN_COLUMN_PX, liveHeaders[ci]?.offsetWidth || 0) + 'px'
+    }
+
+    const applyColumnLayout = () => {
+      const visible = visibleColumns()
+      liveCols.forEach((col, ci) => {
+        col.classList.toggle('km-col-hidden', state.hidden.has(ci))
+        col.style.width = widthTerm(ci)
+      })
+      table.querySelectorAll('th[data-ci], td[data-ci]').forEach((cell) => {
+        cell.classList.toggle('km-col-hidden', state.hidden.has(Number(cell.getAttribute('data-ci'))))
+      })
+      if (cloneThead) {
+        cloneThead.querySelectorAll('th[data-ci]').forEach((cell) => {
+          cell.classList.toggle('km-col-hidden', state.hidden.has(Number(cell.getAttribute('data-ci'))))
+        })
+      }
+      // The CSS min-width remains 100%, so narrow visible sets still fill the
+      // viewport; otherwise the sum below is the exact parser/manual width mix.
+      table.style.width = visible.length ? 'calc(' + visible.map(widthTerm).join(' + ') + ')' : ''
+      refreshLabels()
+      syncTopWidth()
+      syncWidths()
+      updateFloat()
+    }
+
+    const freezeVisibleWidths = () => {
+      liveHeaders.forEach((th, ci) => {
+        if (state.hidden.has(ci) || Number.isFinite(Number(state.widths[ci]))) return
+        state.widths[ci] = Math.max(MIN_COLUMN_PX, th.offsetWidth || MIN_COLUMN_PX)
+      })
+    }
+
+    const autoFitColumn = (ci) => {
+      ci = Number(ci)
+      if (!Number.isFinite(ci)) return
+      delete state.widths[ci]
+      applyColumnLayout()
+    }
+    const autoFitTable = () => {
+      state.widths = {}
+      applyColumnLayout()
+    }
+    const hideColumn = (ci) => {
+      ci = Number(ci)
+      if (!canHideColumn(ci)) return
+      state.hidden.add(ci)
+      closeColumnPop()
+      applyColumnLayout()
+    }
+    const showColumn = (ci) => {
+      ci = Number(ci)
+      if (!state.hidden.delete(ci)) return
+      applyColumnLayout()
+    }
+    const showAllColumns = () => {
+      if (!state.hidden.size) return
+      state.hidden.clear()
+      applyColumnLayout()
+    }
+
+    let controller
+    const startResize = (ci, event) => {
+      ci = Number(ci)
+      if (!Number.isFinite(ci) || state.hidden.has(ci)) return
+      event.preventDefault()
+      event.stopPropagation()
+      activeResizeCleanup?.()
+      freezeVisibleWidths()
+      const zoom = parseFloat(getComputedStyle(host).getPropertyValue('--editor-zoom')) || 1
+      const startX = event.clientX
+      const startWidth = Number(state.widths[ci]) || liveHeaders[ci]?.offsetWidth || MIN_COLUMN_PX
+      let pendingWidth = startWidth
+      let moveRaf = 0
+      let stopped = false
+
+      const paint = () => {
+        moveRaf = 0
+        state.widths[ci] = pendingWidth
+        applyColumnLayout()
+      }
+      const onMove = (moveEvent) => {
+        pendingWidth = Math.max(
+          MIN_COLUMN_PX,
+          Math.min(MAX_COLUMN_PX, Math.round(startWidth + (moveEvent.clientX - startX) / zoom))
+        )
+        if (!moveRaf) moveRaf = requestAnimationFrame(paint)
+      }
+      const stop = () => {
+        if (stopped) return
+        stopped = true
+        if (moveRaf) {
+          cancelAnimationFrame(moveRaf)
+          paint()
+        }
+        document.removeEventListener('pointermove', onMove)
+        document.removeEventListener('pointerup', stop)
+        document.removeEventListener('pointercancel', stop)
+        document.body.classList.remove('km-column-resizing')
+        table.classList.remove('km-column-resizing')
+        if (activeResizeCleanup === stop) activeResizeCleanup = null
+      }
+
+      document.body.classList.add('km-column-resizing')
+      table.classList.add('km-column-resizing')
+      document.addEventListener('pointermove', onMove)
+      document.addEventListener('pointerup', stop)
+      document.addEventListener('pointercancel', stop)
+      activeResizeCleanup = stop
+    }
+
+    const wireHeaderControls = (root) => {
+      const localCleanups = []
+      root.querySelectorAll('.km-col-hide-btn').forEach((button) => {
+        const onClick = (event) => {
+          event.preventDefault()
+          controller.hideColumn(Number(button.dataset.ci))
+        }
+        const onDoubleClick = (event) => event.stopPropagation()
+        button.addEventListener('click', onClick)
+        button.addEventListener('dblclick', onDoubleClick)
+        localCleanups.push(() => button.removeEventListener('click', onClick))
+        localCleanups.push(() => button.removeEventListener('dblclick', onDoubleClick))
+      })
+      root.querySelectorAll('.km-col-resize').forEach((button) => {
+        const ci = Number(button.dataset.ci)
+        const onPointerDown = (event) => startResize(ci, event)
+        const onClick = (event) => {
+          event.preventDefault()
+          event.stopPropagation()
+        }
+        const onDoubleClick = (event) => {
+          event.preventDefault()
+          event.stopPropagation()
+          controller.autoFitColumn(ci)
+        }
+        const onKeyDown = (event) => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault()
+            controller.autoFitColumn(ci)
+            return
+          }
+          if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
+          event.preventDefault()
+          freezeVisibleWidths()
+          const step = event.shiftKey ? 32 : 12
+          const direction = event.key === 'ArrowRight' ? 1 : -1
+          state.widths[ci] = Math.max(
+            MIN_COLUMN_PX,
+            Math.min(MAX_COLUMN_PX, Number(state.widths[ci] || MIN_COLUMN_PX) + direction * step)
+          )
+          applyColumnLayout()
+        }
+        button.addEventListener('pointerdown', onPointerDown)
+        button.addEventListener('click', onClick)
+        button.addEventListener('dblclick', onDoubleClick)
+        button.addEventListener('keydown', onKeyDown)
+        localCleanups.push(() => button.removeEventListener('pointerdown', onPointerDown))
+        localCleanups.push(() => button.removeEventListener('click', onClick))
+        localCleanups.push(() => button.removeEventListener('dblclick', onDoubleClick))
+        localCleanups.push(() => button.removeEventListener('keydown', onKeyDown))
+      })
+      cleanups.push(() => localCleanups.reverse().forEach((fn) => fn()))
+    }
+
+    // Add one quiet hide button and one edge handle to each live header before
+    // cloning it, so the floating header gets the exact same controls and layout.
+    liveHeaders.forEach((th, ci) => {
+      const flex = th.querySelector('.km-th-flex') || th
+      const filter = flex.querySelector('.km-filter-btn')
+      const actions = document.createElement('span')
+      actions.className = 'km-th-actions'
+      if (filter) {
+        flex.insertBefore(actions, filter)
+        actions.appendChild(filter)
+      } else {
+        flex.appendChild(actions)
+      }
+      const hide = document.createElement('button')
+      hide.type = 'button'
+      hide.className = 'km-col-hide-btn'
+      hide.dataset.ci = String(ci)
+      hide.textContent = '⊘'
+      actions.insertBefore(hide, actions.firstChild)
+
+      const resize = document.createElement('button')
+      resize.type = 'button'
+      resize.className = 'km-col-resize'
+      resize.dataset.ci = String(ci)
+      th.appendChild(resize)
+    })
     cleanups.push(() => {
-      ro.disconnect()
-      topBar.remove()
+      liveHeaders.forEach((th) => {
+        th.querySelectorAll(':scope > .km-col-resize').forEach((el) => el.remove())
+        const actions = th.querySelector('.km-th-actions')
+        const flex = th.querySelector('.km-th-flex')
+        if (!actions || !flex) return
+        const filter = actions.querySelector('.km-filter-btn')
+        if (filter) flex.appendChild(filter)
+        actions.remove()
+      })
     })
 
-    if (!thead) return
+    controller = {
+      stateKey,
+      columnName,
+      hiddenColumns: () => [...state.hidden].sort((a, b) => a - b),
+      canHideColumn,
+      autoFitColumn,
+      autoFitTable,
+      hideColumn,
+      showColumn,
+      showAllColumns,
+      refreshLabels,
+      update: () => updateFloat(),
+      hide: () => {},
+      syncContent: () => {}
+    }
+    controllers.set(stateKey, controller)
 
-    // ── (2) floating header: own top scrollbar + cloned thead ───────────────
+    autoFitButton.addEventListener('click', autoFitTable)
+    hiddenButton.addEventListener('click', () => openColumnPop(controller, hiddenButton))
+    cleanups.push(() => autoFitButton.removeEventListener('click', autoFitTable))
+
+    // The inner spacer is sized to the table width; the bar hides when the table
+    // fits. Filtering, hiding, and resizing all re-measure through the same path.
+    syncTopWidth = () => {
+      const tableWidth = table.scrollWidth
+      topInner.style.width = tableWidth + 'px'
+      topBar.classList.toggle('km-hidden', tableWidth <= wrap.clientWidth + 1)
+    }
+    const ro =
+      typeof ResizeObserver === 'function'
+        ? new ResizeObserver(() => {
+            syncTopWidth()
+            syncWidths()
+          })
+        : { observe() {}, disconnect() {} }
+    ro.observe(table)
+    ro.observe(wrap)
+    cleanups.push(() => ro.disconnect())
+
+    // Floating header: own top scrollbar + cloned thead. It is appended outside
+    // the document flow, so explicitly copy lang and editor text context in CSS.
     const floatEl = document.createElement('div')
     floatEl.className = 'km-float-header'
-    // A visual duplicate of the live header — keep it out of the accessibility
-    // tree (and out of find/copy intent) so it isn't announced twice.
     floatEl.setAttribute('aria-hidden', 'true')
-    // The clone is appended OUTSIDE the doc container, so it doesn't inherit the
-    // doc's lang="ja" — copy it so :lang(ja) picks the same writing font.
     const hostLang = host.getAttribute('lang')
     if (hostLang) floatEl.setAttribute('lang', hostLang)
 
@@ -103,120 +530,91 @@ export function enhanceKeepTables(host, scroller, { onFilterClick, onHeaderEdit 
 
     const fscroll = document.createElement('div')
     fscroll.className = 'km-float-header-scroll'
-    const cloneTable = document.createElement('table')
+    cloneTable = document.createElement('table')
     cloneTable.className = table.className
-    const cloneThead = thead.cloneNode(true)
+    cloneThead = thead.cloneNode(true)
     cloneTable.appendChild(cloneThead)
     fscroll.appendChild(cloneTable)
-
-    floatEl.appendChild(fTop)
-    floatEl.appendChild(fscroll)
-    // Append inside .pane-center (the find bar's stacking parent) so a plain
-    // z-index reliably orders the float below the find bar / dropdowns and above
-    // document content — no need to out-z-index a separate root-level layer.
-    // position:fixed still pins it to the viewport (no transformed ancestor).
+    floatEl.append(fTop, fscroll)
     ;(host.closest('.pane-center') || document.body).appendChild(floatEl)
     addH(fTop, true)
-    addH(fscroll, false) // clipped (overflow hidden); driven, never the source
+    addH(fscroll, false)
+    cleanups.push(() => floatEl.remove())
 
-    // Cloned ▼ buttons forward to the host, which opens the real dropdown anchored
-    // to the (visible) clone. stopPropagation keeps the document-level
-    // outside-click handler from closing it in the same gesture.
-    cloneThead.querySelectorAll('.km-filter-btn').forEach((cb) => {
-      cb.addEventListener('click', (e) => {
-        e.stopPropagation()
-        onFilterClick?.(cb)
-      })
+    cloneThead.querySelectorAll('.km-filter-btn').forEach((button) => {
+      const onClick = (event) => {
+        event.stopPropagation()
+        onFilterClick?.(button)
+      }
+      button.addEventListener('click', onClick)
+      cleanups.push(() => button.removeEventListener('click', onClick))
     })
-    // Double-clicking a cloned header cell edits the column header — the host
-    // resolves the clone to the REAL <th> (same data-line/data-ci → same source
-    // line) so the edit writes back to the one source of truth, then re-syncs the
-    // clone's content (below) so both headers stay identical.
-    cloneThead.addEventListener('dblclick', (e) => {
-      if (e.target.closest('.km-filter-btn')) return
-      const th = e.target.closest('th')
+    const onCloneDoubleClick = (event) => {
+      if (event.target.closest('.km-filter-btn, .km-col-hide-btn, .km-col-resize')) return
+      const th = event.target.closest('th')
       if (th) onHeaderEdit?.(th)
-    })
-    // Copy the live header's rendered content + data-raw onto the clone (called
-    // after a header cell is edited in place, when no full re-render rebuilds us).
+    }
+    cloneThead.addEventListener('dblclick', onCloneDoubleClick)
+    cleanups.push(() => cloneThead.removeEventListener('dblclick', onCloneDoubleClick))
+
     const syncContent = () => {
-      const o = thead.querySelectorAll('th')
-      const c = cloneThead.querySelectorAll('th')
-      o.forEach((th, i) => {
-        if (!c[i]) return
-        c[i].setAttribute('data-raw', th.getAttribute('data-raw') || '')
-        const os = th.querySelector('.km-th-content')
-        const cs = c[i].querySelector('.km-th-content')
-        if (os && cs) cs.innerHTML = os.innerHTML
+      const original = thead.querySelectorAll('th')
+      const clone = cloneThead.querySelectorAll('th')
+      original.forEach((th, i) => {
+        if (!clone[i]) return
+        clone[i].setAttribute('data-raw', th.getAttribute('data-raw') || '')
+        const source = th.querySelector('.km-th-content')
+        const target = clone[i].querySelector('.km-th-content')
+        if (source && target) target.innerHTML = source.innerHTML
       })
+      refreshLabels()
     }
 
-    // Match the clone's total + per-column widths to the live header. Re-measured
-    // on every show, so it tracks edits / filtering / font-size / zoom changes.
-    const syncWidths = () => {
+    syncWidths = () => {
       cloneTable.style.width = table.offsetWidth + 'px'
       fTopInner.style.width = table.scrollWidth + 'px'
-      const o = thead.querySelectorAll('th')
-      const c = cloneThead.querySelectorAll('th')
-      o.forEach((th, i) => {
-        if (!c[i]) return
+      const original = thead.querySelectorAll('th')
+      const clone = cloneThead.querySelectorAll('th')
+      original.forEach((th, i) => {
+        if (!clone[i]) return
         const px = th.offsetWidth + 'px'
-        c[i].style.width = px
-        c[i].style.minWidth = px
-        c[i].style.maxWidth = px
+        clone[i].style.width = px
+        clone[i].style.minWidth = px
+        clone[i].style.maxWidth = px
       })
     }
-    // Mirror each column's active-filter state onto the clone (live header is the
-    // source of truth; the host keeps both in sync when a filter changes).
     const syncActive = () => {
-      const o = thead.querySelectorAll('.km-filter-btn')
-      const c = cloneThead.querySelectorAll('.km-filter-btn')
-      o.forEach((ob, i) => {
-        if (c[i]) c[i].classList.toggle('active', ob.classList.contains('active'))
+      const original = thead.querySelectorAll('.km-filter-btn')
+      const clone = cloneThead.querySelectorAll('.km-filter-btn')
+      original.forEach((button, i) => {
+        if (clone[i]) clone[i].classList.toggle('active', button.classList.contains('active'))
       })
     }
 
-    const hide = () => floatEl.classList.remove('km-visible')
-    const update = () => {
-      const sRect = scroller
+    const hideFloat = () => floatEl.classList.remove('km-visible')
+    updateFloat = () => {
+      const scrollerRect = scroller
         ? scroller.getBoundingClientRect()
         : { top: 0, bottom: window.innerHeight }
-      const topOffset = sRect.top
+      const topOffset = scrollerRect.top
       const theadRect = thead.getBoundingClientRect()
       const tableRect = table.getBoundingClientRect()
-      // Show once the real header has scrolled above the offset line AND enough of
-      // the table is still on screen to be worth a header for. (theadRect.height is
-      // the visual height — matches topOffset/tableRect, both zoom-affected.)
       const show =
         theadRect.top < topOffset &&
         tableRect.bottom > topOffset + theadRect.height + 24 &&
-        tableRect.top < sRect.bottom
+        tableRect.top < scrollerRect.bottom
       if (!show) {
-        hide()
+        hideFloat()
         return
       }
       syncWidths()
       syncActive()
-      // The float carries the editor's `zoom` (so its cloned text/cells render at
-      // the exact same scale). Under zoom, an element's own top/left are scaled
-      // too, so divide the viewport coords by it; widths stay in layout px (the
-      // zoom scales them up to match the live table, same as offsetWidth above).
-      const z = parseFloat(getComputedStyle(host).getPropertyValue('--editor-zoom')) || 1
-      // Align the float's content box with the table's visible viewport: the wrap's
-      // padding box (inside its border → clientLeft/clientWidth), not its border box.
+      const zoom = parseFloat(getComputedStyle(host).getPropertyValue('--editor-zoom')) || 1
       const wrapRect = wrap.getBoundingClientRect()
-      floatEl.style.top = topOffset / z + 'px'
-      floatEl.style.left = wrapRect.left / z + wrap.clientLeft + 'px'
+      floatEl.style.top = topOffset / zoom + 'px'
+      floatEl.style.left = wrapRect.left / zoom + wrap.clientLeft + 'px'
       floatEl.style.width = wrap.clientWidth + 'px'
       fTop.classList.toggle('km-hidden', table.scrollWidth <= wrap.clientWidth + 1)
-      // Catch the float's horizontal position up to the table only on the
-      // hidden→shown transition. Do NOT do it every call: update() runs from the
-      // window 'scroll' CAPTURE handler, which fires BEFORE the float bar's own
-      // scroll listener — re-setting scrollLeft here would clobber (freeze) a drag
-      // on the float's own scrollbar. While shown, hGroup keeps it in sync.
-      // Reveal it FIRST: while `display:none` the float's scrollers can't hold a
-      // scrollLeft, so assigning before the class is added is a silent no-op and
-      // the header snaps back to the left (misaligned with a right-scrolled body).
       const wasVisible = floatEl.classList.contains('km-visible')
       floatEl.classList.add('km-visible')
       if (!wasVisible) {
@@ -225,14 +623,37 @@ export function enhanceKeepTables(host, scroller, { onFilterClick, onHeaderEdit 
       }
     }
 
-    floats.push({ update, hide, syncContent })
-    cleanups.push(() => floatEl.remove())
+    controller.hide = hideFloat
+    controller.update = updateFloat
+    controller.syncContent = syncContent
+
+    wireHeaderControls(thead)
+    wireHeaderControls(cloneThead)
+    applyColumnLayout()
   })
 
   return {
-    update: () => floats.forEach((f) => f.update()),
-    hide: () => floats.forEach((f) => f.hide()),
-    refreshContent: () => floats.forEach((f) => f.syncContent()),
-    destroy: () => cleanups.forEach((fn) => fn())
+    update: () => controllers.forEach((controller) => controller.update()),
+    hide: () => {
+      closeColumnPop()
+      controllers.forEach((controller) => controller.hide())
+    },
+    refreshContent: () => controllers.forEach((controller) => controller.syncContent()),
+    refreshLabels: (nextT) => {
+      if (typeof nextT === 'function') translate = nextT
+      closeColumnPop()
+      controllers.forEach((controller) => controller.refreshLabels())
+    },
+    autoFitColumn: (tableIdx, colIdx) => controllers.get(String(tableIdx))?.autoFitColumn(colIdx),
+    autoFitTable: (tableIdx) => controllers.get(String(tableIdx))?.autoFitTable(),
+    hideColumn: (tableIdx, colIdx) => controllers.get(String(tableIdx))?.hideColumn(colIdx),
+    canHideColumn: (tableIdx, colIdx) =>
+      controllers.get(String(tableIdx))?.canHideColumn(colIdx) || false,
+    destroy: () => {
+      closeColumnPop()
+      activeResizeCleanup?.()
+      ;[...cleanups].reverse().forEach((fn) => fn())
+      controllers.clear()
+    }
   }
 }

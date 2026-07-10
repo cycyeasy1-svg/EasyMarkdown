@@ -13,6 +13,9 @@ minimal line-range edit, so VSCode owns dirty state, undo/redo and save.
 
 - **Zero-diff inline editing** — double-click a table cell or block to edit its
   source; only the touched lines are rewritten.
+- **Faithful inline Markdown** — GFM strikethrough, underscore emphasis,
+  autolinks, link titles, escaped punctuation and `==highlight==` render in the
+  keep view without changing the source.
 - **Tables** — Excel-style per-column filters, add/remove rows & columns, a
   sticky floating header for wide tables, rich copy (cell / row / column / table).
 - **Task lists** — `- [ ]` / `- [x]` render as real checkboxes; a click toggles
@@ -34,7 +37,7 @@ minimal line-range edit, so VSCode owns dirty state, undo/redo and save.
 - **Settings** (the gear button) — color **theme** (follow VSCode, or the built-in
   Warm Light / Warm Dark), UI **language** (follow system, or 中文 / 日本語 /
   English), and **layout** (page width, font size, zoom, line height, paragraph
-  spacing).
+  spacing, and optional preservation of deliberate consecutive blank lines).
 - **Mermaid & KaTeX** — click a diagram's magnifier to open a zoom lightbox
   (wheel to zoom, drag to pan) so dense diagrams stay legible.
 - Relative images, live sync with external edits and undo/redo.

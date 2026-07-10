@@ -50,7 +50,7 @@ test('paragraph-spacing preset changes the keep-mode block spacing', async () =>
   }
 })
 
-test('switching the editor engine keeps the document content', async () => {
+test('switching the editor engine keeps content and exposes Milkdown normalization as dirty', async () => {
   const { page, cleanup } = await openWelcome()
   try {
     // Keep mode renders the source; the same source must survive a switch to the
@@ -66,6 +66,15 @@ test('switching the editor engine keeps the document content', async () => {
     await expect(pm.getByText('col a')).toBeVisible()
     // The keep editor's DOM is gone — we're genuinely in the other engine now.
     await expect(page.locator('.km-doc')).toHaveCount(0)
+
+    // This fixture is normalized by Milkdown. The serialized result must stay
+    // compared with the real on-disk Keep source instead of being silently
+    // rebaselined as "saved" during editor initialization.
+    await expect(page.locator('.tab.active .tab-close.dirty')).toHaveCount(1)
+    await page.locator('button[title*="切换编辑模式"]').click()
+    await expect(page.locator('.hm-mode-switch')).toContainText(
+      '当前 Milkdown 内容与上次保存版本不同'
+    )
   } finally {
     await cleanup()
   }
@@ -113,5 +122,95 @@ test('Save FAB clears the dirty state and writes the edit to disk', async () => 
     } catch {
       /* best effort */
     }
+  }
+})
+
+test('dirty Keep mode asks to save before Milkdown and both directions use the app dialog', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'em-mode-switch-'))
+  const file = join(dir, 'mode-switch.md')
+  writeFileSync(file, '# Original Heading\n\nbody text\n', 'utf8')
+
+  const { page, cleanup } = await launchApp([file])
+  try {
+    await page.locator('.tab', { hasText: 'mode-switch.md' }).click()
+    await expect(page.locator('.km-doc')).toBeVisible()
+
+    await page.locator('.km-block[data-bi="0"] .km-src-edit').click()
+    await page.locator('.km-src-editor').fill('# Keep Edit')
+    await page.locator('.km-src-actions .ok').click()
+    await expect(page.locator('.hm-save-fab')).toBeVisible()
+
+    await page.locator('button[title*="切换编辑模式"]').click()
+    const dialog = page.locator('.hm-mode-switch')
+    await expect(dialog).toBeVisible()
+    await expect(dialog).toContainText('保持模式中有未保存的修改')
+    await expect(dialog.getByRole('button', { name: '保存并切换' })).toBeVisible()
+    await expect(dialog.getByRole('button', { name: '不保存，直接切换' })).toBeVisible()
+
+    await dialog.getByRole('button', { name: '保存并切换' }).click()
+    const pm = page.locator('.ProseMirror:visible')
+    await expect(pm).toBeVisible()
+    await expect.poll(() => readFileSync(file, 'utf8')).toBe('# Keep Edit\n\nbody text\n')
+
+    // Make Milkdown dirty and switch back: this direction must also use the
+    // localized in-app dialog, not Electron/Chromium's native window.confirm.
+    await pm.getByText('body text').click()
+    await page.keyboard.press('End')
+    await page.keyboard.type(' milkdown edit')
+    await expect(page.locator('.hm-save-fab')).toBeVisible()
+    await page.locator('button[title*="切换编辑模式"]').click()
+    await expect(dialog).toBeVisible()
+    await expect(dialog).toContainText('当前 Milkdown 内容与上次保存版本不同')
+    await dialog.getByRole('button', { name: '取消' }).click()
+    await expect(pm).toBeVisible()
+  } finally {
+    await cleanup()
+    try {
+      rmSync(dir, { recursive: true, force: true })
+    } catch {
+      /* best effort */
+    }
+  }
+})
+
+test('keep table columns resize, auto-fit, hide and restore without dirtying the document', async () => {
+  const { page, cleanup } = await openWelcome()
+  try {
+    const table = page.locator('.km-doc table.km-table').first()
+    const firstHeader = table.locator('th[data-ci="0"]')
+    await expect(firstHeader).toBeVisible()
+
+    const widthOf = () => firstHeader.evaluate((el) => el.offsetWidth)
+    const initialWidth = await widthOf()
+    await firstHeader.hover()
+    const handle = firstHeader.locator(':scope > .km-col-resize')
+    const box = await handle.boundingBox()
+    expect(box).not.toBeNull()
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
+    await page.mouse.down()
+    await page.mouse.move(box.x + box.width / 2 + 90, box.y + box.height / 2, { steps: 6 })
+    await page.mouse.up()
+    await expect.poll(widthOf).toBeGreaterThan(initialWidth + 50)
+
+    // One click restores the same parser-generated width hints used on first paint.
+    await page.locator('.km-table-autofit').first().click()
+    await expect.poll(widthOf).toBeLessThan(initialWidth + 4)
+    await expect.poll(widthOf).toBeGreaterThan(initialWidth - 4)
+
+    // The per-column hide affordance appears on header hover. Recovery remains in
+    // the table toolbar, including an individual entry for every hidden column.
+    await firstHeader.hover()
+    await firstHeader.locator('.km-col-hide-btn').click()
+    await expect(firstHeader).toBeHidden()
+    const hiddenButton = page.locator('.km-table-hidden-columns').first()
+    await expect(hiddenButton).toContainText('已隐藏 1 列')
+    await hiddenButton.click()
+    await page.locator('.km-column-pop-item[data-ci="0"]').click()
+    await expect(firstHeader).toBeVisible()
+
+    // Width/visibility are preview state only: no source edit and no dirty marker.
+    await expect(page.locator('.tab.active .tab-close.dirty')).toHaveCount(0)
+  } finally {
+    await cleanup()
   }
 })

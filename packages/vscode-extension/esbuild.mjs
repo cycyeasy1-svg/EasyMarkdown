@@ -1,7 +1,11 @@
 import * as esbuild from 'esbuild'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 const production = process.argv.includes('--production')
 const watch = process.argv.includes('--watch')
+const extensionDir = path.dirname(fileURLToPath(import.meta.url))
+const extensionNodeModules = path.join(extensionDir, 'node_modules')
 
 /** Extension host: Node/CommonJS, `vscode` stays external (provided by the host). */
 const hostConfig = {
@@ -26,6 +30,10 @@ const webviewConfig = {
   platform: 'browser',
   format: 'iife',
   target: 'es2020',
+  // Shared renderer modules live above this package. Their bare imports normally
+  // resolve from the repository root; fall back to this package's dependencies so
+  // an extension-only install can still build the webview bundle.
+  nodePaths: [extensionNodeModules],
   sourcemap: !production,
   minify: production,
   loader: {

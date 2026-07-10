@@ -606,9 +606,13 @@ function renderList(b, viewLines, baseDir, opts = {}) {
   // marker line also records its source line (b.start + k) so a GFM task item's
   // checkbox can map a click back to exactly one raw line.
   const items = []
+  let blankRun = 0
   for (let k = 0; k < lines.length; k++) {
     const l = lines[k]
-    if (l.trim() === '') continue // loose-list gaps carry no content
+    if (l.trim() === '') {
+      blankRun++
+      continue // gaps carry no content, but their count belongs to the next item
+    }
     const m = l.match(/^(\s*)([-*+]|\d+[.)])\s+(.*)$/)
     if (m) {
       const num = m[2].match(/^\d+/)
@@ -622,13 +626,32 @@ function renderList(b, viewLines, baseDir, opts = {}) {
         task: !!task,
         checked: !!task && task[1] !== ' ',
         line: b.start + k,
+        blankLinesBefore: blankRun,
         html: inline(task ? task[2] || '' : m[3], baseDir)
       })
     } else if (items.length) {
-      items[items.length - 1].html += '<br>' + inline(l.trim(), baseDir)
+      // An unmarked line continues the previous list item. A normal blank before
+      // it remains the existing soft break; when the display option is enabled,
+      // preserve every additional blank line as a block-height spacer.
+      const extra = Math.max(0, blankRun - 1)
+      const bridge =
+        opts.blankLineSpacing && blankRun > 0
+          ? '<span class="km-list-inline-gap" data-list-gap data-gap="' +
+            extra +
+            '" style="--km-gap:' +
+            extra +
+            '"></span>'
+          : '<br>'
+      items[items.length - 1].html += bridge + inline(l.trim(), baseDir)
     } else {
-      items.push({ indent: 0, ordered: false, html: inline(l.trim(), baseDir) })
+      items.push({
+        indent: 0,
+        ordered: false,
+        blankLinesBefore: blankRun,
+        html: inline(l.trim(), baseDir)
+      })
     }
+    blankRun = 0
   }
   // A task item's checkbox is a REAL <input> carrying its source line. It's only
   // interactive where a click handler exists to write the toggle back (the VSCode
@@ -644,7 +667,15 @@ function renderList(b, viewLines, baseDir, opts = {}) {
         (opts.interactiveTasks ? '' : ' disabled') +
         '>'
       : ''
-  const liOpen = (it) => '<li' + (it.task ? ' class="km-task-item"' : '') + '>' + taskBox(it) + it.html
+  const liOpen = (it) => {
+    const blankLines = it.blankLinesBefore || 0
+    const extra = Math.max(0, blankLines - 1)
+    const gap =
+      opts.blankLineSpacing && blankLines > 0
+        ? ' data-list-gap data-gap="' + extra + '" style="--km-gap:' + extra + '"'
+        : ''
+    return '<li' + (it.task ? ' class="km-task-item"' : '') + gap + '>' + taskBox(it) + it.html
+  }
   // Build nested <ul>/<ol> from the indent levels. Each nesting level keeps the
   // marker type of its first item, so a "1." parent with "-" children renders as
   // an ordered list containing a bullet sublist (not one flat numbered list).
@@ -653,7 +684,11 @@ function renderList(b, viewLines, baseDir, opts = {}) {
   const openList = (it) => {
     // Looseness is a property of the list, and only the outermost one here carries
     // the block's blank-line evidence — a nested sublist keeps its tight spacing.
-    const cls = !stack.length && b.loose ? ' class="km-loose"' : ''
+    // Default Markdown rendering uses one `km-loose` class for the whole list.
+    // When exact blank-line display is enabled, that would incorrectly enlarge
+    // EVERY item after one local gap; suppress it and let data-list-gap mark only
+    // the item that actually follows source blank lines.
+    const cls = !stack.length && b.loose && !opts.blankLineSpacing ? ' class="km-loose"' : ''
     stack.push({ indent: it.indent, ordered: it.ordered })
     // Honor the first item's number (CommonMark: a list's start = its first
     // item's marker). `<ol>` alone always restarts at 1, so "3. / 4." rendered
@@ -798,7 +833,10 @@ export function renderBlockInner(b, bi, viewLines, opts = {}) {
       inline(viewLines.slice(b.start, b.end + 1).map((l) => l.replace(/^\s*>\s?/, '')).join('<br>'), baseDir) +
       '</blockquote>'
   } else if (b.type === 'list') {
-    inner = renderList(b, viewLines, baseDir, { interactiveTasks: !!opts.interactiveTasks && !forExport })
+    inner = renderList(b, viewLines, baseDir, {
+      interactiveTasks: !!opts.interactiveTasks && !forExport,
+      blankLineSpacing: !!opts.blankLineSpacing
+    })
   } else if (b.type === 'table') {
     inner = renderTable(b, tableIdx, filterState, forExport, baseDir)
   } else if (b.type === 'frontmatter') {

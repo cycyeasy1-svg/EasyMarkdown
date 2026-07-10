@@ -81,10 +81,51 @@ const keepCodeLensProvider = {
 // tab in `lastKind`). `suppressed` (shared with the commands) keeps the watcher
 // away from a uri we're acting on ourselves — e.g. "Open Keep to the Side"
 // while the preferred mode is source must not be instantly reverted.
-function watchTabsForKeep(context, suppressed) {
+function watchTabsForKeep(context, suppressed, keepProvider) {
   const rememberOn = () =>
     vscode.workspace.getConfiguration('easymarkdown.keep').get('rememberMode', true)
   const lastKind = new Map() // "uri|viewColumn" -> 'keep' | 'text'
+  const recentSelections = new Map() // uriString -> { line, character, text, at }
+  const switchingToKeep = new Set() // uriString values currently crossing openWith
+
+  const revealFromEditor = (editor) => {
+    if (!editor || !isMarkdownFileUri(editor.document?.uri)) return null
+    const selection = editor.selection
+    if (!selection || selection.isEmpty) return null
+    if (
+      selection.start.line !== selection.end.line ||
+      selection.end.character - selection.start.character > 1000
+    ) {
+      return null
+    }
+    const text = editor.document.getText(selection)
+    // Keep-mode find works on rendered text nodes. VSCode workspace-search
+    // results are single-line; ignore other selections instead of opening a
+    // misleading find session that cannot represent a multi-node match.
+    if (!text || /[\r\n]/.test(text)) return null
+    return {
+      line: selection.start.line,
+      character: selection.start.character,
+      text,
+      at: Date.now()
+    }
+  }
+
+  const selectionSub = vscode.window.onDidChangeTextEditorSelection((e) => {
+    const reveal = revealFromEditor(e.textEditor)
+    const uri = e.textEditor?.document?.uri
+    if (!isMarkdownFileUri(uri)) return
+    const uriKey = uri.toString()
+    if (!reveal) {
+      recentSelections.delete(uriKey)
+      return
+    }
+    recentSelections.set(uriKey, reveal)
+    // The selection event can land just after openWith started. Relay it to an
+    // already-resolving/ready keep panel as long as this URI is still in the
+    // automatic text-to-keep transition window.
+    if (switchingToKeep.has(uriKey)) keepProvider.queueSearchReveal(uri, reveal)
+  })
 
   const classify = (tab) => {
     const input = tab && tab.input
@@ -118,6 +159,17 @@ function watchTabsForKeep(context, suppressed) {
     const uriKey = c.uri.toString()
     if (suppressed.has(uriKey)) return
     suppressed.add(uriKey)
+    if (want === 'keep' && c.kind === 'text') {
+      switchingToKeep.add(uriKey)
+      const activeReveal =
+        vscode.window.activeTextEditor?.document.uri.toString() === uriKey
+          ? revealFromEditor(vscode.window.activeTextEditor)
+          : null
+      const cachedReveal = recentSelections.get(uriKey)
+      const reveal =
+        activeReveal || (cachedReveal && Date.now() - cachedReveal.at <= 1500 ? cachedReveal : null)
+      if (reveal) keepProvider.queueSearchReveal(c.uri, reveal)
+    }
     const original = tab
     // A single Explorer click opens the file as a PREVIEW (italic) tab. Each
     // group has ONE preview slot, shared across editor kinds, so re-opening as a
@@ -126,7 +178,12 @@ function watchTabsForKeep(context, suppressed) {
     // editor isn't hijacked, which means the source text always opens first;
     // this preview reuse is what hides that transition.)
     const wasPreview = !!tab.isPreview
-    const release = () => setTimeout(() => suppressed.delete(uriKey), 500)
+    const release = () =>
+      setTimeout(() => {
+        suppressed.delete(uriKey)
+        switchingToKeep.delete(uriKey)
+        recentSelections.delete(uriKey)
+      }, 500)
     vscode.commands
       .executeCommand('vscode.openWith', c.uri, want === 'keep' ? KEEP_VIEW_TYPE : 'default', {
         viewColumn: tab.group?.viewColumn,
@@ -172,6 +229,7 @@ function watchTabsForKeep(context, suppressed) {
   return new vscode.Disposable(() => {
     clearTimeout(initTimer)
     changeSub.dispose()
+    selectionSub.dispose()
   })
 }
 
@@ -185,9 +243,11 @@ function activate(context) {
     setTimeout(() => suppressed.delete(key), ms)
   }
 
+  const keepProvider = KeepEditorProvider.register(context)
+
   context.subscriptions.push(
-    KeepEditorProvider.register(context),
-    watchTabsForKeep(context, suppressed),
+    keepProvider,
+    watchTabsForKeep(context, suppressed, keepProvider),
     vscode.commands.registerCommand('easymarkdown.openWithKeep', async (uriArg) => {
       const uri = activeResourceUri(uriArg)
       if (isMarkdownFileUri(uri)) {

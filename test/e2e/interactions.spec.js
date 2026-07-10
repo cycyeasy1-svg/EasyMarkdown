@@ -13,6 +13,13 @@ async function openWelcome() {
   return res
 }
 
+async function openFindPositionFixture() {
+  const res = await launchApp([fixture('find-position.md')])
+  await res.page.locator('.tab', { hasText: 'find-position.md' }).click()
+  await expect(res.page.locator('.km-doc')).toBeVisible()
+  return res
+}
+
 test('keep mode: editing a block via "edit source" updates the rendered doc', async () => {
   const { page, cleanup } = await openWelcome()
   try {
@@ -147,14 +154,47 @@ test('find query is restored per tab instead of shared globally', async () => {
   }
 })
 
+test('keep mode: find starts from the current viewport and wraps in document order', async () => {
+  const { page, cleanup } = await openFindPositionFixture()
+  const findShortcut = process.platform === 'darwin' ? 'Meta+F' : 'Control+F'
+  try {
+    const second = page.locator('.km-block', { hasText: 'Second anchorword result' })
+    await second.evaluate((el) => el.scrollIntoView({ block: 'start' }))
+    await expect.poll(() => page.locator('.editor-scroll.km-scroll').evaluate((el) => el.scrollTop)).toBeGreaterThan(0)
+
+    await page.keyboard.press(findShortcut)
+    await page.locator('.findbar input').fill('anchorword')
+    await expect(page.locator('.findbar-count')).toHaveText('2/3')
+  } finally {
+    await cleanup()
+  }
+})
+
 // Switch the active tab from keep mode to Milkdown (Crepe) via the status-bar
 // toggle, and return the Crepe editor locator scoped to the fixture's content.
-async function switchToMilkdown(page) {
+async function switchToMilkdown(page, expectedText = 'reliable click') {
   await page.locator('button[title*="切换编辑模式"]').click()
-  const pm = page.locator('.ProseMirror', { hasText: 'reliable click' })
+  const pm = page.locator('.ProseMirror', { hasText: expectedText })
   await expect(pm).toBeVisible()
   return pm
 }
+
+test('milkdown mode: find starts from the current cursor position', async () => {
+  const { page, cleanup } = await openFindPositionFixture()
+  const findShortcut = process.platform === 'darwin' ? 'Meta+F' : 'Control+F'
+  try {
+    const pm = await switchToMilkdown(page, 'Third anchorword result')
+    const third = pm.locator('p', { hasText: 'Third anchorword result' })
+    await third.click()
+    await page.keyboard.press('Home')
+
+    await page.keyboard.press(findShortcut)
+    await page.locator('.findbar input').fill('anchorword')
+    await expect(page.locator('.findbar-count')).toHaveText('3/3')
+  } finally {
+    await cleanup()
+  }
+})
 
 test('milkdown mode: Ctrl+2 converts the current paragraph to a heading', async () => {
   const { page, cleanup } = await openWelcome()

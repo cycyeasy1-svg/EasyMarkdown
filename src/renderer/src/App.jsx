@@ -19,6 +19,7 @@ import Welcome from './components/Welcome.jsx'
 import WindowControls from './components/WindowControls.jsx'
 import UpdateToast from './components/UpdateToast.jsx'
 import RenameModal from './components/RenameModal.jsx'
+import ModeSwitchDialog from './components/ModeSwitchDialog.jsx'
 import Settings from './components/Settings.jsx'
 import SearchPanel from './components/SearchPanel.jsx'
 import {
@@ -36,7 +37,16 @@ import {
 import { applyCustomTheme } from './customThemes.js'
 import { fireToast, HM_TOAST_EVENT } from './ui.js'
 import logoUrl from './assets/logo.png'
-import { clearFindHighlights, findRangesInEl, paintFindHighlights, scrollRangeIntoView, findMatchesInText, replaceMatchesInText, blockIndexForLine } from './find.js'
+import {
+  clearFindHighlights,
+  findRangesInEl,
+  findRangeIndexFromStart,
+  paintFindHighlights,
+  scrollRangeIntoView,
+  findMatchesInText,
+  replaceMatchesInText,
+  blockIndexForLine
+} from './find.js'
 import {
   isNewerVersion, isAbsolutePath, sanitizeWorkspaces, baseName, dirName, joinPath,
   isPlainTextDoc, isHeavyDoc, genId, LS, loadSession, buildSessionTabs,
@@ -440,6 +450,11 @@ export default function App() {
   // Mobile "save as": prompt for a filename before writing an untitled doc into
   // the local library (desktop uses the native save dialog instead).
   const [saveNameState, setSaveNameState] = useState(null)
+  // Project-styled Keep ⇄ Milkdown warning. `direction` is `toMilkdown` or
+  // `toKeep`; the former offers save / continue / cancel, the latter continue /
+  // cancel. Native window.confirm cannot express or localize that action set.
+  const [modeSwitchState, setModeSwitchState] = useState(null)
+  const [modeSwitchSaving, setModeSwitchSaving] = useState(false)
   // User preferences (page width, font size, zoom). Persisted separately from
   // the session; see settings.js.
   const [settings, setSettings] = useState(loadSettings)
@@ -455,6 +470,7 @@ export default function App() {
   const pendingSourceLineRef = useRef(null) // 0-based line to select after entering source mode
   const findInputRef = useRef(null)
   const openFindRef = useRef(null)
+  const findStartRef = useRef(null)
   const findOptionsRef = useRef({ caseSensitive: false, wholeWord: false, regex: false, inSelection: false })
   const findSessionsRef = useRef({})
   const findScopesRef = useRef({})
@@ -499,6 +515,15 @@ export default function App() {
   // docs default to the source-backed "keep" editor (zero-diff saves); this Set
   // opts a tab into full WYSIWYG instead. Mirrors `richForced` (heavy-doc opt-in).
   const [milkdownForced, setMilkdownForced] = useState(() => new Set())
+  const milkdownForcedRef = useRef(milkdownForced)
+  milkdownForcedRef.current = milkdownForced
+  // A tab entering Milkdown from Keep must retain the on-disk savedContent
+  // baseline. Otherwise Crepe's initial serialization is incorrectly rebaselined
+  // as "saved", hiding exactly the unexpected diff the mode warning is about.
+  const keepToMilkdownInitRef = useRef(new Set())
+  // Mobile Save As is a two-step flow; remember the requested mode switch until
+  // the filename modal finishes writing successfully.
+  const pendingModeAfterSaveRef = useRef(null)
   // First-run only: a one-time bubble over the status-bar mode button explaining
   // Keep vs Milkdown. Set when the welcome doc opens; dismissed (and remembered)
   // on "Got it" or the first mode switch. Existing users never trigger it.
@@ -798,30 +823,33 @@ export default function App() {
     setSourceMode(true)
   }, [])
 
+  const applyEditorMode = useCallback((id, toMilkdown) => {
+    if (toMilkdown) keepToMilkdownInitRef.current.add(id)
+    else keepToMilkdownInitRef.current.delete(id)
+    setMilkdownForced((prev) => {
+      const next = new Set(prev)
+      if (toMilkdown) next.add(id)
+      else next.delete(id)
+      return next
+    })
+  }, [])
+
   // Switch the active Markdown tab between keep mode (source-backed, default) and
-  // the Milkdown WYSIWYG editor. Skips plain-text (`.txt`) tabs. A heavy doc CAN be
-  // toggled — it just lands in the plain-source + "load rich" banner path instead of
-  // a freeze-prone Crepe render (heavyAsSource in the editor routing).
+  // the Milkdown WYSIWYG editor. Dirty transitions go through the project-styled
+  // warning instead of a native confirm. A heavy doc CAN be toggled — it just
+  // lands in the safe plain-source + "load rich" banner path first.
   const toggleEditorMode = useCallback(() => {
     const id = activeIdRef.current
     const tab = tabsRef.current.find((t) => t.id === id)
     if (!tab || isPlainTextDoc(tab)) return
-    setMilkdownForced((prev) => {
-      const next = new Set(prev)
-      if (next.has(id)) {
-        // Milkdown → keep: Milkdown re-serializes the whole document, so its
-        // content may differ byte-wise from the original. Going back to keep
-        // adopts that reformatted text as the new source — warn if it's unsaved.
-        if (tab.content !== tab.savedContent && !window.confirm(tRef.current('confirm.switchKeepUnsaved'))) {
-          return prev
-        }
-        next.delete(id)
-      } else {
-        next.add(id)
-      }
-      return next
-    })
-  }, [])
+    const toMilkdown = !milkdownForcedRef.current.has(id)
+    if (tab.content !== tab.savedContent) {
+      setModeSwitchSaving(false)
+      setModeSwitchState({ id, direction: toMilkdown ? 'toMilkdown' : 'toKeep' })
+      return
+    }
+    applyEditorMode(id, toMilkdown)
+  }, [applyEditorMode])
 
   useLayoutEffect(() => {
     const ratio = scrollRatioRef.current
@@ -1013,12 +1041,18 @@ export default function App() {
   }, [t])
 
   const updateContent = useCallback((id, md, isInitial) => {
+    const preserveSavedBaseline = isInitial && keepToMilkdownInitRef.current.delete(id)
     setTabs((prev) =>
       prev.map((t) => {
         if (t.id !== id) return t
         if (isInitial) {
+          // Keep → Milkdown: keep the actual on-disk baseline so any Crepe
+          // normalization becomes an honest dirty diff instead of being silently
+          // marked as saved during initialization.
+          if (preserveSavedBaseline) return { ...t, content: md }
           // Rebaseline a clean doc against Crepe's normalized output; keep the
-          // existing baseline if the doc already had unsaved edits.
+          // existing baseline if the doc already had unsaved edits. This path is
+          // for tabs born in Milkdown (new scratch / onboarding), not mode switches.
           if (t.content === t.savedContent) return { ...t, content: md, savedContent: md }
           return { ...t, content: md }
         }
@@ -1347,16 +1381,18 @@ export default function App() {
         // stays silent so it doesn't toast every couple of seconds while typing.
         fireToast(tRef.current('save.saved'), { kind: 'success' })
       }
+      return true
     } catch (e) {
       // Never fail silently — surface the real error so saving is debuggable.
       fireToast(tRef.current('save.failed', { msg: e?.message || String(e) }), { sticky: true, kind: 'error' })
+      return false
     }
   }, [isMobile])
 
   const saveTab = useCallback(
     async (id, forceDialog = false, opts) => {
       const tab = tabs.find((t) => t.id === id)
-      if (!tab) return
+      if (!tab) return false
       let target = tab.path
       if (!target || forceDialog) {
         // Mobile has no native save dialog: ask for a filename, then write into
@@ -1364,12 +1400,12 @@ export default function App() {
         if (isMobile) {
           const base = (tab.title || 'Untitled').replace(/\.(md|markdown|mdx)$/i, '')
           setSaveNameState({ id, value: base + '.md' })
-          return
+          return 'pending'
         }
         target = await window.api.saveAs(tab.title.endsWith('.md') ? tab.title : tab.title + '.md')
-        if (!target) return
+        if (!target) return false
       }
-      await writeTab(tab, target, opts)
+      return writeTab(tab, target, opts)
     },
     [tabs, writeTab, isMobile]
   )
@@ -1426,6 +1462,10 @@ export default function App() {
   // the local library (it returns a de-duplicated path), then write it.
   const commitMobileSave = useCallback(
     async (id, rawName) => {
+      const pendingMode = pendingModeAfterSaveRef.current?.id === id
+        ? pendingModeAfterSaveRef.current
+        : null
+      if (pendingMode) pendingModeAfterSaveRef.current = null
       setSaveNameState(null)
       const tab = tabsRef.current.find((t) => t.id === id)
       let name = (rawName || '').trim()
@@ -1437,10 +1477,41 @@ export default function App() {
       if (!/\.(md|markdown|mdx)$/i.test(name)) name += '.md'
       const target = await window.api.saveAs(name)
       if (!target) return
-      await writeTab(tab, target)
+      const saved = await writeTab(tab, target)
+      if (saved && pendingMode) applyEditorMode(id, pendingMode.direction === 'toMilkdown')
     },
-    [writeTab]
+    [applyEditorMode, writeTab]
   )
+
+  const cancelModeSwitch = useCallback(() => {
+    if (modeSwitchSaving) return
+    setModeSwitchState(null)
+  }, [modeSwitchSaving])
+
+  const continueModeSwitch = useCallback(() => {
+    if (!modeSwitchState || modeSwitchSaving) return
+    const { id, direction } = modeSwitchState
+    setModeSwitchState(null)
+    applyEditorMode(id, direction === 'toMilkdown')
+  }, [applyEditorMode, modeSwitchSaving, modeSwitchState])
+
+  const saveAndContinueModeSwitch = useCallback(async () => {
+    if (!modeSwitchState || modeSwitchState.direction !== 'toMilkdown' || modeSwitchSaving) return
+    const pending = modeSwitchState
+    setModeSwitchSaving(true)
+    const result = await saveTab(pending.id)
+    if (result === true) {
+      setModeSwitchState(null)
+      setModeSwitchSaving(false)
+      applyEditorMode(pending.id, true)
+      return
+    }
+    if (result === 'pending') {
+      pendingModeAfterSaveRef.current = pending
+      setModeSwitchState(null)
+    }
+    setModeSwitchSaving(false)
+  }, [applyEditorMode, modeSwitchSaving, modeSwitchState, saveTab])
 
   // Export a file (by path) to PDF: open/focus it, wait for its editor to mount,
   // then reuse the same HTML→PDF pipeline as the menu command. Driven from the
@@ -2291,6 +2362,51 @@ export default function App() {
     for (const km of kms) if (km.offsetParent !== null) return km // the on-screen one
     return null
   }
+
+  // Capture where the user was working before the find input takes focus.
+  // Milkdown uses its live ProseMirror selection head; keep mode has no caret,
+  // so its visible viewport top becomes the stable start for this find session.
+  const captureFindStart = () => {
+    if (sourceRef.current) return null
+    const root = richRoot()
+    if (!root) return null
+
+    if (root.classList.contains('ProseMirror')) {
+      const view = editorApis.current[activeIdRef.current]?.getView?.()
+      const head = view?.state?.selection?.head
+      if (view && Number.isFinite(head)) {
+        try {
+          const point = view.domAtPos(head)
+          const range = document.createRange()
+          range.setStart(point.node, point.offset)
+          range.collapse(true)
+          return { kind: 'cursor', range }
+        } catch {
+          // Fall through to the native selection when a node view cannot map
+          // the ProseMirror position directly to a DOM boundary.
+        }
+      }
+
+      const selection = window.getSelection?.()
+      const node = selection?.focusNode
+      const el = node?.nodeType === Node.ELEMENT_NODE ? node : node?.parentElement
+      if (selection && node && (node === root || el === root || root.contains(el))) {
+        try {
+          const range = document.createRange()
+          range.setStart(node, selection.focusOffset)
+          range.collapse(true)
+          return { kind: 'cursor', range }
+        } catch {
+          return null
+        }
+      }
+      return null
+    }
+
+    const scroller = root.closest('.editor-scroll')
+    return scroller ? { kind: 'viewport', scroller, scrollTop: scroller.scrollTop } : null
+  }
+
   const findQueryRef = useRef('')
   const activeIdxRef = useRef(-1)
   const findModeRef = useRef('text')
@@ -2425,7 +2541,7 @@ export default function App() {
     if (ranges.length) {
       nextActiveIdx =
         preferredActiveIdx == null
-          ? 0
+          ? findRangeIndexFromStart(ranges, findStartRef.current)
           : Math.min(Math.max(0, preferredActiveIdx), ranges.length - 1)
       activeIdxRef.current = nextActiveIdx
       paintFindHighlights(ranges, nextActiveIdx)
@@ -2687,6 +2803,7 @@ export default function App() {
     activeIdxRef.current = -1
     lineBiRef.current = -1
     findQueryRef.current = query
+    findStartRef.current = captureFindStart()
     findOptionsRef.current = { ...findOptionsRef.current, inSelection }
 
     setHome(false)
@@ -2705,7 +2822,8 @@ export default function App() {
     }))
     selectFindInputSoon()
     saveFindSession({ query, mode: 'text', inSelection })
-    setTimeout(() => runFind(query, findOptionsRef.current, session.activeIdx ?? 0), 0)
+    const preferredActiveIdx = sourceRef.current ? session.activeIdx ?? 0 : null
+    setTimeout(() => runFind(query, findOptionsRef.current, preferredActiveIdx), 0)
   }
   openFindRef.current = openFind
 
@@ -2965,6 +3083,7 @@ export default function App() {
     findOptionsRef.current = options
     findModeRef.current = mode
     findQueryRef.current = query
+    findStartRef.current = captureFindStart()
     setFind((f) => ({
       ...f,
       mode,
@@ -2976,7 +3095,7 @@ export default function App() {
       error: ''
     }))
     if (mode === 'line') runLineJump(query, false)
-    else runFind(query, options, session.activeIdx ?? 0)
+    else runFind(query, options, sourceRef.current ? session.activeIdx ?? 0 : null)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeId])
 
@@ -3552,13 +3671,27 @@ export default function App() {
         />
       )}
 
+      {modeSwitchState && (
+        <ModeSwitchDialog
+          t={t}
+          direction={modeSwitchState.direction}
+          busy={modeSwitchSaving}
+          onSaveAndSwitch={saveAndContinueModeSwitch}
+          onSwitch={continueModeSwitch}
+          onCancel={cancelModeSwitch}
+        />
+      )}
+
       {saveNameState && (
         <RenameModal
           t={t}
           title={t('save.nameTitle')}
           initial={saveNameState.value}
           onConfirm={(name) => commitMobileSave(saveNameState.id, name)}
-          onCancel={() => setSaveNameState(null)}
+          onCancel={() => {
+            pendingModeAfterSaveRef.current = null
+            setSaveNameState(null)
+          }}
         />
       )}
 

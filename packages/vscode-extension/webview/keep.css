@@ -307,6 +307,22 @@ body.hm-full-width .km-doc {
 /* Loose list (CommonMark): blank-line-separated items breathe. Outermost list only. */
 .km-doc ul.km-loose > li,
 .km-doc ol.km-loose > li { margin: calc(0.8em * var(--editor-para-scale, 1)) 0; }
+/* Exact blank-line display uses the shared keep-parser's data-list-gap marker.
+   Only the item that follows source blank lines gets extra space; the rest of
+   the list stays tight instead of inheriting a whole-list loose line spacing. */
+.km-doc li[data-list-gap] {
+  margin-top: calc(
+    0.8em * var(--editor-para-scale, 1) +
+    var(--km-gap, 0) * var(--editor-line-height, 1.8) * 1em * var(--editor-para-scale, 1)
+  );
+}
+.km-list-inline-gap {
+  display: block;
+  height: calc(
+    0.8em * var(--editor-para-scale, 1) +
+    var(--km-gap, 0) * var(--editor-line-height, 1.8) * 1em * var(--editor-para-scale, 1)
+  );
+}
 /* `==highlight==` and the colored `<mark class="hm-hl-…">` form. Mirrors app.css. */
 .km-doc mark {
   color: inherit;
@@ -429,6 +445,48 @@ body.dark .km-doc mark.hm-hl-blue { background: #2f4a6b; }
   margin: calc(2em * var(--editor-para-scale, 1)) 0;
 }
 
+.km-table-frame {
+  position: relative;
+  margin: calc(1.2em * var(--editor-para-scale, 1)) 0;
+}
+.km-table-tools {
+  display: flex;
+  min-height: 26px;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-bottom: 5px;
+  opacity: 0.7;
+  transition: opacity 0.14s ease-out;
+}
+.km-table-frame:hover .km-table-tools,
+.km-table-frame:focus-within .km-table-tools {
+  opacity: 1;
+}
+.km-table-tool {
+  min-height: 24px;
+  padding: 3px 8px;
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  font: inherit;
+  font-size: 11px;
+  line-height: 1.2;
+  cursor: pointer;
+}
+.km-table-tool:hover,
+.km-table-tool:focus-visible {
+  color: var(--text);
+  background: var(--hover);
+  border-color: var(--border);
+}
+.km-table-frame .km-table-wrap {
+  margin: 0;
+}
+.km-table-frame .km-table-scrolltop {
+  margin-top: 0;
+}
 .km-table-wrap {
   /* Natural height: the page scrolls straight through the table (no inner wheel
      trap). Only X scrolls, for wide tables; the sticky-on-page header is provided
@@ -532,6 +590,10 @@ body.dark .km-doc mark.hm-hl-blue { background: #2f4a6b; }
   text-align: left;
   vertical-align: top;
 }
+.km-table .km-col-hidden,
+.km-float-header .km-col-hidden {
+  display: none !important;
+}
 .km-table th {
   background: var(--hover-elevated, var(--border-soft));
   color: var(--text-strong);
@@ -554,9 +616,91 @@ body.dark .km-doc mark.hm-hl-blue { background: #2f4a6b; }
 }
 .km-th-flex {
   display: flex;
+  min-width: 0;
   align-items: center;
   gap: 6px;
   justify-content: space-between;
+}
+.km-th-content {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.km-th-actions {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 2px;
+}
+.km-col-hide-btn {
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  color: var(--muted);
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-sm);
+  font: inherit;
+  font-size: 13px;
+  line-height: 20px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.12s, color 0.12s, background 0.12s;
+}
+.km-table th:hover .km-col-hide-btn,
+.km-table th:focus-within .km-col-hide-btn,
+.km-float-header th:hover .km-col-hide-btn,
+.km-float-header th:focus-within .km-col-hide-btn {
+  opacity: 1;
+}
+.km-col-hide-btn:hover,
+.km-col-hide-btn:focus-visible {
+  color: var(--text);
+  background: var(--active);
+  opacity: 1;
+}
+.km-col-hide-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.22;
+}
+.km-col-resize {
+  position: absolute;
+  z-index: 6;
+  top: 0;
+  right: -5px;
+  width: 10px;
+  height: 100%;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  cursor: col-resize;
+  touch-action: none;
+}
+.km-col-resize::after {
+  position: absolute;
+  top: 20%;
+  bottom: 20%;
+  left: 4px;
+  width: 2px;
+  content: '';
+  background: var(--accent);
+  border-radius: 2px;
+  opacity: 0;
+  transform: scaleY(0.65);
+  transition: opacity 0.12s, transform 0.12s;
+}
+.km-table th:hover > .km-col-resize::after,
+.km-col-resize:hover::after,
+.km-col-resize:focus-visible::after,
+.km-column-resizing .km-col-resize::after {
+  opacity: 0.72;
+  transform: scaleY(1);
+}
+body.km-column-resizing,
+body.km-column-resizing * {
+  cursor: col-resize !important;
+  user-select: none !important;
 }
 .km-filter-btn {
   border: none;
@@ -575,6 +719,55 @@ body.dark .km-doc mark.hm-hl-blue { background: #2f4a6b; }
 .km-filter-btn.active {
   color: #fff;
   background: var(--accent);
+}
+.km-column-pop {
+  position: fixed;
+  z-index: 1300;
+  width: min(260px, calc(100vw - 16px));
+  max-height: min(360px, calc(100vh - 16px));
+  overflow-y: auto;
+  padding: 6px;
+  color: var(--text);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+}
+.km-column-pop-title {
+  padding: 6px 8px 5px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+}
+.km-column-pop-item {
+  display: block;
+  width: 100%;
+  padding: 7px 8px;
+  overflow: hidden;
+  color: var(--text);
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-sm);
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.35;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.km-column-pop-item:hover,
+.km-column-pop-item:focus-visible {
+  background: var(--hover);
+}
+.km-column-pop-sep {
+  height: 1px;
+  margin: 5px 3px;
+  background: var(--border-soft);
+}
+.km-column-pop-all {
+  color: var(--accent);
+  font-weight: 600;
 }
 .km-cell-pop {
   position: fixed;
@@ -1089,6 +1282,32 @@ body.dark .km-doc mark.hm-hl-blue { background: #2f4a6b; }
   color: var(--muted);
   font-size: 12px;
 }
+.km-lo-toggle-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  cursor: pointer;
+}
+.km-lo-toggle-copy {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 3px;
+}
+.km-lo-desc {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
+.km-lo-check {
+  width: 16px;
+  height: 16px;
+  margin: 1px 0 0;
+  flex: 0 0 auto;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
 .km-lo-val {
   color: var(--faint);
   font-size: 11px;
@@ -1210,6 +1429,22 @@ body.dark .km-doc mark.hm-hl-blue { background: #2f4a6b; }
 ::highlight(hm-find-current) {
   background-color: var(--accent);
   color: #fff;
+}
+
+/* Fallback for source-only matches (for example a URL hidden behind link text):
+   the exact text cannot be painted in the rendered DOM, so briefly mark its block. */
+.km-block.km-search-reveal {
+  animation: km-search-reveal 1.8s ease-out;
+}
+@keyframes km-search-reveal {
+  0%, 35% {
+    background: color-mix(in srgb, var(--accent) 22%, transparent);
+    box-shadow: inset 3px 0 0 var(--accent);
+  }
+  100% {
+    background: transparent;
+    box-shadow: inset 3px 0 0 transparent;
+  }
 }
 
 /* ── mermaid zoom lightbox ── */

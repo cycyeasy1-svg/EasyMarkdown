@@ -26,14 +26,51 @@ class KeepEditorProvider {
     this.context = context
     this.panels = new Map() // uriString -> live webviewPanel (for cross-file anchor jumps)
     this.pendingAnchor = new Map() // uriString -> #fragment to apply once the editor opens
+    this.pendingReveal = new Map() // uriString -> short-lived source selection from VSCode search
+    this.readyPanels = new Set() // uriString values whose webview has sent `ready`
+    this.registration = null
   }
 
   static register(context) {
     const provider = new KeepEditorProvider(context)
-    return vscode.window.registerCustomEditorProvider(VIEW_TYPE, provider, {
+    provider.registration = vscode.window.registerCustomEditorProvider(VIEW_TYPE, provider, {
       webviewOptions: { retainContextWhenHidden: true },
       supportsMultipleEditorsPerDocument: false
     })
+    return provider
+  }
+
+  dispose() {
+    this.registration?.dispose()
+  }
+
+  /**
+   * Carry a non-empty source-editor selection across `vscode.openWith`, which
+   * otherwise preserves only the URI and loses the range chosen in Search.
+   * The entry expires so a failed editor switch cannot cause a surprise jump
+   * the next time the document is opened.
+   */
+  queueSearchReveal(uri, reveal) {
+    if (!(uri instanceof vscode.Uri) || !reveal || !reveal.text) return
+    const docKey = uri.toString()
+    const target = {
+      line: Math.max(0, reveal.line | 0),
+      character: Math.max(0, reveal.character | 0),
+      text: String(reveal.text),
+      expiresAt: Date.now() + 5000
+    }
+    this.pendingReveal.set(docKey, target)
+    const panel = this.panels.get(docKey)
+    if (panel && this.readyPanels.has(docKey)) {
+      this.pendingReveal.delete(docKey)
+      panel.webview.postMessage({ type: 'revealSearchMatch', reveal: target })
+    }
+  }
+
+  takeSearchReveal(docKey) {
+    const target = this.pendingReveal.get(docKey)
+    this.pendingReveal.delete(docKey)
+    return target && target.expiresAt >= Date.now() ? target : null
   }
 
   resolveCustomTextEditor(document, webviewPanel) {
@@ -44,6 +81,7 @@ class KeepEditorProvider {
     // (the commands / the in-editor Source button) update the preference.
     const docKey = document.uri.toString()
     this.panels.set(docKey, webviewPanel)
+    this.readyPanels.delete(docKey)
     const webview = webviewPanel.webview
     const docDir = vscode.Uri.joinPath(document.uri, '..')
     webview.options = {
@@ -83,6 +121,8 @@ class KeepEditorProvider {
       // once the first paint lands.
       const anchor = this.pendingAnchor.get(docKey) || null
       this.pendingAnchor.delete(docKey)
+      const reveal = this.takeSearchReveal(docKey)
+      this.readyPanels.add(docKey)
       webview.postMessage({
         type: 'init',
         text: lastKnownText,
@@ -91,7 +131,8 @@ class KeepEditorProvider {
         langPref: this.context.globalState.get(LANG_KEY) || 'auto', // for the picker
         theme: this.context.globalState.get(THEME_KEY) || 'auto',
         layout: this.context.globalState.get(LAYOUT_KEY) || null,
-        anchor
+        anchor,
+        reveal
       })
     }
 
@@ -175,7 +216,10 @@ class KeepEditorProvider {
       msgSub.dispose()
       scrollSub.dispose()
       clearTimeout(editorScrollTimer)
-      if (this.panels.get(docKey) === webviewPanel) this.panels.delete(docKey)
+      if (this.panels.get(docKey) === webviewPanel) {
+        this.panels.delete(docKey)
+        this.readyPanels.delete(docKey)
+      }
     })
   }
 

@@ -76,6 +76,7 @@ function KeepEditor({
   const viewLinesRef = useRef([]) // \r-stripped view (parse/display)
   const blocksRef = useRef([]) // source map from the last render
   const filterStateRef = useRef({}) // tableIdx -> { colIdx: Set(excluded values) }
+  const columnStateRef = useRef({}) // tableIdx -> preview-only widths + hidden columns
   const collapsedRef = useRef(new Set()) // collapsed section keys ("level:text"), persisted across re-renders
   const onChangeRef = useRef(onChange)
   onChangeRef.current = onChange
@@ -112,6 +113,7 @@ function KeepEditor({
 
     rawLinesRef.current = (initialContent || '').split('\n')
     filterStateRef.current = {}
+    columnStateRef.current = {}
 
     const emitChange = () => {
       if (destroyed) return
@@ -294,6 +296,8 @@ function KeepEditor({
       // tear the old ones down first.
       tableScrollRef.current?.destroy()
       tableScrollRef.current = enhanceKeepTables(host, host.closest('.editor-scroll'), {
+        columnState: columnStateRef.current,
+        t: tRef.current,
         onFilterClick: (clonedBtn) => openFilterPop(clonedBtn),
         // Editing a floating-header cell: resolve the clone to the REAL <th> (same
         // data-line/data-ci → same source line) and edit that, but anchor the
@@ -906,6 +910,7 @@ function KeepEditor({
         rawLinesRef.current[ln] = insertColumnInLine(rawLinesRef.current[ln], colIdx, content)
       }
       delete filterStateRef.current[ti] // column indices shifted — drop stale filters
+      delete columnStateRef.current[ti] // manual widths / hidden indices shifted too
       emitChange()
       rerender()
     }
@@ -916,6 +921,7 @@ function KeepEditor({
         rawLinesRef.current[ln] = removeColumnInLine(rawLinesRef.current[ln], colIdx)
       }
       delete filterStateRef.current[ti] // column indices shifted — drop stale filters
+      delete columnStateRef.current[ti] // manual widths / hidden indices shifted too
       emitChange()
       rerender()
     }
@@ -969,6 +975,21 @@ function KeepEditor({
       items.push('sep')
       items.push({ label: T('keep.colInsertLeft'), fn: () => doInsertColumn(ti, ci) })
       items.push({ label: T('keep.colInsertRight'), fn: () => doInsertColumn(ti, ci + 1) })
+      items.push('sep')
+      items.push({
+        label: T('keep.autoFitColumn'),
+        fn: () => tableScrollRef.current?.autoFitColumn(ti, ci)
+      })
+      items.push({
+        label: T('keep.tableAutoFit'),
+        fn: () => tableScrollRef.current?.autoFitTable(ti)
+      })
+      const columnName = (b?.headers[ci] || '').trim() || T('keep.columnNumber', { number: ci + 1 })
+      items.push({
+        label: T('keep.hideColumn', { name: columnName }),
+        fn: () => tableScrollRef.current?.hideColumn(ti, ci),
+        disabled: !tableScrollRef.current?.canHideColumn(ti, ci)
+      })
       items.push('sep')
       if (!isHeader) items.push({ label: T('keep.rowDelete'), fn: () => doDeleteRow(ti, ri) })
       items.push({
@@ -1575,6 +1596,7 @@ function KeepEditor({
       const span = btn.querySelector('span')
       if (span) span.textContent = label
     })
+    tableScrollRef.current?.refreshLabels(tRef.current)
   }, [lang])
 
   return <div className="km-doc" ref={hostRef} />
