@@ -2,7 +2,27 @@
 // cross-platform-critical logic that turns a document-relative src into a
 // display-only file:// URL (the doc model keeps the original relative path).
 import { describe, it, expect } from 'vitest'
-import { dirOf, isRelativePath, resolveToFileUrl } from '../src/renderer/src/components/editor-images.js'
+import {
+  dirOf,
+  isRelativePath,
+  resolveToFileUrl,
+  uniqueImageName
+} from '../src/renderer/src/components/editor-images.js'
+
+describe('uniqueImageName', () => {
+  const now = new Date(2026, 6, 6, 0, 45, 50, 557)
+
+  it('adds a millisecond timestamp and normalizes the extension', () => {
+    expect(uniqueImageName('image.PNG', now)).toBe('image-20260706004550557.png')
+  })
+
+  it('sanitizes and bounds the stem while retaining an image extension', () => {
+    expect(uniqueImageName('screen:shot?.jpeg', now)).toBe('screen_shot_-20260706004550557.jpeg')
+    expect(uniqueImageName('', now)).toBe('image-20260706004550557.png')
+    const long = uniqueImageName(`${'a'.repeat(80)}.webp`, now)
+    expect(long).toBe(`${'a'.repeat(48)}-20260706004550557.webp`)
+  })
+})
 
 describe('dirOf', () => {
   it('returns the parent dir, normalizing backslashes', () => {

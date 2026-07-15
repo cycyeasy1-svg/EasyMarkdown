@@ -372,16 +372,21 @@ const ICON_CLOSE = icon(16, '<line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y
 
 // Paint a rendered diagram + append the magnifier affordance (opens the zoom
 // lightbox). Serialization/copy strips `button`s, so this never pollutes output.
-function setMermaidSvg(el, svg) {
-  el.innerHTML = svg
-  el.classList.add('km-mermaid-ready')
+function appendEmbedZoom(el, kind) {
   const btn = document.createElement('button')
   btn.type = 'button'
   btn.className = 'km-mermaid-zoom'
-  btn.title = t('mermaid.zoom')
-  btn.setAttribute('aria-label', t('mermaid.zoom'))
+  btn.dataset.zoomKind = kind
+  const label = kind === 'math' ? t('math.zoom') : t('mermaid.zoom')
+  btn.title = label
+  btn.setAttribute('aria-label', label)
   btn.innerHTML = ICON_ZOOM
   el.appendChild(btn)
+}
+function setMermaidSvg(el, svg) {
+  el.innerHTML = svg
+  el.classList.add('km-mermaid-ready')
+  appendEmbedZoom(el, 'mermaid')
 }
 function renderMermaidEl(el) {
   const code = el.getAttribute('data-code') || ''
@@ -416,6 +421,7 @@ function renderMathEl(el) {
     const tex = el.getAttribute('data-tex') || ''
     try {
       katex.render(tex, el, { displayMode: true, throwOnError: false })
+      appendEmbedZoom(el, 'math')
     } catch (e) {
       el.classList.add('hm-mermaid-error')
       el.textContent = String((e && e.message) || e)
@@ -470,20 +476,20 @@ function closeMermaidZoom() {
   zoomOverlay.remove()
   zoomOverlay = null
 }
-function openMermaidZoom(svgEl) {
+function openMermaidZoom(contentEl) {
   closeMermaidZoom()
   const overlay = document.createElement('div')
   overlay.className = 'km-zoom-overlay'
   const stage = document.createElement('div')
   stage.className = 'km-zoom-stage'
-  const svg = svgEl.cloneNode(true)
-  svg.removeAttribute('width')
-  svg.removeAttribute('height')
-  svg.style.width = ''
-  svg.style.height = ''
-  svg.style.maxWidth = 'none'
-  svg.style.maxHeight = 'none'
-  stage.appendChild(svg)
+  const content = contentEl.cloneNode(true)
+  content.removeAttribute('width')
+  content.removeAttribute('height')
+  content.style.width = ''
+  content.style.height = ''
+  content.style.maxWidth = 'none'
+  content.style.maxHeight = 'none'
+  stage.appendChild(content)
   overlay.appendChild(stage)
 
   let scale = 1
@@ -2058,7 +2064,6 @@ function activateLink(href) {
     return
   }
   if (/^[a-z][a-z\d+.-]*:/i.test(href)) {
-    vscode.postMessage({ type: 'openExternal', url: href })
     return
   }
   // Relative file link (optionally with #fragment) — the host resolves it
@@ -2348,8 +2353,10 @@ function onClick(e) {
   if (mz && host.contains(mz)) {
     e.preventDefault()
     e.stopPropagation()
-    const svgEl = mz.closest('.km-mermaid')?.querySelector('svg')
-    if (svgEl) openMermaidZoom(svgEl)
+    const contentEl = mz.dataset.zoomKind === 'math'
+      ? mz.closest('.km-math')?.querySelector('.katex-display')
+      : mz.closest('.km-mermaid')?.querySelector('svg')
+    if (contentEl) openMermaidZoom(contentEl)
     return
   }
   const ct = e.target.closest('.km-collapse-toggle')

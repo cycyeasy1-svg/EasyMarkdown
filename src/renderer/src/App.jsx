@@ -1722,50 +1722,129 @@ export default function App() {
   )
 
   // --------------------------- outline jump ------------------------
+  const [activeHeading, setActiveHeading] = useState(-1)
+  const forcedActiveHeadingRef = useRef(null)
+  const outlineJumpRef = useRef({ token: 0, raf: 0, timer: 0, scroller: null, overflowAnchor: '' })
+
+  const cancelOutlineJump = useCallback(() => {
+    const job = outlineJumpRef.current
+    job.token += 1
+    if (job.raf) cancelAnimationFrame(job.raf)
+    if (job.timer) clearTimeout(job.timer)
+    if (job.scroller) job.scroller.style.overflowAnchor = job.overflowAnchor
+    job.raf = 0
+    job.timer = 0
+    job.scroller = null
+    forcedActiveHeadingRef.current = null
+  }, [])
+
   const jumpToHeading = useCallback((index) => {
-    // Make sure the document (not the Home page) is showing — otherwise the
-    // active editor is hidden and editorHostRef isn't attached, so the jump
-    // would silently do nothing. setHome(false) is a no-op when already not home.
     setHome(false)
-    // On mobile the outline lives in the drawer; close it so the jumped-to
-    // content is actually visible instead of hidden behind the drawer.
     if (isMobile) setSidebarOpen(false)
-    const doJump = () => {
-      // Keep mode streams its DOM in chunks after open — make sure the whole doc is
-      // painted before we index headings, or a jump to a far one finds nothing.
-      Object.values(editorApis.current).forEach((api) => api?.ensureRendered?.())
-      const host = editorHostRef.current
-      let hs = host
-        ? host.querySelectorAll(
+    cancelOutlineJump()
+
+    const job = outlineJumpRef.current
+    const token = job.token
+    const api = editorApis.current[activeId]
+    let attempts = 0
+
+    const finish = () => {
+      if (token !== job.token) return
+      if (job.scroller) job.scroller.style.overflowAnchor = job.overflowAnchor
+      job.raf = 0
+      job.timer = 0
+      job.scroller = null
+      forcedActiveHeadingRef.current = null
+    }
+
+    const stabilize = (scroller, el) => {
+      let stable = 0
+      let checks = 0
+      let lastScrollTop = scroller.scrollTop
+      const poll = () => {
+        if (token !== job.token) return
+        if (!el.isConnected) {
+          finish()
+          return
+        }
+        const delta = el.getBoundingClientRect().top - scroller.getBoundingClientRect().top
+        if (Math.abs(delta) > 2) scroller.scrollTop += delta
+        const current = scroller.scrollTop
+        if (Math.abs(delta) <= 2 && Math.abs(current - lastScrollTop) < 3) stable += 1
+        else stable = 0
+        lastScrollTop = current
+        checks += 1
+        if (stable >= 2 || checks >= 18) {
+          finish()
+          return
+        }
+        job.timer = setTimeout(poll, 180)
+      }
+      job.timer = setTimeout(poll, 180)
+    }
+
+    const animateTo = (scroller, el) => {
+      forcedActiveHeadingRef.current = index
+      setActiveHeading(index)
+      job.scroller = scroller
+      job.overflowAnchor = scroller.style.overflowAnchor
+      scroller.style.overflowAnchor = 'none'
+
+      const start = scroller.scrollTop
+      const target = start + el.getBoundingClientRect().top - scroller.getBoundingClientRect().top
+      const distance = Math.abs(target - start)
+      const reduced = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+      if (reduced || distance < 5) {
+        scroller.scrollTop = target
+        stabilize(scroller, el)
+        return
+      }
+      const duration = Math.min(500, Math.max(200, distance / 8))
+      const startedAt = performance.now()
+      const step = (now) => {
+        if (token !== job.token) return
+        const p = Math.min(1, (now - startedAt) / duration)
+        const eased = 1 - Math.pow(1 - p, 3)
+        scroller.scrollTop = start + (target - start) * eased
+        if (p < 1) job.raf = requestAnimationFrame(step)
+        else stabilize(scroller, el)
+      }
+      job.raf = requestAnimationFrame(step)
+    }
+
+    const tryJump = () => {
+      if (token !== job.token) return
+      // Keep mode progressively paints long documents. Flush only the active
+      // editor; touching hidden tabs would make one outline click render them.
+      api?.ensureRendered?.()
+
+      let scroller = editorHostRef.current
+      let headings = scroller && scroller.offsetParent !== null
+        ? scroller.querySelectorAll(
             '.ProseMirror h1, .ProseMirror h2, .ProseMirror h3, .ProseMirror h4, .ProseMirror h5, .ProseMirror h6'
           )
-        : null
-      // Keep mode: no ProseMirror — jump within the visible rendered `.km-doc`.
-      if (!hs || !hs.length) {
-        const kms = editorAreaRef.current?.querySelectorAll('.km-doc') || []
-        let km = null
-        kms.forEach((k) => {
-          if (!km && k.offsetParent !== null) km = k
-        })
-        hs = km ? km.querySelectorAll('h1, h2, h3, h4, h5, h6') : []
+        : []
+      if (!headings.length) {
+        const candidates = editorAreaRef.current?.querySelectorAll('.editor-scroll.km-scroll.hm-pane-left') || []
+        scroller = [...candidates].find((el) => el.offsetParent !== null) || null
+        headings = scroller?.querySelectorAll('.km-doc h1, .km-doc h2, .km-doc h3, .km-doc h4, .km-doc h5, .km-doc h6') || []
       }
-      const el = hs[index]
-      if (!el) return false
-      // Keep mode: the target heading may be folded inside a collapsed section
-      // (display:none → not scrollable). Ask the keep editors to expand its
-      // ancestors first, then scroll.
-      if (el.offsetParent === null)
-        Object.values(editorApis.current).forEach((api) => api?.revealHeading?.(el))
-      el.scrollIntoView({ behavior: 'smooth', block: 'start' })
-      return true
+      const el = headings[index]
+      if (!scroller || !el) {
+        if (attempts++ < 75) job.timer = setTimeout(tryJump, 40)
+        return
+      }
+      api?.revealHeading?.(el)
+      animateTo(scroller, el)
     }
-    // Works synchronously in the normal case; if we just left Home, the editor
-    // needs a frame to re-render and re-attach the ref before we can scroll it.
-    if (doJump()) return
-    requestAnimationFrame(() => {
-      if (!doJump()) requestAnimationFrame(doJump)
-    })
-  }, [isMobile])
+
+    tryJump()
+  }, [activeId, cancelOutlineJump, isMobile])
+
+  useEffect(() => {
+    setActiveHeading(-1)
+    return cancelOutlineJump
+  }, [activeId, cancelOutlineJump])
 
   // Outline scrollspy: highlight the heading you're currently viewing (the last
   // one scrolled past the top), mirroring how the file tree marks the open file.
@@ -1775,7 +1854,6 @@ export default function App() {
   // is a forced reflow that freezes the main thread → scroll "chase" (#17).
   // Throttle to at most once per 300ms (not per frame) and skip entirely while
   // the user is actively scrolling fast (resume on settle).
-  const [activeHeading, setActiveHeading] = useState(-1)
   useEffect(() => {
     if (home || !sidebarOpen || sidebarMode !== 'outline' || sourceMode) {
       setActiveHeading(-1)
@@ -1831,11 +1909,14 @@ export default function App() {
       }
       // scrollTop is a cheap scroll-offset read — no layout, no reflow — so this
       // can run every frame without freezing and lands on the exact heading.
-      const limit = scroller.scrollTop + 90
-      let idx = 0
-      for (let i = 0; i < tops.length; i++) {
-        if (tops[i] <= limit) idx = i
-        else break
+      let idx = forcedActiveHeadingRef.current
+      if (idx == null) {
+        const limit = scroller.scrollTop + 90
+        idx = 0
+        for (let i = 0; i < tops.length; i++) {
+          if (tops[i] <= limit) idx = i
+          else break
+        }
       }
       if (idx !== lastIdx) {
         lastIdx = idx

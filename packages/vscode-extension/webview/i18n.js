@@ -7,6 +7,7 @@ import { translate } from '../../../src/renderer/src/i18n-strings.js'
 const EXTRA = {
   en: {
     'mermaid.zoom': 'Zoom diagram',
+    'math.zoom': 'Zoom formula',
     'mermaid.zoomIn': 'Zoom in',
     'mermaid.zoomOut': 'Zoom out',
     'mermaid.zoomReset': 'Reset (fit)',
@@ -28,6 +29,7 @@ const EXTRA = {
   },
   zh: {
     'mermaid.zoom': '放大查看',
+    'math.zoom': '放大查看公式',
     'mermaid.zoomIn': '放大',
     'mermaid.zoomOut': '缩小',
     'mermaid.zoomReset': '复位（适应）',
@@ -49,6 +51,7 @@ const EXTRA = {
   },
   ja: {
     'mermaid.zoom': '図を拡大',
+    'math.zoom': '数式を拡大',
     'mermaid.zoomIn': '拡大',
     'mermaid.zoomOut': '縮小',
     'mermaid.zoomReset': 'リセット（フィット）',

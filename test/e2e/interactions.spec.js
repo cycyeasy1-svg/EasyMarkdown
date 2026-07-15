@@ -256,6 +256,129 @@ test('milkdown mode: right-click block menu opens and converts the block', async
   }
 })
 
+test('milkdown mode: code-block Tab inserts at the cursor instead of moving focus', async () => {
+  const { page, cleanup } = await launchApp([fixture('code-autolink.md')])
+  try {
+    await page.locator('.tab', { hasText: 'code-autolink.md' }).click()
+    await expect(page.locator('.km-doc')).toBeVisible()
+    await switchToMilkdown(page, 'const answer = 42;')
+
+    const content = page.locator('.cm-editor .cm-content').first()
+    const line = content.locator('.cm-line').first()
+    await line.click()
+    await page.keyboard.press('End')
+    await page.keyboard.press('Tab')
+
+    await expect(content).toBeFocused()
+    await expect.poll(() => line.textContent()).toBe('const answer = 42;\t')
+  } finally {
+    await cleanup()
+  }
+})
+
+test('milkdown mode: GFM autolink does not swallow trailing CJK prose', async () => {
+  const { page, cleanup } = await launchApp([fixture('code-autolink.md')])
+  try {
+    await page.locator('.tab', { hasText: 'code-autolink.md' }).click()
+    await expect(page.locator('.km-doc')).toBeVisible()
+    const pm = await switchToMilkdown(page, '查看课程1')
+
+    const paragraph = pm.locator('p', { hasText: 'www.caixuetang.cn' })
+    await expect(paragraph).toHaveText('www.caixuetang.cn，查看课程1')
+    await expect(paragraph.locator('a')).toHaveText('www.caixuetang.cn')
+  } finally {
+    await cleanup()
+  }
+})
+
+test('keep mode: outline jump flushes a far heading and keeps it selected while layout settles', async () => {
+  const { page, cleanup } = await launchApp([fixture('outline-stability.md')])
+  try {
+    await page.locator('.tab', { hasText: 'outline-stability.md' }).click()
+    await expect(page.locator('.km-doc')).toBeVisible()
+    await page.locator('button[title="大纲"]').click()
+
+    const item = page.locator('.outline-item[title="Far Target Heading"]')
+    await expect(item).toBeVisible()
+    await item.click()
+
+    const heading = page.getByRole('heading', { name: 'Far Target Heading' })
+    const scroller = page.locator('.editor-scroll.km-scroll.hm-pane-left')
+    await expect.poll(async () => {
+      const [headingTop, scrollerTop] = await Promise.all([
+        heading.evaluate((el) => el.getBoundingClientRect().top),
+        scroller.evaluate((el) => el.getBoundingClientRect().top)
+      ])
+      return Math.abs(headingTop - scrollerTop)
+    }).toBeLessThan(4)
+    await expect(item).toHaveClass(/active/)
+  } finally {
+    await cleanup()
+  }
+})
+
+test('milkdown mode: slash language alias inserts a preconfigured code block', async () => {
+  const { page, cleanup } = await openWelcome()
+  try {
+    const pm = await switchToMilkdown(page)
+    const paragraph = pm.locator('p', { hasText: 'reliable click' })
+    await paragraph.click()
+    await page.keyboard.press('End')
+    await page.keyboard.press('Enter')
+    await page.keyboard.type('/java')
+
+    const menu = page.locator('.hm-smart-slash[data-show="true"]')
+    await expect(menu).toBeVisible()
+    await expect(menu.locator('.hm-slash-item').first()).toContainText('代码 · java')
+    await page.keyboard.press('Enter')
+
+    await expect(menu).not.toBeVisible()
+    await expect(pm.locator('.milkdown-code-block')).toHaveCount(1)
+    await expect(pm).not.toContainText('/java')
+  } finally {
+    await cleanup()
+  }
+})
+
+test('keep and milkdown modes: Mermaid and KaTeX open the shared zoom lightbox', async () => {
+  const { page, cleanup } = await launchApp([fixture('zoom-embeds.md')])
+  try {
+    await page.locator('.tab', { hasText: 'zoom-embeds.md' }).click()
+    await expect(page.locator('.km-doc')).toBeVisible()
+
+    const keepMermaid = page.locator('.km-mermaid')
+    await expect(keepMermaid.locator(':scope > svg')).toBeVisible()
+    await keepMermaid.hover()
+    await keepMermaid.locator('.hm-embed-zoom').click()
+    const overlay = page.locator('.hm-zoom-overlay')
+    await expect(overlay.locator('.hm-zoom-content svg')).toBeVisible()
+    await expect(overlay.locator('.hm-zoom-bar span')).toHaveText('100%')
+    await overlay.hover()
+    await page.mouse.wheel(0, -240)
+    await expect(overlay.locator('.hm-zoom-bar span')).not.toHaveText('100%')
+    await page.keyboard.press('Escape')
+    await expect(overlay).toHaveCount(0)
+
+    const keepMath = page.locator('.km-math')
+    await expect(keepMath.locator('.katex-display')).toBeVisible()
+    await keepMath.hover()
+    await keepMath.locator('.hm-embed-zoom').click()
+    await expect(overlay.locator('.hm-zoom-content .katex-display')).toBeVisible()
+    await page.keyboard.press('Escape')
+
+    await switchToMilkdown(page, 'Zoom Fixture')
+    const richPreview = page.locator('.milkdown-code-block .preview:has(> svg)')
+    await expect(richPreview).toBeVisible()
+    await richPreview.hover()
+    await richPreview.locator('.hm-embed-zoom[data-zoom-kind="mermaid"]').click()
+    await expect(overlay.locator('.hm-zoom-content svg')).toBeVisible()
+    await page.keyboard.press('Escape')
+    await expect(page.locator('.ProseMirror .hm-embed-zoom[data-zoom-kind="math"]')).toBeVisible()
+  } finally {
+    await cleanup()
+  }
+})
+
 // NOTE: the on-selection floating toolbar is Crepe's own bubble (`.milkdown-toolbar`,
 // with an injected `.hm-heading-item` heading button). It only surfaces on a real
 // pointer drag-select and does not reliably lay out / become clickable under

@@ -23,13 +23,18 @@ import { detectDocLang } from '../keep-parser.js'
 import { useI18n } from '../i18n.jsx'
 import { fireToast } from '../ui.js'
 import { renderHtmlNodeView, convertBlock, mergeInlineHtmlRemarkPlugin } from './editor-html.js'
-import { dirOf, isRelativePath, resolveToFileUrl } from './editor-images.js'
+import { dirOf, isRelativePath, resolveToFileUrl, uniqueImageName } from './editor-images.js'
 import { inlineRichStyles } from './editor-copy.js'
 import { createMermaidPreviewRenderer, createMermaidSplitPlugin } from './editor-mermaid.js'
 import { tableBreakKeymap, tableCellBreakHandler, brToBreakRemarkPlugin } from './editor-tablebreak.js'
 import { attachMdPasteHandler } from './editor-md-paste.js'
 import { normalizeDisplayMath } from './editor-math.js'
 import { createSafeUnderscoreEmphasisInputRule } from './editor-inputrules.js'
+import { tabAtCursorKeymap } from './editor-codeblock-tab.js'
+import { remarkRepairNonAsciiAutolinks } from './editor-autolink.js'
+import { createSlashPlugin, disableCrepeSlash } from './editor-slash-menu.js'
+import ZoomLightbox from './ZoomLightbox.jsx'
+import { ensureEmbedZoomButtons, zoomItemFromButton } from './editor-zoom.js'
 import './editor-codeblock-eager.js' // side effect: stable code-block heights (scroll-jump fix)
 import remarkFrontmatter from 'remark-frontmatter'
 import { frontmatterSchema, renderFrontmatterNodeView, remarkFrontmatterAnywhere } from './editor-frontmatter.js'
@@ -156,8 +161,8 @@ function Editor({
   const [ctxMenu, setCtxMenu] = useState(null) // { x, y } viewport coords, or null
   // Floating "block level" indicator that tracks the caret (H1…H6 / Text).
   const [level, setLevel] = useState(null) // { label, kind, top, left } or null
-  // Lightbox: the image src currently shown enlarged, or null.
-  const [zoom, setZoom] = useState(null)
+  // Shared image / Mermaid / display-math zoom lightbox.
+  const [lightbox, setLightbox] = useState(null)
   // False until Crepe has parsed and rendered the document — drives the loading
   // skeleton. Only large documents (which actually take a moment to render) show
   // it, so small files never flash a placeholder.
@@ -175,6 +180,7 @@ function Editor({
     let destroyed = false
     let createRaf = 0
     const cleanups = []
+    const isMobile = window.api?.platform === 'ios' || window.api?.platform === 'android'
 
     // Register this editor so a globally-injected toolbar button can find the
     // editor that currently has the selection. Getters read the live refs.
@@ -196,12 +202,15 @@ function Editor({
     // never dies on reload (the "screenshots lost after save & reopen" bug):
     //   1. saved document → write into ./assets and use a relative path (Typora)
     //   2. untitled doc / mobile / any failure → inline base64 data: URL
-    const persistImage = async (file) => {
+    const persistImage = async (file, fromClipboard = false) => {
+      const fileName = fromClipboard
+        ? uniqueImageName(file.name || 'image.png')
+        : file.name || 'image.png'
       if (window.api.saveImage && docPath) {
         // Saved doc → write straight into ./assets, use a relative path.
         try {
           const buf = await file.arrayBuffer()
-          const res = await window.api.saveImage(docPath, file.name || 'image.png', new Uint8Array(buf))
+          const res = await window.api.saveImage(docPath, fileName, new Uint8Array(buf))
           if (res?.ok && res.path) return res.path
         } catch {
           /* fall through */
@@ -212,7 +221,7 @@ function Editor({
         // ./assets on first save (Typora-style).
         try {
           const buf = await file.arrayBuffer()
-          const res = await window.api.savePaste(file.name || 'image.png', new Uint8Array(buf))
+          const res = await window.api.savePaste(fileName, new Uint8Array(buf))
           if (res?.ok && res.url) return res.url
         } catch {
           /* fall through */
@@ -223,8 +232,8 @@ function Editor({
 
     // Insert an image at the caret (used by paste / drop of image files). Persists
     // the file first, then drops an inline image node with the resulting src.
-    const insertUploadedImage = async (file) => {
-      const url = await persistImage(file)
+    const insertUploadedImage = async (file, fromClipboard = false) => {
+      const url = await persistImage(file, fromClipboard)
       const v = viewRef.current
       if (!v || !url) return
       const imgType = v.state.schema.nodes.image
@@ -239,8 +248,7 @@ function Editor({
       // feature recognizes; code fences / front matter are left untouched.
       defaultValue: normalizeDisplayMath(initialContent || ''),
       features: {
-        [CrepeFeature.SelectionTooltip]: true,
-        [CrepeFeature.SlashCommand]: true,
+        [CrepeFeature.SelectionTooltip]: !isMobile,
         [CrepeFeature.BlockEdit]: true,
         [CrepeFeature.CodeMirror]: true,
         [CrepeFeature.Table]: true,
@@ -263,6 +271,7 @@ function Editor({
         // built-in "Copied!" state.)
         [CrepeFeature.CodeMirror]: {
           copyText: t('code.copy'),
+          extensions: [tabAtCursorKeymap],
           // previewToggleText is consumed by the feature to BUILD the toggle
           // button, so it must live in the feature config (not codeBlockConfig)
           // — otherwise the Mermaid Hide/Edit label stays English.
@@ -283,6 +292,7 @@ function Editor({
     // overwrite every component node view (image-block captions, CodeMirror code
     // blocks, tables, list items). Appending here merges with them.
     crepe.editor.config((ctx) => {
+      disableCrepeSlash(ctx)
       ctx.update(nodeViewCtx, (views) => [
         ...views,
         ['html', (node) => renderHtmlNodeView(node)],
@@ -293,25 +303,41 @@ function Editor({
       // Route the image-block / inline-image "Upload" button through the image
       // host. applyImageText spreads the existing config, so re-applying it on a
       // language switch preserves this onUpload.
-      ctx.update(imageBlockConfig.key, (v) => ({ ...v, onUpload: persistImage }))
-      ctx.update(inlineImageConfig.key, (v) => ({ ...v, onUpload: persistImage }))
+      ctx.update(imageBlockConfig.key, (v) => ({
+        ...v,
+        onUpload: (file) => persistImage(file, false)
+      }))
+      ctx.update(inlineImageConfig.key, (v) => ({
+        ...v,
+        onUpload: (file) => persistImage(file, false)
+      }))
       // Offer "Mermaid" in the code-block language picker (shown first), and
       // render a ```mermaid block's diagram as the block's "preview" — the same
       // built-in mechanism LaTeX uses: shown by default with the source hidden,
       // with a Hide/Edit toggle in the toolbar next to Copy. Non-mermaid blocks
       // have no preview, so their source always shows. See editor-mermaid.js.
-      ctx.update(codeBlockConfig.key, (v) => ({
-        ...v,
-        languages: [mermaidLanguage, ...(v.languages || [])],
-        renderPreview: createMermaidPreviewRenderer((k) => tRef.current(k)),
-        previewOnlyByDefault: true,
-        previewLabel: t('mermaid.diagram'),
-        previewLoading: t('mermaid.rendering')
-      }))
+      const renderMermaidPreview = createMermaidPreviewRenderer((k) => tRef.current(k))
+      ctx.update(codeBlockConfig.key, (v) => {
+        const renderDefaultPreview = v.renderPreview
+        return {
+          ...v,
+          languages: [mermaidLanguage, ...(v.languages || [])],
+          renderPreview: (language, text, setPreview) => {
+            if (String(language || '').toLowerCase() === 'mermaid') {
+              return renderMermaidPreview(language, text, setPreview)
+            }
+            return renderDefaultPreview?.(language, text, setPreview) ?? null
+          },
+          previewOnlyByDefault: true,
+          previewLabel: t('mermaid.diagram'),
+          previewLoading: t('mermaid.rendering')
+        }
+      })
       ctx.update(prosePluginsCtx, (plugins) => [
         ...plugins,
         // Table-cell line break (issue #7): keymap first so it wins Enter inside a cell.
         tableBreakKeymap(),
+        createSlashPlugin(ctx, (key) => tRef.current(key)),
         // Split a mermaid block that holds 2+ diagrams (e.g. a 2nd paste appended
         // into the same block) back into one block per diagram.
         createMermaidSplitPlugin()
@@ -337,6 +363,7 @@ function Editor({
         { plugin: remarkFrontmatter, options: undefined },
         { plugin: remarkFrontmatterAnywhere, options: undefined },
         { plugin: brToBreakRemarkPlugin, options: undefined },
+        { plugin: remarkRepairNonAsciiAutolinks, options: undefined },
         // Merge balanced inline HTML pairs (<span>…</span>, <sub>…</sub>) into one
         // html node so the node view can render them inline (see editor-html.js).
         { plugin: mergeInlineHtmlRemarkPlugin, options: undefined }
@@ -595,9 +622,11 @@ function Editor({
 
         if (view) {
           view.dom.addEventListener('keydown', onKeydown)
-          view.dom.addEventListener('contextmenu', onContextMenu)
           cleanups.push(() => view.dom.removeEventListener('keydown', onKeydown))
-          cleanups.push(() => view.dom.removeEventListener('contextmenu', onContextMenu))
+          if (!isMobile) {
+            view.dom.addEventListener('contextmenu', onContextMenu)
+            cleanups.push(() => view.dom.removeEventListener('contextmenu', onContextMenu))
+          }
           // Show/hide and reposition the level badge with focus and scrolling.
           const onBlur = () => setLevel(null)
           const onFocus = () => refreshLevel()
@@ -698,8 +727,8 @@ function Editor({
           const file = imgItem.getAsFile()
           if (!file) return
           e.preventDefault()
-          e.stopPropagation()
-          insertUploadedImage(file)
+          e.stopImmediatePropagation()
+          insertUploadedImage(file, true)
         }
         const onDropImage = (e) => {
           if (!imageHandlingActive(e)) return
@@ -708,14 +737,14 @@ function Editor({
           )
           if (!files.length) return
           e.preventDefault()
-          e.stopPropagation()
+          e.stopImmediatePropagation()
           // Move the caret to the drop point before inserting.
           const at = view.posAtCoords({ left: e.clientX, top: e.clientY })
           if (at) {
             const $pos = view.state.doc.resolve(at.pos)
             view.dispatch(view.state.tr.setSelection(TextSelection.near($pos)))
           }
-          files.forEach(insertUploadedImage)
+          files.forEach((file) => insertUploadedImage(file, false))
         }
 
         // --- Double-click an image → open it enlarged in a lightbox ---
@@ -748,7 +777,7 @@ function Editor({
           const now = e.timeStamp || Date.now()
           if (lastImgClick.src === src && now - lastImgClick.at < 350) {
             e.preventDefault()
-            setZoom(src)
+            setLightbox({ kind: 'image', src, trigger: img })
             lastImgClick = { src: null, at: 0 }
           } else {
             lastImgClick = { src, at: now }
@@ -787,8 +816,33 @@ function Editor({
           fireToast(tRef.current('code.copied'))
         }
 
+        const onEmbedZoom = (e) => {
+          const button = e.target.closest?.('.hm-embed-zoom')
+          if (!button || !view.dom.contains(button)) return
+          const item = zoomItemFromButton(button)
+          if (!item) return
+          e.preventDefault()
+          e.stopPropagation()
+          setLightbox(item)
+        }
+
+        let embedRaf = 0
+        const scanEmbeds = () => ensureEmbedZoomButtons(view.dom, (key) => tRef.current(key))
+        const embedObserver = new MutationObserver((mutations) => {
+          if (!mutations.some((mutation) => mutation.addedNodes.length)) return
+          if (!embedRaf) {
+            embedRaf = requestAnimationFrame(() => {
+              embedRaf = 0
+              scanEmbeds()
+            })
+          }
+        })
+        embedObserver.observe(view.dom, { childList: true, subtree: true })
+        scanEmbeds()
+
         view.dom.addEventListener('click', onLinkClick, true)
         view.dom.addEventListener('click', onImgClick, true)
+        view.dom.addEventListener('click', onEmbedZoom, true)
         view.dom.addEventListener('click', onCaptionBtn)
         view.dom.addEventListener('click', onCopyBtn, true)
         view.dom.addEventListener('copy', onCopy, true)
@@ -796,11 +850,16 @@ function Editor({
         view.dom.addEventListener('drop', onDropImage, true)
         cleanups.push(() => view.dom.removeEventListener('click', onLinkClick, true))
         cleanups.push(() => view.dom.removeEventListener('click', onImgClick, true))
+        cleanups.push(() => view.dom.removeEventListener('click', onEmbedZoom, true))
         cleanups.push(() => view.dom.removeEventListener('click', onCaptionBtn))
         cleanups.push(() => view.dom.removeEventListener('click', onCopyBtn, true))
         cleanups.push(() => view.dom.removeEventListener('copy', onCopy, true))
         cleanups.push(() => view.dom.removeEventListener('paste', onPasteImage, true))
         cleanups.push(() => view.dom.removeEventListener('drop', onDropImage, true))
+        cleanups.push(() => {
+          embedObserver.disconnect()
+          if (embedRaf) cancelAnimationFrame(embedRaf)
+        })
         // Markdown paste (capture phase — runs before ProseMirror's handler so
         // text/html doesn't bypass us). Parses pasted Markdown source via
         // Milkdown's own remark pipeline. See editor-md-paste.js.
@@ -978,11 +1037,13 @@ function Editor({
           })
           updateHighlightActive()
         }
-        scanToolbars()
-        // Re-scan when nodes are added (the toolbar is created on selection) —
-        // via the module-level shared observer, so N mounted editors cost one
-        // body observer instead of N (see registerToolbarScanner above).
-        cleanups.push(registerToolbarScanner(scanToolbars))
+        if (!isMobile) {
+          scanToolbars()
+          // Re-scan when nodes are added (the toolbar is created on selection) —
+          // via the module-level shared observer, so N mounted editors cost one
+          // body observer instead of N (see registerToolbarScanner above).
+          cleanups.push(registerToolbarScanner(scanToolbars))
+        }
         }
 
         // Typora-style new document: first line is an empty Heading 1 (title),
@@ -1158,16 +1219,6 @@ function Editor({
     }
   }, [t])
 
-  // Close the image lightbox on Escape.
-  useEffect(() => {
-    if (!zoom) return
-    const onKey = (e) => {
-      if (e.key === 'Escape') setZoom(null)
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [zoom])
-
   // The floating bar and context menu reuse the same conversion path as the
   // keyboard shortcuts (defined inside the effect, reached through apiRef).
   const pickBlock = (id) => apiRef.current?.setBlock(id)
@@ -1232,24 +1283,7 @@ function Editor({
         </>
       )}
 
-      {zoom && (
-        <div
-          className="hm-image-lightbox"
-          onClick={() => setZoom(null)}
-          role="dialog"
-          aria-modal="true"
-        >
-          <img src={zoom} alt="" />
-          <button
-            className="hm-lightbox-close"
-            title={t('lightbox.close')}
-            aria-label={t('lightbox.close')}
-            onClick={() => setZoom(null)}
-          >
-            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
-          </button>
-        </div>
-      )}
+      <ZoomLightbox item={lightbox} onClose={() => setLightbox(null)} t={t} />
     </>
   )
 }

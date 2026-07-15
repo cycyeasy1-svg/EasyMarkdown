@@ -1,6 +1,22 @@
 // Resolve relative image paths in a document against the file's folder, as
 // display-only file:// URLs (the document model keeps the original relative src).
 
+const pad2 = (n) => String(n).padStart(2, '0')
+const timestamp17 = (date) =>
+  `${date.getFullYear()}${pad2(date.getMonth() + 1)}${pad2(date.getDate())}` +
+  `${pad2(date.getHours())}${pad2(date.getMinutes())}${pad2(date.getSeconds())}` +
+  String(date.getMilliseconds()).padStart(3, '0')
+
+// Clipboard image files often arrive with the same generic name (image.png).
+// Add a local-time timestamp before handing the name to the host's existing
+// collision check. Dropped/picked files intentionally keep their original name.
+export function uniqueImageName(name, date = new Date()) {
+  const ext = (String(name || '').match(/\.([a-z0-9]+)$/i)?.[1] || 'png').toLowerCase()
+  const raw = String(name || '').replace(/\.[^.]+$/, '').trim() || 'image'
+  const stem = raw.replace(/[\\/:*?"<>|]/g, '_').slice(0, 48) || 'image'
+  return `${stem}-${timestamp17(date)}.${ext}`
+}
+
 export function dirOf(path) {
   if (!path) return null
   const norm = path.replace(/\\/g, '/')

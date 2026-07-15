@@ -1,4 +1,4 @@
-import { memo, useEffect, useRef } from 'react'
+import { memo, useEffect, useRef, useState } from 'react'
 import { useI18n } from '../i18n.jsx'
 import {
   renderDoc,
@@ -18,6 +18,8 @@ import { inlineRichStyles } from './editor-copy.js'
 import { dirOf } from './editor-images.js'
 import { getMermaidSvg, peekMermaidSvg } from './editor-mermaid.js'
 import { enhanceKeepTables } from './editor-tablescroll.js'
+import ZoomLightbox from './ZoomLightbox.jsx'
+import { ensureEmbedZoomButtons, zoomItemFromButton } from './editor-zoom.js'
 
 // Wrapper style for rich-text copy (mirrors the Crepe editor's onCopy payload) so
 // pasted output keeps a sensible default font in apps that ignore external CSS.
@@ -71,6 +73,7 @@ function KeepEditor({
   docPathRef.current = docPath
 
   const hostRef = useRef(null)
+  const [lightbox, setLightbox] = useState(null)
   // Mutable doc state held in refs (this component drives the DOM directly).
   const rawLinesRef = useRef([]) // \r-inclusive source of truth
   const viewLinesRef = useRef([]) // \r-stripped view (parse/display)
@@ -431,6 +434,7 @@ function KeepEditor({
       const cached = peekMermaidSvg(code)
       if (cached && cached.svg) {
         el.innerHTML = cached.svg
+        ensureEmbedZoomButtons(el.parentElement || el, tRef.current)
         return
       }
       el.classList.add('hm-mermaid-hint')
@@ -440,6 +444,7 @@ function KeepEditor({
         el.classList.remove('hm-mermaid-hint')
         if (res && res.svg) {
           el.innerHTML = res.svg
+          ensureEmbedZoomButtons(el.parentElement || el, tRef.current)
         } else {
           el.classList.add('hm-mermaid-error')
           el.textContent = T('mermaid.error') + ' ' + ((res && res.error) || '')
@@ -463,6 +468,7 @@ function KeepEditor({
         const tex = el.getAttribute('data-tex') || ''
         try {
           katex.render(tex, el, { displayMode: true, throwOnError: false })
+          ensureEmbedZoomButtons(el.parentElement || el, tRef.current)
         } catch (e) {
           el.classList.add('hm-mermaid-error')
           el.textContent = String((e && e.message) || e)
@@ -492,6 +498,7 @@ function KeepEditor({
         const cached = peekMermaidSvg(el.getAttribute('data-code') || '')
         if (cached && cached.svg) {
           el.innerHTML = cached.svg
+          ensureEmbedZoomButtons(el.parentElement || el, tRef.current)
           return
         }
       }
@@ -1296,9 +1303,10 @@ function KeepEditor({
       tableScrollRef.current?.update()
     }
 
-    // Classify a clicked link: external → system browser; in-app doc link or
-    // pure #anchor → hand the (path, anchor, fromPath) to the parent so it opens
-    // the markdown tab and jumps. Other schemes (file:, etc.) open externally.
+    // Classify a clicked link: allowlisted web/mail targets → system browser;
+    // in-app doc link or pure #anchor → hand the (path, anchor, fromPath) to the
+    // parent so it opens the markdown tab and jumps. Unknown schemes are blocked
+    // here and again by the main-process permission boundary.
     const activateLink = (href) => {
       if (/^(https?:|mailto:)/i.test(href)) {
         window.api?.openExternal?.(href)
@@ -1309,8 +1317,6 @@ function KeepEditor({
       const anchor = hashIdx >= 0 ? safeDecode(href.slice(hashIdx + 1)) : ''
       const path = safeDecode(rawPath)
       if (/^[a-z][a-z\d+.-]*:/i.test(path)) {
-        // a non-http scheme with a path (file:, vscode:, …) — let the OS handle it
-        window.api?.openExternal?.(href)
         return
       }
       onOpenDocLinkRef.current?.(path, anchor, docPathRef.current)
@@ -1338,6 +1344,16 @@ function KeepEditor({
       }
     }
     const onClick = (e) => {
+      const zoomButton = e.target.closest('.hm-embed-zoom')
+      if (zoomButton && host.contains(zoomButton)) {
+        const item = zoomItemFromButton(zoomButton)
+        if (item) {
+          e.preventDefault()
+          e.stopPropagation()
+          setLightbox(item)
+        }
+        return
+      }
       // Fold/unfold a heading's section. Handled first so it never falls through to
       // link-open or block-edit; stopPropagation keeps the block hover-edit quiet.
       const ct = e.target.closest('.km-collapse-toggle')
@@ -1563,6 +1579,7 @@ function KeepEditor({
     if (!inView) {
       wasHiddenRef.current = true
       closeFloatingRef.current?.()
+      setLightbox(null)
     } else if (wasHiddenRef.current) {
       // Only after a hide → show: fix km-multiline on blocks that streamed in while
       // the pane was display:none (they measured 0 height). Skips the no-op remeasure
@@ -1596,10 +1613,16 @@ function KeepEditor({
       const span = btn.querySelector('span')
       if (span) span.textContent = label
     })
+    ensureEmbedZoomButtons(host, tRef.current)
     tableScrollRef.current?.refreshLabels(tRef.current)
   }, [lang])
 
-  return <div className="km-doc" ref={hostRef} />
+  return (
+    <>
+      <div className="km-doc" ref={hostRef} />
+      <ZoomLightbox item={lightbox} onClose={() => setLightbox(null)} t={t} />
+    </>
+  )
 }
 
 // Decode a URL component, tolerating malformed escapes (return the input as-is).

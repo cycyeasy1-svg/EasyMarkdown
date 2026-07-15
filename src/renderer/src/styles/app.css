@@ -2234,43 +2234,149 @@ body.hm-full-width .editor-skeleton {
   display: inline;
 }
 
-/* Image lightbox: double-click an image in the editor to view it enlarged.
-   (Single click stays native — selecting the image and editing its caption.) */
-.hm-image-lightbox {
+/* Shared image / Mermaid / display-math lightbox. Diagram/formula buttons are
+   injected only after the async renderer has produced usable content. */
+.hm-zoomable-embed {
+  position: relative;
+}
+.hm-embed-zoom {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  z-index: 4;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
+  color: var(--muted);
+  background: color-mix(in srgb, var(--bg-elevated) 92%, transparent);
+  box-shadow: var(--shadow-sm);
+  cursor: zoom-in;
+  opacity: 0;
+  transition: opacity 0.12s var(--ease-out), color 0.12s var(--ease-out), background 0.12s var(--ease-out);
+}
+.hm-zoomable-embed:hover > .hm-embed-zoom,
+.hm-zoomable-embed:focus-within > .hm-embed-zoom,
+.hm-embed-zoom:focus-visible {
+  opacity: 1;
+}
+.hm-embed-zoom:hover {
+  color: var(--accent-strong);
+  background: var(--hover-elevated, var(--hover));
+}
+.hm-embed-zoom:focus-visible,
+.hm-zoom-bar button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.hm-zoom-overlay {
   position: fixed;
   inset: 0;
-  z-index: 1000;
+  z-index: 1500;
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 5vh 5vw;
-  background: rgba(0, 0, 0, 0.72);
-  cursor: zoom-out;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--bg) 82%, transparent);
+  backdrop-filter: blur(3px);
+  cursor: grab;
+  touch-action: none;
   animation: hmLightboxFade 0.15s var(--ease-out);
 }
-.hm-image-lightbox img {
-  max-width: 90vw;
-  max-height: 90vh;
-  object-fit: contain;
-  border-radius: 6px;
-  box-shadow: 0 12px 48px rgba(0, 0, 0, 0.5);
+.hm-zoom-overlay.is-grabbing { cursor: grabbing; }
+.hm-zoom-stage {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transform-origin: center;
+  will-change: transform;
 }
-.hm-lightbox-close {
+.hm-zoom-stage img {
+  max-width: 88vw;
+  max-height: 84vh;
+  object-fit: contain;
+  border-radius: var(--radius-md);
+  box-shadow: 0 12px 48px rgba(0, 0, 0, 0.5);
+  user-select: none;
+}
+.hm-zoom-content {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: min(70vw, 900px);
+  min-height: 120px;
+  padding: 24px;
+  color: var(--text);
+  background: var(--bg-editor);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-float);
+}
+.hm-zoom-content > svg {
+  min-width: min(70vw, 900px);
+  max-width: none;
+  max-height: none;
+}
+.hm-zoom-content .katex-display {
+  margin: 0;
+  padding: 18px;
+  overflow: visible;
+  white-space: nowrap;
+}
+.hm-zoom-bar {
   position: fixed;
-  top: 18px;
-  right: 22px;
-  width: 38px;
-  height: 38px;
+  bottom: max(20px, env(safe-area-inset-bottom));
+  left: 50%;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 5px 7px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  color: var(--text);
+  background: var(--bg-elevated);
+  box-shadow: var(--shadow-lg);
+  transform: translateX(-50%);
+  cursor: default;
+}
+.hm-zoom-bar button {
   display: grid;
   place-items: center;
-  border-radius: 50%;
-  color: #fff;
-  background: rgba(255, 255, 255, 0.12);
+  min-width: 32px;
+  height: 32px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  color: var(--muted);
+  background: transparent;
+  font-size: 15px;
   cursor: pointer;
-  transition: background 0.15s var(--ease-out);
 }
-.hm-lightbox-close:hover { background: rgba(255, 255, 255, 0.24); }
+.hm-zoom-bar button:hover {
+  color: var(--text-strong);
+  background: var(--hover);
+}
+.hm-zoom-bar span {
+  min-width: 48px;
+  color: var(--muted);
+  font-size: 12px;
+  text-align: center;
+  user-select: none;
+}
 @keyframes hmLightboxFade { from { opacity: 0; } to { opacity: 1; } }
+
+@media (hover: none), (pointer: coarse) {
+  .hm-embed-zoom { opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .hm-zoom-overlay,
+  .milkdown .milkdown-slash-menu.hm-smart-slash {
+    animation: none;
+  }
+}
 
 /* Block-level hint: a small, quiet tag beside the caret's line naming the
    current block (H1…H6 / 正文). Non-interactive — purely an at-a-glance cue.
@@ -2322,6 +2428,83 @@ body.hm-full-width .editor-skeleton {
 .milkdown .milkdown-slash-menu,
 .milkdown .milkdown-slash-menu * {
   overscroll-behavior: contain;
+}
+.milkdown .milkdown-slash-menu.hm-smart-slash {
+  min-width: 248px;
+  max-width: min(320px, calc(100vw - 16px));
+  padding: 6px;
+  color: var(--text);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  animation: hmSlashIn 0.12s var(--ease-out);
+}
+.milkdown .hm-smart-slash .menu-groups {
+  max-height: min(420px, calc(100vh - 24px));
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+.milkdown .hm-smart-slash .menu-group {
+  margin: 0;
+  padding: 0;
+}
+.milkdown .hm-smart-slash .menu-group + .menu-group {
+  margin-top: 5px;
+  padding-top: 5px;
+  border-top: 1px solid var(--border-soft);
+}
+.milkdown .hm-smart-slash .menu-group h6 {
+  margin: 0;
+  padding: 5px 10px 4px;
+  color: var(--faint);
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+}
+.milkdown .hm-smart-slash .menu-group li.hm-slash-item {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  min-width: 220px;
+  padding: 8px 10px;
+  border-radius: var(--radius-md);
+  color: var(--text);
+  cursor: pointer;
+  list-style: none;
+  transition: background 0.12s var(--ease-out), color 0.12s var(--ease-out);
+}
+.milkdown .hm-smart-slash .menu-group li.hm-slash-item > svg {
+  width: 20px;
+  height: 20px;
+  flex: 0 0 20px;
+  color: var(--muted);
+}
+.milkdown .hm-smart-slash .menu-group li.hm-slash-item > span {
+  overflow: hidden;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 18px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.milkdown .hm-smart-slash .menu-group li.hm-slash-item.hover,
+.milkdown .hm-smart-slash .menu-group li.hm-slash-item:hover {
+  color: var(--text-strong);
+  background: var(--hover-elevated, var(--hover));
+}
+.milkdown .hm-smart-slash .menu-group li.hm-slash-item.hover > svg {
+  color: var(--accent);
+}
+.milkdown .hm-smart-slash .hm-slash-empty {
+  padding: 18px 12px;
+  color: var(--faint);
+  font-size: 12.5px;
+  text-align: center;
+}
+@keyframes hmSlashIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 .milkdown .milkdown-toolbar .hm-heading-divider {
   height: 24px;
@@ -3802,6 +3985,10 @@ body.dark .milkdown {
 .app.is-mobile .welcome-hints { display: none; }
 /* The floating "Text / H1" caret badge is desktop affordance; drop it on phones. */
 .app.is-mobile .hm-level-badge { display: none !important; }
+/* iOS/Android own text selection, copy/paste, and accessibility actions. The
+   feature is disabled in Editor.jsx; this also protects against upstream UI
+   changes that might otherwise overlap the native selection menu. */
+.app.is-mobile .milkdown .milkdown-toolbar { display: none !important; }
 /* Vertical scroll only: editor-scroll has overflow-y:auto but no overflow-x, so
    per CSS it computes to auto and the whole article pans sideways when anything
    is too wide. Clip it horizontally (wide code blocks still scroll internally)

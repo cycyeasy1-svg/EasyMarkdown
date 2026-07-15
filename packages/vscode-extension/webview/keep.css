@@ -407,6 +407,7 @@ body.dark .km-doc mark.hm-hl-blue { background: #2f4a6b; }
   transition: opacity 0.12s var(--ease-out, ease), color 0.12s, background 0.12s;
 }
 .km-mermaid:hover .km-mermaid-zoom,
+.km-math:hover .km-mermaid-zoom,
 .km-mermaid-zoom:focus-visible {
   opacity: 1;
 }
@@ -419,6 +420,7 @@ body.dark .km-doc mark.hm-hl-blue { background: #2f4a6b; }
   height: auto;
 }
 .km-doc .km-math {
+  position: relative;
   margin: calc(1.2em * var(--editor-para-scale, 1)) 0;
   padding: 4px 0;
   overflow-x: auto;
@@ -1476,6 +1478,20 @@ body.km-column-resizing * {
   max-height: none;
   /* A diagram with no intrinsic size still fills a readable box to zoom from. */
   min-width: min(70vw, 900px);
+}
+.km-zoom-stage > .katex-display {
+  min-width: min(60vw, 720px);
+  margin: 0;
+  padding: 28px;
+  color: var(--text);
+  background: var(--bg-editor);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg, 12px);
+  box-shadow: var(--shadow-lg);
+  white-space: nowrap;
+}
+@media (hover: none), (pointer: coarse) {
+  .km-mermaid-zoom { opacity: 1; }
 }
 .km-zoom-bar {
   position: fixed;
