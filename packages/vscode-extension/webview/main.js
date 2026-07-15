@@ -269,9 +269,10 @@ function finishRender() {
       if (real) openCellPop(real, clonedTh)
     }
   })
-  // A re-render replaces the DOM, invalidating any painted find ranges — recompute
-  // against the fresh nodes so highlights survive edits / external updates.
-  if (findBar && findBar.style.display !== 'none' && findQuery) runFind(findQuery)
+  // A re-render replaces the DOM, invalidating any painted find ranges. Refresh
+  // the count/highlights against the fresh nodes, but preserve the current
+  // result and viewport while the user is editing.
+  refreshFindAfterContentChange()
   if (pendingAnchor) {
     const a = pendingAnchor
     pendingAnchor = null
@@ -653,6 +654,9 @@ function commitCellPop() {
       td.innerHTML = inline(val)
     }
     resolveImgSrcs(td)
+    // Cell edits deliberately avoid a full document re-render for large-table
+    // performance, so finishRender() cannot refresh the active find session.
+    refreshFindAfterContentChange()
   } else {
     rerender()
   }
@@ -1993,7 +1997,11 @@ function closeFind() {
   findRanges = []
   clearFindHighlights()
 }
-function runFind(q, sourceTarget = null) {
+function refreshFindAfterContentChange() {
+  if (!findBar || findBar.style.display === 'none' || !findQuery) return
+  runFind(findQuery, null, { preferredIndex: findIdx, reveal: false })
+}
+function runFind(q, sourceTarget = null, behavior = {}) {
   findQuery = q
   clearFindHighlights()
   const raw = q ? findRangesInEl(host, q).ranges : []
@@ -2005,12 +2013,18 @@ function runFind(q, sourceTarget = null) {
       !el.closest('.km-src-edit, .km-filter-btn, .km-collapse-toggle')
     )
   })
-  findIdx = sourceTarget
-    ? findRangeIndexForSourceTarget(findRanges, q, sourceTarget)
-    : findRangeIndexFromStart(findRanges, findStart)
+  if (sourceTarget) {
+    findIdx = findRangeIndexForSourceTarget(findRanges, q, sourceTarget)
+  } else if (Number.isInteger(behavior.preferredIndex) && findRanges.length) {
+    findIdx = Math.min(Math.max(0, behavior.preferredIndex), findRanges.length - 1)
+  } else {
+    findIdx = findRangeIndexFromStart(findRanges, findStart)
+  }
   paintFindHighlights(findRanges, findIdx)
   updateFindCount()
-  if (findRanges[findIdx]) scrollRangeIntoView(findRanges[findIdx], host.closest('.editor-scroll'))
+  if (behavior.reveal !== false && findRanges[findIdx]) {
+    scrollRangeIntoView(findRanges[findIdx], host.closest('.editor-scroll'))
+  }
   return findRanges.length
 }
 function stepFind(dir) {

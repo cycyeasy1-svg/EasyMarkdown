@@ -439,6 +439,13 @@ export default function App() {
   // Current match set: Range objects (rich editor) or character offsets (source
   // textarea). Held in a ref so next/prev don't trigger re-renders.
   const findRangesRef = useRef([])
+  // Editor change handlers are cached before the find callbacks below are
+  // declared. Route committed/live content edits through a ref so those stable
+  // handlers can request a fresh find pass without being recreated per keypress.
+  const refreshFindAfterEditRef = useRef(() => {})
+  const findEditDebounceRef = useRef(0)
+  const findOpenRef = useRef(find.open)
+  findOpenRef.current = find.open
   // "New version available" toast — populated by the startup update check below.
   const [update, setUpdate] = useState(null)
   // Transient bottom-center toast (e.g. "Copied"), fired via a `hm:toast` event.
@@ -1059,6 +1066,7 @@ export default function App() {
         return { ...t, content: md }
       })
     )
+    if (!isInitial) refreshFindAfterEditRef.current(id)
   }, [])
 
   // Per-tab stable handlers for the (memoized) editor panes. Inline lambdas in
@@ -2496,7 +2504,7 @@ export default function App() {
   }
 
   // Run a fresh search for `query`, scoped to the editor content.
-  const runFind = useCallback((query, optionsArg = null, preferredActiveIdx = null) => {
+  const runFind = useCallback((query, optionsArg = null, preferredActiveIdx = null, behavior = {}) => {
     const q = query ?? ''
     const options = optionsArg || findOptionsRef.current
     const scope = options.inSelection ? activeFindScope() : null
@@ -2545,7 +2553,9 @@ export default function App() {
           : Math.min(Math.max(0, preferredActiveIdx), ranges.length - 1)
       activeIdxRef.current = nextActiveIdx
       paintFindHighlights(ranges, nextActiveIdx)
-      scrollRangeIntoView(ranges[nextActiveIdx], root.closest('.editor-scroll'))
+      if (behavior.reveal !== false) {
+        scrollRangeIntoView(ranges[nextActiveIdx], root.closest('.editor-scroll'))
+      }
     }
     nextMatches = error ? 0 : ranges.length
     setFind((f) => ({
@@ -2570,6 +2580,37 @@ export default function App() {
     if (!q) { runFind(''); return }
     findDebounceRef.current = setTimeout(() => runFind(q), 160)
   }, [runFind])
+
+  // Keep mode emits only after an edit is confirmed; Milkdown emits on every
+  // document transaction. Coalesce the latter so a burst of keystrokes causes
+  // one DOM scan, then repaint highlights/count without scrolling the editor
+  // away from the user's caret. Heavy documents do not enter Milkdown by
+  // default, which keeps this bounded to the editor sizes Crepe can handle.
+  const queueFindRefreshAfterEdit = useCallback((editedId) => {
+    if (
+      editedId !== activeIdRef.current ||
+      !findOpenRef.current ||
+      findModeRef.current !== 'text'
+    ) return
+    const query = findInputRef.current?.value ?? findQueryRef.current
+    if (!query) return
+
+    clearTimeout(findEditDebounceRef.current)
+    findEditDebounceRef.current = setTimeout(() => {
+      if (
+        editedId !== activeIdRef.current ||
+        !findOpenRef.current ||
+        findModeRef.current !== 'text'
+      ) return
+      const liveQuery = findInputRef.current?.value ?? findQueryRef.current
+      if (!liveQuery) return
+      const preferredIdx = activeIdxRef.current >= 0 ? activeIdxRef.current : null
+      runFind(liveQuery, findOptionsRef.current, preferredIdx, { reveal: false })
+    }, 160)
+  }, [runFind])
+  refreshFindAfterEditRef.current = queueFindRefreshAfterEdit
+
+  useEffect(() => () => clearTimeout(findEditDebounceRef.current), [])
 
   const rememberFindQuery = (query) => {
     const q = String(query ?? '').trim()
@@ -3063,6 +3104,8 @@ export default function App() {
 
   const closeFind = useCallback(() => {
     clearTimeout(findDebounceRef.current)
+    clearTimeout(findEditDebounceRef.current)
+    findOpenRef.current = false
     clearFindHighlights()
     findRangesRef.current = []
     activeIdxRef.current = -1
