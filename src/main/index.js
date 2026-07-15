@@ -10,12 +10,24 @@ import {
   MD_RE,
   isRestrictedRoot,
   imageNameParts,
+  getAllowedExternalUrl,
   searchContentLines,
   docLangAttr,
   winDefaultOpenerRegOps
 } from './helpers.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
+
+async function openExternalUrl(url) {
+  const allowedUrl = getAllowedExternalUrl(url)
+  if (!allowedUrl) return { ok: false, error: 'Unsupported external URL.' }
+  try {
+    await shell.openExternal(allowedUrl)
+    return { ok: true }
+  } catch (error) {
+    return { ok: false, error: error?.message || String(error) }
+  }
+}
 
 // Keep the app responsive when it comes back from being backgrounded — i.e. the
 // "lags for a beat after I unlock / re-focus" complaint. Chromium aggressively
@@ -295,7 +307,7 @@ function createWindow() {
   })
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    if (url.startsWith('http')) shell.openExternal(url)
+    void openExternalUrl(url)
     return { action: 'deny' }
   })
 
@@ -306,7 +318,7 @@ function createWindow() {
     const devUrl = process.env.ELECTRON_RENDERER_URL
     if (devUrl && url.startsWith(devUrl)) return
     event.preventDefault()
-    if (url.startsWith('http')) shell.openExternal(url)
+    void openExternalUrl(url)
   })
 
   // Spellcheck is an opt-in preference (settings), reported by the renderer via
@@ -820,7 +832,12 @@ ipcMain.handle('watch:unfile', async (_e, path) => {
   return true
 })
 
-ipcMain.handle('shell:openExternal', async (_e, url) => shell.openExternal(url))
+ipcMain.handle('shell:openExternal', async (event, url) => {
+  if (!mainWindow || event.sender.id !== mainWindow.webContents.id) {
+    return { ok: false, error: 'Untrusted renderer.' }
+  }
+  return openExternalUrl(url)
+})
 ipcMain.handle('shell:showInFolder', async (_e, path) => shell.showItemInFolder(path))
 
 // ----------------------------- custom themes -------------------------------

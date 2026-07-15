@@ -9,11 +9,39 @@ import {
   isAbsolutePath,
   isRestrictedRoot,
   imageNameParts,
+  getAllowedExternalUrl,
   searchContentLines,
   docLangAttr,
   WIN_MD_PROGID,
   winDefaultOpenerRegOps
 } from '../src/main/helpers.js'
+
+describe('getAllowedExternalUrl', () => {
+  it('accepts and normalizes browser and mail links', () => {
+    expect(getAllowedExternalUrl('https://example.com/docs?q=1#top')).toBe(
+      'https://example.com/docs?q=1#top'
+    )
+    expect(getAllowedExternalUrl('HTTP://EXAMPLE.COM/path')).toBe('http://example.com/path')
+    expect(getAllowedExternalUrl('mailto:user@example.com?subject=Hello')).toBe(
+      'mailto:user@example.com?subject=Hello'
+    )
+  })
+
+  it('rejects privileged, executable, malformed, and empty targets', () => {
+    for (const value of [
+      'file:///C:/Windows/System32/calc.exe',
+      'javascript:alert(1)',
+      'data:text/html,<script>alert(1)</script>',
+      'vscode://settings/editor.fontSize',
+      'https://',
+      '/relative.md',
+      '',
+      null
+    ]) {
+      expect(getAllowedExternalUrl(value)).toBe(null)
+    }
+  })
+})
 
 describe('winDefaultOpenerRegOps', () => {
   const exe = 'C:\\Program Files\\EasyMarkdown\\EasyMarkdown.exe'

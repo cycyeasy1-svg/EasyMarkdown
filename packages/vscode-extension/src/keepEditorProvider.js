@@ -1,7 +1,7 @@
 const vscode = require('vscode')
 // Pure filename sanitizer shared with the desktop app's image:save IPC — same
 // naming convention for pasted images on both sides.
-const { imageNameParts } = require('../../../src/main/helpers.js')
+const { imageNameParts, getAllowedExternalUrl } = require('../../../src/main/helpers.js')
 
 const VIEW_TYPE = 'easymarkdown.keep'
 const LAYOUT_KEY = 'easymarkdown.keep.layout'
@@ -163,8 +163,10 @@ class KeepEditorProvider {
           if (!ok) ownEditPending = false
         })
       } else if (msg.type === 'openExternal') {
+        const allowedUrl = getAllowedExternalUrl(msg.url)
+        if (!allowedUrl) return
         try {
-          vscode.env.openExternal(vscode.Uri.parse(msg.url))
+          vscode.env.openExternal(vscode.Uri.parse(allowedUrl)).then(undefined, () => {})
         } catch {
           /* ignore malformed url */
         }

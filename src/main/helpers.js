@@ -8,6 +8,23 @@
 export const MD_EXTS = ['md', 'markdown', 'mdx', 'txt']
 export const MD_RE = new RegExp(`\\.(${MD_EXTS.join('|')})$`, 'i')
 
+// External links cross from untrusted Markdown content into the OS. Keep the
+// protocol allowlist in this pure helper so both the main process and unit tests
+// share the exact same gate. file:/javascript:/data:/custom app schemes must
+// never reach shell.openExternal.
+const ALLOWED_EXTERNAL_PROTOCOLS = new Set(['https:', 'http:', 'mailto:'])
+export function getAllowedExternalUrl(value) {
+  if (typeof value !== 'string' || !value.trim()) return null
+  try {
+    const parsed = new URL(value)
+    if (!ALLOWED_EXTERNAL_PROTOCOLS.has(parsed.protocol)) return null
+    if ((parsed.protocol === 'https:' || parsed.protocol === 'http:') && !parsed.hostname) return null
+    return parsed.href
+  } catch {
+    return null
+  }
+}
+
 // An absolute path: POSIX "/…", Windows "C:\…"/"C:/…", or a UNC "\\…".
 export const isAbsolutePath = (p) => /^\//.test(p) || /^[a-zA-Z]:[\\/]/.test(p) || /^\\\\/.test(p)
 
