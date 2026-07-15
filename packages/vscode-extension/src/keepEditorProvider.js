@@ -192,9 +192,10 @@ class KeepEditorProvider {
         this.context.globalState.update(LANG_KEY, msg.lang)
       } else if (msg.type === 'switchToSource') {
         // The in-editor "source" button → reopen this file in the text editor,
-        // and remember source as the preferred mode for the next file.
-        this.context.globalState.update(MODE_KEY, 'source')
-        vscode.commands.executeCommand('vscode.openWith', document.uri, 'default')
+        // and remember source as the preferred mode for the next file. Route it
+        // through the public extension command so its suppression window also
+        // makes this explicit choice win when rememberMode is disabled.
+        vscode.commands.executeCommand('easymarkdown.openWithText', document.uri)
       }
     })
 

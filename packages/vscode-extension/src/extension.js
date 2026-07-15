@@ -1,5 +1,6 @@
 const vscode = require('vscode')
 const { KeepEditorProvider, MODE_KEY } = require('./keepEditorProvider')
+const { navigationTargetFromSelection, isRecentNavigationTarget } = require('./openMode')
 
 const KEEP_VIEW_TYPE = 'easymarkdown.keep'
 const MD_RE = /\.(md|markdown)$/i
@@ -85,46 +86,44 @@ function watchTabsForKeep(context, suppressed, keepProvider) {
   const rememberOn = () =>
     vscode.workspace.getConfiguration('easymarkdown.keep').get('rememberMode', true)
   const lastKind = new Map() // "uri|viewColumn" -> 'keep' | 'text'
-  const recentSelections = new Map() // uriString -> { line, character, text, at }
+  const recentNavigation = new Map() // uriString -> command-driven selection/cursor target
   const switchingToKeep = new Set() // uriString values currently crossing openWith
+  const pendingKeepChecks = new Map() // Tab -> short delay that lets VSCode apply an open selection
 
-  const revealFromEditor = (editor) => {
+  const navigationFromSelectionEvent = (event) => {
+    const editor = event?.textEditor
     if (!editor || !isMarkdownFileUri(editor.document?.uri)) return null
+    // VSCode uses Command for navigation-owned cursor/selection changes: Search
+    // results, file:line quick-open targets, Problems/References, and similar
+    // workbench jumps. Ordinary file opens and restored cursor state arrive
+    // without this kind, while direct user input reports Keyboard or Mouse.
     const selection = editor.selection
-    if (!selection || selection.isEmpty) return null
-    if (
-      selection.start.line !== selection.end.line ||
-      selection.end.character - selection.start.character > 1000
-    ) {
-      return null
-    }
-    const text = editor.document.getText(selection)
-    // Keep-mode find works on rendered text nodes. VSCode workspace-search
-    // results are single-line; ignore other selections instead of opening a
-    // misleading find session that cannot represent a multi-node match.
-    if (!text || /[\r\n]/.test(text)) return null
-    return {
-      line: selection.start.line,
-      character: selection.start.character,
-      text,
-      at: Date.now()
-    }
+    if (!selection) return null
+    const canRevealInKeep =
+      !selection.isEmpty &&
+      selection.start.line === selection.end.line &&
+      selection.end.character - selection.start.character <= 1000
+    return navigationTargetFromSelection({
+      kind: event.kind,
+      commandKind: vscode.TextEditorSelectionChangeKind.Command,
+      selection,
+      selectedText: canRevealInKeep ? editor.document.getText(selection) : ''
+    })
   }
 
   const selectionSub = vscode.window.onDidChangeTextEditorSelection((e) => {
-    const reveal = revealFromEditor(e.textEditor)
     const uri = e.textEditor?.document?.uri
     if (!isMarkdownFileUri(uri)) return
+    const navigation = navigationFromSelectionEvent(e)
+    if (!navigation) return
     const uriKey = uri.toString()
-    if (!reveal) {
-      recentSelections.delete(uriKey)
-      return
-    }
-    recentSelections.set(uriKey, reveal)
+    recentNavigation.set(uriKey, navigation)
     // The selection event can land just after openWith started. Relay it to an
     // already-resolving/ready keep panel as long as this URI is still in the
     // automatic text-to-keep transition window.
-    if (switchingToKeep.has(uriKey)) keepProvider.queueSearchReveal(uri, reveal)
+    if (switchingToKeep.has(uriKey) && navigation.text) {
+      keepProvider.queueSearchReveal(uri, navigation)
+    }
   })
 
   const classify = (tab) => {
@@ -143,7 +142,7 @@ function watchTabsForKeep(context, suppressed, keepProvider) {
   }
   const keyOf = (tab, c) => c.uri.toString() + '|' + (tab.group?.viewColumn ?? 0)
 
-  const handle = (tab, isOpen) => {
+  const handle = (tab, isOpen, allowSelectionDelay = true) => {
     const c = classify(tab)
     if (!c) return
     const key = keyOf(tab, c)
@@ -158,17 +157,40 @@ function watchTabsForKeep(context, suppressed, keepProvider) {
     if (c.kind === want) return
     const uriKey = c.uri.toString()
     if (suppressed.has(uriKey)) return
+
+    // Navigation-owned opens stay in source mode so VSCode keeps the precise
+    // cursor/range, diagnostics, and native highlight. This is a one-document
+    // override only; it deliberately does not change the remembered mode used
+    // by ordinary browsing opens.
+    const navigation = recentNavigation.get(uriKey)
+    if (
+      want === 'keep' &&
+      c.kind === 'text' &&
+      isRecentNavigationTarget(navigation)
+    ) {
+      recentNavigation.delete(uriKey)
+      return
+    }
+
+    // Tab-open notifications can precede the TextEditor selection event by a
+    // few frames. Give native navigation (Search, file:line, Problems, etc.) a
+    // short window to apply its command-owned cursor/selection before deciding
+    // this was a plain browsing open that should follow the remembered mode.
+    if (want === 'keep' && c.kind === 'text' && allowSelectionDelay) {
+      if (!pendingKeepChecks.has(tab)) {
+        const timer = setTimeout(() => {
+          pendingKeepChecks.delete(tab)
+          const stillOpen = vscode.window.tabGroups.all.some((group) => group.tabs.includes(tab))
+          if (stillOpen) handle(tab, true, false)
+        }, 120)
+        pendingKeepChecks.set(tab, timer)
+      }
+      return
+    }
+
     suppressed.add(uriKey)
     if (want === 'keep' && c.kind === 'text') {
       switchingToKeep.add(uriKey)
-      const activeReveal =
-        vscode.window.activeTextEditor?.document.uri.toString() === uriKey
-          ? revealFromEditor(vscode.window.activeTextEditor)
-          : null
-      const cachedReveal = recentSelections.get(uriKey)
-      const reveal =
-        activeReveal || (cachedReveal && Date.now() - cachedReveal.at <= 1500 ? cachedReveal : null)
-      if (reveal) keepProvider.queueSearchReveal(c.uri, reveal)
     }
     const original = tab
     // A single Explorer click opens the file as a PREVIEW (italic) tab. Each
@@ -182,12 +204,16 @@ function watchTabsForKeep(context, suppressed, keepProvider) {
       setTimeout(() => {
         suppressed.delete(uriKey)
         switchingToKeep.delete(uriKey)
-        recentSelections.delete(uriKey)
+        recentNavigation.delete(uriKey)
       }, 500)
     vscode.commands
       .executeCommand('vscode.openWith', c.uri, want === 'keep' ? KEEP_VIEW_TYPE : 'default', {
         viewColumn: tab.group?.viewColumn,
-        preview: wasPreview
+        preview: wasPreview,
+        // This is an automatic editor-kind swap, not an explicit request to
+        // start editing. Preserve Explorer/Search focus so commands such as F2
+        // still act on the selected file after opening it.
+        preserveFocus: true
       })
       .then(
         () => {
@@ -218,8 +244,14 @@ function watchTabsForKeep(context, suppressed, keepProvider) {
 
   const changeSub = vscode.window.tabGroups.onDidChangeTabs((e) => {
     e.closed.forEach((tab) => {
+      const pending = pendingKeepChecks.get(tab)
+      if (pending) clearTimeout(pending)
+      pendingKeepChecks.delete(tab)
       const c = classify(tab)
-      if (c) lastKind.delete(keyOf(tab, c))
+      if (c) {
+        lastKind.delete(keyOf(tab, c))
+        recentNavigation.delete(c.uri.toString())
+      }
     })
     e.opened.forEach((t) => handle(t, true))
     e.changed.forEach((t) => handle(t, false))
@@ -228,6 +260,8 @@ function watchTabsForKeep(context, suppressed, keepProvider) {
   const initTimer = setTimeout(syncOpenTabs, 0)
   return new vscode.Disposable(() => {
     clearTimeout(initTimer)
+    pendingKeepChecks.forEach((timer) => clearTimeout(timer))
+    pendingKeepChecks.clear()
     changeSub.dispose()
     selectionSub.dispose()
   })
