@@ -29,6 +29,7 @@ import { createMermaidPreviewRenderer, createMermaidSplitPlugin } from './editor
 import { tableBreakKeymap, tableCellBreakHandler, brToBreakRemarkPlugin } from './editor-tablebreak.js'
 import { attachMdPasteHandler } from './editor-md-paste.js'
 import { normalizeDisplayMath } from './editor-math.js'
+import { createSafeUnderscoreEmphasisInputRule } from './editor-inputrules.js'
 import './editor-codeblock-eager.js' // side effect: stable code-block heights (scroll-jump fix)
 import remarkFrontmatter from 'remark-frontmatter'
 import { frontmatterSchema, renderFrontmatterNodeView, remarkFrontmatterAnywhere } from './editor-frontmatter.js'
@@ -360,6 +361,10 @@ function Editor({
     // Mod-Alt-H shortcut. Pass the whole array — editor.use() registers only its
     // first arg, so spreading would drop every feature after the first.
     crepe.editor.use(highlightFeatures)
+    // Milkdown's underscore-emphasis input rule lacks the required end anchor;
+    // replace it before EditorState is built so escaped literal underscores
+    // cannot corrupt a paragraph when Enter is pressed later.
+    crepe.editor.use(createSafeUnderscoreEmphasisInputRule())
     crepeRef.current = crepe
 
     // Convert the block the cursor sits in to a given block id (paragraph/h1…h6).

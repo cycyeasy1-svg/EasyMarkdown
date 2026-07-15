@@ -179,6 +179,35 @@ async function switchToMilkdown(page, expectedText = 'reliable click') {
   return pm
 }
 
+test('milkdown mode: Enter after escaped underscores splits without deleting text', async () => {
+  const { page, cleanup } = await launchApp([fixture('escaped-underscores.md')])
+  try {
+    await page.locator('.tab', { hasText: 'escaped-underscores.md' }).click()
+    await expect(page.locator('.km-doc')).toBeVisible()
+
+    const pm = await switchToMilkdown(page, 'GemFire廃止対応')
+    const paragraphs = pm.locator('p')
+    const original = '【EM003351】GemFire廃止対応_プロジェクト計画書_上海出張用.pptx'
+
+    await paragraphs.first().click()
+    await page.keyboard.press('End')
+    await page.keyboard.press('Enter')
+
+    await expect(paragraphs).toHaveCount(3)
+    await expect(paragraphs.nth(0)).toHaveText(original)
+    await expect(paragraphs.nth(1)).toBeEmpty()
+    await expect(paragraphs.nth(2)).toHaveText('概要設計：')
+    await expect(paragraphs.nth(0).locator('em')).toHaveCount(0)
+
+    // The replacement keeps the intended input rule: a pair typed directly at
+    // the caret still becomes underscore-delimited emphasis.
+    await page.keyboard.type('_still italic_')
+    await expect(paragraphs.nth(1).locator('em')).toHaveText('still italic')
+  } finally {
+    await cleanup()
+  }
+})
+
 test('milkdown mode: find starts from the current cursor position', async () => {
   const { page, cleanup } = await openFindPositionFixture()
   const findShortcut = process.platform === 'darwin' ? 'Meta+F' : 'Control+F'
