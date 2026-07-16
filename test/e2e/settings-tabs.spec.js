@@ -3,7 +3,48 @@
 // itself is pure HTML5 DnD (unreliable under automation); its ordering logic
 // is unit-tested in paths.test.js, so here we cover the pin path end-to-end.
 import { test, expect } from '@playwright/test'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { launchApp, fixture } from './helpers.js'
+
+test('tab migration buttons appear only on overflow and switch adjacent tabs', async () => {
+  const single = await launchApp([fixture('welcome.md')])
+  try {
+    await expect(single.page.locator('.tab-nav')).toHaveCount(0)
+  } finally {
+    await single.cleanup()
+  }
+
+  const dir = mkdtempSync(join(tmpdir(), 'em-tab-overflow-'))
+  const names = Array.from({ length: 14 }, (_, index) =>
+    `long-document-name-for-tab-migration-${String(index + 1).padStart(2, '0')}.md`
+  )
+  const files = names.map((name) => {
+    const path = join(dir, name)
+    writeFileSync(path, `# ${name}\n`, 'utf8')
+    return path
+  })
+  const many = await launchApp(files)
+  try {
+    const previous = many.page.locator('.tab-nav-prev')
+    const next = many.page.locator('.tab-nav-next')
+    await expect(previous).toBeVisible()
+    await expect(next).toBeVisible()
+    await expect(previous).toHaveAttribute('title', '切换到上一个标签')
+    await expect(next).toHaveAttribute('title', '切换到下一个标签')
+
+    await many.page.locator('.tab', { hasText: names[7] }).click()
+    await expect(many.page.locator('.tab.active')).toContainText(names[7])
+    await previous.click()
+    await expect(many.page.locator('.tab.active')).toContainText(names[6])
+    await next.click()
+    await expect(many.page.locator('.tab.active')).toContainText(names[7])
+  } finally {
+    await many.cleanup()
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
 
 test('settings modal opens, autosave toggle flips and persists in settings storage', async () => {
   const { page, cleanup } = await launchApp([fixture('welcome.md')])

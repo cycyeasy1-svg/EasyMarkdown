@@ -23,18 +23,93 @@ async function openFindPositionFixture() {
 test('keep mode: editing a block via "edit source" updates the rendered doc', async () => {
   const { page, cleanup } = await openWelcome()
   try {
+    const undoButton = page.locator('.status-history-btn.undo')
+    const redoButton = page.locator('.status-history-btn.redo')
+    await expect(undoButton).toBeVisible()
+    await expect(redoButton).toBeVisible()
+    await expect(undoButton).toBeDisabled()
+    await expect(redoButton).toBeDisabled()
+    await expect(undoButton).toHaveAttribute('title', '撤销 Keep 编辑（Ctrl/Cmd+Z）')
+
     // Block 0 is the H1. Its per-block "edit source" button swaps in a raw-text
     // textarea (.km-src-editor) with action buttons (.ok / cancel).
-    await page.locator('.km-block[data-bi="0"] .km-src-edit').click();
+    await page.locator('.km-block[data-bi="0"] .km-src-edit').click()
     const editor = page.locator('.km-src-editor')
     await expect(editor).toBeVisible()
     await expect(editor).toHaveValue('# E2E Welcome Fixture')
+    await expect(undoButton).toBeDisabled()
+    await expect(redoButton).toBeDisabled()
+    await expect(undoButton).toHaveAttribute('title', '请先确认或取消当前的 Keep 编辑。')
+
     // Rewrite the source and commit by clicking OK.
     await editor.fill('# Edited By E2E')
     await page.locator('.km-src-actions .ok').click()
     // The block re-renders from the new source.
     await expect(page.getByRole('heading', { name: 'Edited By E2E' })).toBeVisible()
     await expect(page.getByRole('heading', { name: 'E2E Welcome Fixture' })).toHaveCount(0)
+
+    // Keep commits expose their history through explicit status-bar controls
+    // even though the rendered document itself is not contenteditable.
+    await expect(undoButton).toBeEnabled()
+    await expect(redoButton).toBeDisabled()
+    await undoButton.click()
+    await expect(page.getByRole('heading', { name: 'E2E Welcome Fixture' })).toBeVisible()
+    await expect(undoButton).toBeDisabled()
+    await expect(redoButton).toBeEnabled()
+    await redoButton.click()
+    await expect(page.getByRole('heading', { name: 'Edited By E2E' })).toBeVisible()
+    await expect(undoButton).toBeEnabled()
+    await expect(redoButton).toBeDisabled()
+  } finally {
+    await cleanup()
+  }
+})
+
+test('keep mode: an unfinished cell draft survives switching tabs', async () => {
+  const { page, cleanup } = await launchApp([fixture('welcome.md'), fixture('images.md')])
+  try {
+    await page.locator('.tab', { hasText: 'welcome.md' }).click()
+    await expect(page.locator('.km-doc', { hasText: 'E2E Welcome Fixture' })).toBeVisible()
+    await page.locator('.km-table td', { hasText: '1' }).first().dblclick()
+    const input = page.locator('.km-cell-pop .km-cp-input')
+    await input.fill('draft survives')
+    await expect(page.locator('.tab.active .tab-close.dirty')).toHaveCount(1)
+
+    await page.locator('.tab', { hasText: 'images.md' }).click()
+    await expect(input).toBeHidden()
+    await page.locator('.tab', { hasText: 'welcome.md' }).click()
+    await expect(input).toBeVisible()
+    await expect(input).toHaveValue('draft survives')
+
+    await page.locator('.km-cell-pop .km-cp-actions button:not(.ok)').click()
+    await expect(page.locator('.tab.active .tab-close.dirty')).toHaveCount(0)
+  } finally {
+    await cleanup()
+  }
+})
+
+test('command palette @ headings integrates with back and forward navigation', async () => {
+  const { page, cleanup } = await launchApp([fixture('outline-stability.md')])
+  try {
+    await page.locator('.tab', { hasText: 'outline-stability.md' }).click()
+    await expect(page.locator('.km-doc')).toBeVisible()
+    const scroller = page.locator('.editor-scroll.km-scroll.hm-pane-left')
+    await expect.poll(() => scroller.evaluate((el) => el.scrollTop)).toBeLessThan(30)
+
+    await page.locator('button[title^="Command palette"]').click()
+    const input = page.locator('.palette-input input')
+    await input.fill('@Far Target Heading')
+    const headingItem = page.locator('.palette-item[data-kind="heading"]', {
+      hasText: 'Far Target Heading'
+    })
+    await expect(headingItem).toBeVisible()
+    await headingItem.click()
+    await expect.poll(() => scroller.evaluate((el) => el.scrollTop)).toBeGreaterThan(1000)
+
+    await page.keyboard.press('Alt+ArrowLeft')
+    await expect.poll(() => scroller.evaluate((el) => el.scrollTop)).toBeLessThan(30)
+    await page.keyboard.press('Alt+ArrowRight')
+    await expect.poll(() => scroller.evaluate((el) => el.scrollTop)).toBeGreaterThan(1000)
   } finally {
     await cleanup()
   }

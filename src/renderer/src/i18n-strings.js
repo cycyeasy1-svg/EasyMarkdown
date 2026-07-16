@@ -91,6 +91,8 @@ export const STRINGS = {
 
     // tabs
     'tab.new': 'New tab (Ctrl+N)',
+    'tab.previous': 'Switch to previous tab',
+    'tab.next': 'Switch to next tab',
     'tab.untitled': 'Untitled',
 
     // sidebar
@@ -168,7 +170,7 @@ export const STRINGS = {
     'find.invalidRegex': 'Invalid',
 
     // command palette
-    'palette.placeholder': 'Search files and commands…',
+    'palette.placeholder': 'Search files, commands, or @headings…',
     'palette.empty': 'No matches',
 
     // commands
@@ -177,6 +179,8 @@ export const STRINGS = {
     'cmd.openFolder': 'Open Folder…',
     'cmd.save': 'Save',
     'cmd.saveAs': 'Save As…',
+    'cmd.undoKeep': 'Undo Keep Edit',
+    'cmd.redoKeep': 'Redo Keep Edit',
     'cmd.exportPdf': 'Export as PDF…',
     'cmd.attach': 'Attach Files…',
     'cmd.print': 'Print…',
@@ -191,6 +195,8 @@ export const STRINGS = {
     'attach.inserted': 'Added {n} attachment(s).',
     'cmd.sidebar': 'Toggle Sidebar',
     'nav.home': 'Home',
+    'nav.back': 'Go Back',
+    'nav.forward': 'Go Forward',
     'lightbox.close': 'Close (Esc)',
     'lightbox.zoomIn': 'Zoom in',
     'lightbox.zoomOut': 'Zoom out',
@@ -413,6 +419,12 @@ export const STRINGS = {
     'keep.editSaveBtn': 'Save',
     'keep.editDiscardBtn': 'Discard',
     'keep.editConfirmKey': 'Confirm (Ctrl+Enter)',
+    'keep.finishDraft': 'Confirm or cancel the current Keep edit first.',
+    'keep.undoTitle': 'Undo Keep edit (Ctrl/Cmd+Z)',
+    'keep.redoTitle': 'Redo Keep edit (Ctrl/Cmd+Shift+Z)',
+    'keep.historyActions': 'Keep edit history',
+    'keep.undoDone': 'Keep edit undone',
+    'keep.redoDone': 'Keep edit redone',
     'hint.modeTitle': 'Two editing modes',
     'hint.modeKeep': '**Keep** — source-backed, saves a zero-diff result. Default for .md.',
     'hint.modeRich': '**Milkdown** — free WYSIWYG, but rewrites the file and may change its formatting.',
@@ -505,6 +517,8 @@ export const STRINGS = {
     'hint.save': '保存',
 
     'tab.new': '新建标签 (Ctrl+N)',
+    'tab.previous': '切换到上一个标签',
+    'tab.next': '切换到下一个标签',
     'tab.untitled': '未命名',
 
     'side.noFolder': '未打开文件夹',
@@ -578,7 +592,7 @@ export const STRINGS = {
     'find.selectFirst': '请先选择文本',
     'find.invalidRegex': '正则错误',
 
-    'palette.placeholder': '搜索文件和命令…',
+    'palette.placeholder': '搜索文件、命令或 @标题…',
     'palette.empty': '无匹配项',
 
     'cmd.new': '新建文件',
@@ -586,6 +600,8 @@ export const STRINGS = {
     'cmd.openFolder': '打开文件夹…',
     'cmd.save': '保存',
     'cmd.saveAs': '另存为…',
+    'cmd.undoKeep': '撤销 Keep 编辑',
+    'cmd.redoKeep': '重做 Keep 编辑',
     'cmd.exportPdf': '导出为 PDF…',
     'cmd.attach': '添加附件…',
     'cmd.print': '打印…',
@@ -600,6 +616,8 @@ export const STRINGS = {
     'attach.inserted': '已添加 {n} 个附件。',
     'cmd.sidebar': '切换侧边栏',
     'nav.home': '主页',
+    'nav.back': '后退',
+    'nav.forward': '前进',
     'lightbox.close': '关闭（Esc）',
     'lightbox.zoomIn': '放大',
     'lightbox.zoomOut': '缩小',
@@ -817,6 +835,12 @@ export const STRINGS = {
     'keep.editSaveBtn': '保存',
     'keep.editDiscardBtn': '丢弃',
     'keep.editConfirmKey': '确认（Ctrl+回车）',
+    'keep.finishDraft': '请先确认或取消当前的 Keep 编辑。',
+    'keep.undoTitle': '撤销 Keep 编辑（Ctrl/Cmd+Z）',
+    'keep.redoTitle': '重做 Keep 编辑（Ctrl/Cmd+Shift+Z）',
+    'keep.historyActions': 'Keep 编辑历史',
+    'keep.undoDone': '已撤销 Keep 编辑',
+    'keep.redoDone': '已重做 Keep 编辑',
     'hint.modeTitle': '两种编辑模式',
     'hint.modeKeep': '**保持** —— 以原文为正本，保存零差分。.md 默认用它。',
     'hint.modeRich': '**Milkdown** —— 自由所见即所得，但会重写文件、可能改变原有格式。',
@@ -911,6 +935,8 @@ export const STRINGS = {
 
     // tabs
     'tab.new': '新規タブ (Ctrl+N)',
+    'tab.previous': '前のタブに切り替え',
+    'tab.next': '次のタブに切り替え',
     'tab.untitled': '無題',
 
     // sidebar
@@ -988,7 +1014,7 @@ export const STRINGS = {
     'find.invalidRegex': '正規表現エラー',
 
     // command palette
-    'palette.placeholder': 'ファイルとコマンドを検索…',
+    'palette.placeholder': 'ファイル、コマンド、@見出しを検索…',
     'palette.empty': '一致する項目がありません',
 
     // commands
@@ -997,6 +1023,8 @@ export const STRINGS = {
     'cmd.openFolder': 'フォルダを開く…',
     'cmd.save': '保存',
     'cmd.saveAs': '名前を付けて保存…',
+    'cmd.undoKeep': 'Keep の編集を元に戻す',
+    'cmd.redoKeep': 'Keep の編集をやり直す',
     'cmd.exportPdf': 'PDF としてエクスポート…',
     'cmd.attach': '添付ファイルを追加…',
     'cmd.print': '印刷…',
@@ -1011,6 +1039,8 @@ export const STRINGS = {
     'attach.inserted': '{n} 件の添付ファイルを追加しました。',
     'cmd.sidebar': 'サイドバーの切り替え',
     'nav.home': 'ホーム',
+    'nav.back': '戻る',
+    'nav.forward': '進む',
     'lightbox.close': '閉じる（Esc）',
     'lightbox.zoomIn': '拡大',
     'lightbox.zoomOut': '縮小',
@@ -1233,6 +1263,12 @@ export const STRINGS = {
     'keep.editSaveBtn': '保存',
     'keep.editDiscardBtn': '破棄',
     'keep.editConfirmKey': '確定（Ctrl+Enter）',
+    'keep.finishDraft': '現在の Keep 編集を確定またはキャンセルしてください。',
+    'keep.undoTitle': 'Keep の編集を元に戻す（Ctrl/Cmd+Z）',
+    'keep.redoTitle': 'Keep の編集をやり直す（Ctrl/Cmd+Shift+Z）',
+    'keep.historyActions': 'Keep 編集履歴',
+    'keep.undoDone': 'Keep の編集を元に戻しました',
+    'keep.redoDone': 'Keep の編集をやり直しました',
     'hint.modeTitle': '2 つの編集モード',
     'hint.modeKeep': '**キープ** —— 原文を正本とし、保存は差分ゼロ。.md の既定です。',
     'hint.modeRich': '**Milkdown** —— 自由な WYSIWYG。ただしファイルを書き換え、書式が変わることがあります。',

@@ -66,6 +66,7 @@ test('switching the editor engine keeps content and exposes Milkdown normalizati
     await expect(pm.getByText('col a')).toBeVisible()
     // The keep editor's DOM is gone — we're genuinely in the other engine now.
     await expect(page.locator('.km-doc')).toHaveCount(0)
+    await expect(page.locator('.status-history')).toHaveCount(0)
 
     // This fixture is normalized by Milkdown. The serialized result must stay
     // compared with the real on-disk Keep source instead of being silently

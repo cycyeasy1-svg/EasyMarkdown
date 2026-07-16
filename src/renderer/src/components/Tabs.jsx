@@ -29,6 +29,9 @@ function Tabs({
 }) {
   const { t } = useI18n()
   const activeRef = useRef(null)
+  const stripRef = useRef(null)
+  const scrollRef = useRef(null)
+  const [overflowing, setOverflowing] = useState(false)
   // Right-click context menu: { x, y, tab } in viewport coords, or null.
   const [menu, setMenu] = useState(null)
   // Drag-reorder state: the tab id being dragged and the id currently hovered
@@ -38,15 +41,49 @@ function Tabs({
   // On touch there's no hover to reveal the close ✕, so show it always and use a
   // clear ✕ (the unsaved state is shown in the bottom bar, not as a tab dot).
   const isMobile = window.api.platform === 'ios' || window.api.platform === 'android'
+  const focusedId = focusedPane === 'right' && splitId != null ? splitId : activeId
+  const focusedIndex = tabs.findIndex((tab) => tab.id === focusedId)
+  const canMovePrevious = focusedIndex > 0
+  const canMoveNext = focusedIndex !== -1 && focusedIndex < tabs.length - 1
 
-  // When the active tab changes (opened a new file, switched, or restored a
-  // session), the tab strip may have scrolled it out of view once the tabs
-  // overflow the window width. Pull it back into the visible range so the user
+  // Firefox-style overflow affordances: the arrow buttons do not consume any
+  // space while every tab fits. Compare the tab content width with the whole
+  // strip width (not the narrower scroll viewport while arrows are visible), so
+  // the buttons disappear again as soon as the tabs genuinely fit.
+  useEffect(() => {
+    const strip = stripRef.current
+    const scroll = scrollRef.current
+    if (!strip || !scroll || isMobile) {
+      setOverflowing(false)
+      return
+    }
+    let raf = 0
+    const measure = () => {
+      cancelAnimationFrame(raf)
+      raf = requestAnimationFrame(() => {
+        setOverflowing(scroll.scrollWidth > strip.clientWidth + 1)
+      })
+    }
+    measure()
+    const resize = new ResizeObserver(measure)
+    resize.observe(strip)
+    resize.observe(scroll)
+    window.addEventListener('resize', measure)
+    return () => {
+      cancelAnimationFrame(raf)
+      resize.disconnect()
+      window.removeEventListener('resize', measure)
+    }
+  }, [tabs, isMobile])
+
+  // When the focused tab changes (opened a new file, switched, restored, or the
+  // focused split pane moved), the tab strip may have scrolled it out of view.
+  // Pull it back into the visible range so the user
   // never has to hunt/scroll for the file they just opened. `inline: 'nearest'`
   // only scrolls when it's actually off-screen and never jumps vertically.
   useEffect(() => {
     activeRef.current?.scrollIntoView({ inline: 'nearest', block: 'nearest' })
-  }, [activeId, tabs.length])
+  }, [focusedId, tabs.length])
 
   // Close the menu on Escape (clicks outside are handled by the backdrop).
   useEffect(() => {
@@ -65,10 +102,25 @@ function Tabs({
   const reveal = (tab) => {
     if (tab.path) window.api.showInFolder(tab.path)
   }
+  const moveTabFocus = (delta) => {
+    const target = tabs[focusedIndex + delta]
+    if (target) onActivate(target.id)
+  }
 
   return (
-    <div className="tabs">
-      <div className="tabs-scroll">
+    <div className="tabs" ref={stripRef}>
+      {overflowing && (
+        <button
+          className="tab-nav tab-nav-prev"
+          title={t('tab.previous')}
+          aria-label={t('tab.previous')}
+          disabled={!canMovePrevious}
+          onClick={() => moveTabFocus(-1)}
+        >
+          <Icon name="chevron-right" size={15} style={{ transform: 'rotate(180deg)' }} />
+        </button>
+      )}
+      <div className="tabs-scroll" ref={scrollRef}>
         {tabs.map((tab) => {
           const dirty = tab.dirty
           const isLeft = tab.id === activeId
@@ -80,7 +132,7 @@ function Tabs({
           return (
             <div
               key={tab.id}
-              ref={isLeft ? activeRef : null}
+              ref={tab.id === focusedId ? activeRef : null}
               className={
                 `tab${isActive ? ' active' : ''}${isActive && !focused ? ' split-peer' : ''}` +
                 `${tab.pinned ? ' pinned' : ''}${dragOverId === tab.id ? ' drag-over' : ''}`
@@ -140,6 +192,17 @@ function Tabs({
           )
         })}
       </div>
+      {overflowing && (
+        <button
+          className="tab-nav tab-nav-next"
+          title={t('tab.next')}
+          aria-label={t('tab.next')}
+          disabled={!canMoveNext}
+          onClick={() => moveTabFocus(1)}
+        >
+          <Icon name="chevron-right" size={15} />
+        </button>
+      )}
       <button className="tab-new" title={t('tab.new')} onClick={onNew}>
         <Icon name="plus" size={16} />
       </button>

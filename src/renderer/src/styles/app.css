@@ -433,6 +433,7 @@ button:focus-visible,
 .topbar .tabs-scroll { -webkit-app-region: drag; }
 .topbar .drag-no,
 .topbar .tab,
+.topbar .tab-nav,
 .topbar .tab-new,
 .topbar input { -webkit-app-region: no-drag; }
 /* Always-draggable handle between the tabs and the right-side buttons. The
@@ -1535,6 +1536,30 @@ body.dark .milkdown .ProseMirror mark.hm-hl-blue { background: #2f4a6b; }
   min-width: 0;
 }
 .tabs-scroll::-webkit-scrollbar { display: none; }
+
+.tab-nav {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 30px;
+  flex: 0 0 28px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  transition: background 0.15s var(--ease-out), color 0.15s var(--ease-out), opacity 0.15s var(--ease-out);
+}
+.tab-nav:hover:not(:disabled) {
+  background: var(--hover);
+  color: var(--text);
+}
+.tab-nav:disabled {
+  color: var(--faint);
+  cursor: default;
+  opacity: 0.45;
+}
 
 .tab {
   display: flex;
@@ -3013,8 +3038,40 @@ body.hm-full-width .source-editor-wrap {
   flex-shrink: 1;
   min-width: 0;
 }
+.status-state-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
 .status-dot.mod { color: var(--accent); }
 .status-dot.ok { color: var(--faint); }
+.status-history {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding-left: 8px;
+  border-left: 1px solid var(--border-soft);
+}
+.status-history-btn {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 22px;
+  padding: 0;
+  border-radius: var(--radius-sm);
+  color: var(--muted);
+  transition: background 0.15s var(--ease-out), color 0.15s var(--ease-out), opacity 0.15s var(--ease-out);
+}
+.status-history-btn:hover:not(:disabled) {
+  background: var(--hover);
+  color: var(--text);
+}
+.status-history-btn:disabled {
+  color: var(--faint);
+  opacity: 0.45;
+  cursor: default;
+}
 /* Keep-mode table-filter badge: "筛选 N/M 条" — accent-tinted so it reads as an
    active state, sits next to the saved/modified dot. A button: clicking it clears
    every table filter in the document (the trailing ×). */
@@ -4190,6 +4247,15 @@ body.dark .milkdown {
   }
 }
 .app.is-mobile .hm-sheet-save { font-weight: 600; }
+.app.is-mobile .hm-sheet-history {
+  display: flex;
+  gap: 4px;
+  padding: 2px 4px 4px;
+}
+.app.is-mobile .hm-sheet-history .block-menu-item {
+  flex: 1;
+  justify-content: center;
+}
 .app.is-mobile .hm-sheet-save-dot {
   width: 7px;
   height: 7px;

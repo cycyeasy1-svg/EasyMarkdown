@@ -17,7 +17,7 @@ function score(query, text) {
 
 const EMPTY_ITEMS = []
 
-function CommandPalette({ open, onClose, commands, files, onOpenFile }) {
+function CommandPalette({ open, onClose, commands, files, headings = EMPTY_ITEMS, onOpenFile, onOpenHeading }) {
   const { t } = useI18n()
   const [query, setQuery] = useState('')
   // The input stays bound to `query` (instant), but the expensive scoring/sort
@@ -43,6 +43,27 @@ function CommandPalette({ open, onClose, commands, files, onOpenFile }) {
     // Hooks run even while the palette is closed (the early return below comes
     // after them) — skip the whole-file-index mapping until it's actually open.
     if (!open) return EMPTY_ITEMS
+    if (deferredQuery.startsWith('@')) {
+      const headingQuery = deferredQuery.slice(1).trim()
+      const headingItems = headings.map((heading, index) => ({
+        kind: 'heading',
+        id: `heading:${index}:${heading.line ?? heading.charOffset ?? ''}`,
+        title: heading.text,
+        hint: `H${heading.level} · ${Number(heading.line ?? 0) + 1}`,
+        icon: 'outline',
+        run: () => onOpenHeading?.(index, heading)
+      }))
+      if (!headingQuery) return headingItems.slice(0, 50)
+      return headingItems
+        .map((it) => ({
+          it,
+          s: Math.max(score(headingQuery, it.title), score(headingQuery, it.hint) * 0.6)
+        }))
+        .filter((item) => item.s > 0)
+        .sort((a, b) => b.s - a.s)
+        .slice(0, 50)
+        .map((item) => item.it)
+    }
     const cmdItems = commands.map((c) => ({ kind: 'cmd', ...c }))
     const fileItems = files.map((f) => ({
       kind: 'file',
@@ -59,7 +80,7 @@ function CommandPalette({ open, onClose, commands, files, onOpenFile }) {
       .sort((a, b) => b.s - a.s)
       .slice(0, 50)
       .map((x) => x.it)
-  }, [open, deferredQuery, commands, files, onOpenFile])
+  }, [open, deferredQuery, commands, files, headings, onOpenFile, onOpenHeading])
 
   useEffect(() => {
     if (sel >= items.length) setSel(Math.max(0, items.length - 1))
@@ -106,6 +127,7 @@ function CommandPalette({ open, onClose, commands, files, onOpenFile }) {
           {items.map((it, i) => (
             <div
               key={it.id}
+              data-kind={it.kind}
               className={`palette-item${i === sel ? ' sel' : ''}`}
               onMouseEnter={() => setSel(i)}
               onClick={() => choose(it)}

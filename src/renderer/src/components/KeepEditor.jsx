@@ -20,6 +20,12 @@ import { dirOf } from './editor-images.js'
 import { getMermaidSvg, peekMermaidSvg } from './editor-mermaid.js'
 import { enhanceKeepTables } from './editor-tablescroll.js'
 import { lineColumnAtOffset, lineStartOffset } from '../source-position.js'
+import {
+  applyKeepHistoryEntry,
+  createKeepHistoryEntry,
+  createKeepHistoryPatch,
+  pushKeepHistory
+} from '../keep-history.js'
 import ZoomLightbox from './ZoomLightbox.jsx'
 import { ensureEmbedZoomButtons, zoomItemFromButton } from './editor-zoom.js'
 
@@ -59,6 +65,8 @@ function KeepEditor({
   onReady,
   onOutline,
   onFilterChange,
+  onDraftChange,
+  onHistoryChange,
   onOpenSource,
   onOpenDocLink
 }) {
@@ -89,6 +97,11 @@ function KeepEditor({
   onOutlineRef.current = onOutline
   const onFilterChangeRef = useRef(onFilterChange)
   onFilterChangeRef.current = onFilterChange
+  const onDraftChangeRef = useRef(onDraftChange)
+  onDraftChangeRef.current = onDraftChange
+  const onHistoryChangeRef = useRef(onHistoryChange)
+  onHistoryChangeRef.current = onHistoryChange
+  const historyRef = useRef({ undo: [], redo: [] })
 
   // Live edit handles so blur/outside-click can commit/close the right one.
   const activeCellPopRef = useRef(null) // { pop, raw, lineIdx, colIdx } during a cell edit
@@ -101,7 +114,8 @@ function KeepEditor({
   // Tear down every body-appended popover (cell pop / filter pop / table menu /
   // confirm modal). Set inside the mount effect; called when the pane leaves view
   // so a floating edit bar never lingers over another tab's document.
-  const closeFloatingRef = useRef(null)
+  const suspendFloatingRef = useRef(null)
+  const resumeFloatingRef = useRef(null)
   // Re-measure multi-line flags for the whole doc. Set inside the mount effect;
   // called when the pane RE-ENTERS view, since blocks streamed while it was hidden
   // measured 0 height (display:none) and may have missed their km-multiline class.
@@ -119,10 +133,51 @@ function KeepEditor({
     rawLinesRef.current = (initialContent || '').split('\n')
     filterStateRef.current = {}
     columnStateRef.current = {}
+    historyRef.current = { undo: [], redo: [] }
+
+    const setDraftActive = (active) => {
+      if (destroyed) return
+      onDraftChangeRef.current?.(!!active)
+    }
+    const reportHistory = () => {
+      if (destroyed) return
+      onHistoryChangeRef.current?.({
+        canUndo: historyRef.current.undo.length > 0,
+        canRedo: historyRef.current.redo.length > 0
+      })
+    }
+    reportHistory()
 
     const emitChange = () => {
       if (destroyed) return
       onChangeRef.current?.(rawLinesRef.current.join('\n'), false)
+    }
+
+    const applyRawLines = (nextLines, { record = true, emit = true } = {}) => {
+      const next = Array.isArray(nextLines) ? nextLines : []
+      const entry = createKeepHistoryEntry(rawLinesRef.current, next)
+      if (!entry) return false
+      if (record) {
+        historyRef.current.undo = pushKeepHistory(historyRef.current.undo, entry)
+        historyRef.current.redo = []
+        reportHistory()
+      }
+      rawLinesRef.current = next
+      viewLinesRef.current = toViewLines(next)
+      if (emit) emitChange()
+      return true
+    }
+
+    const applyRawPatch = (start, deleteCount, insertedLines, { emit = true } = {}) => {
+      const entry = createKeepHistoryPatch(rawLinesRef.current, start, deleteCount, insertedLines)
+      if (!entry) return false
+      historyRef.current.undo = pushKeepHistory(historyRef.current.undo, entry)
+      historyRef.current.redo = []
+      reportHistory()
+      rawLinesRef.current.splice(entry.start, entry.before.length, ...entry.after)
+      viewLinesRef.current.splice(entry.start, entry.before.length, ...toViewLines(entry.after))
+      if (emit) emitChange()
+      return true
     }
 
     const pushOutline = () => {
@@ -618,6 +673,7 @@ function KeepEditor({
       if (activeCellPopRef.current) {
         activeCellPopRef.current.pop.remove()
         activeCellPopRef.current = null
+        setDraftActive(false)
       }
     }
     // Re-place the open editor under its cell; hide it while the cell is scrolled
@@ -667,15 +723,8 @@ function KeepEditor({
       const td = cur.td
       closeCellPop()
       if (val === cur.raw) return
-      rawLinesRef.current[cur.lineIdx] = replaceCellInLine(
-        rawLinesRef.current[cur.lineIdx],
-        cur.colIdx,
-        val
-      )
-      // Keep the \r-stripped view in sync for this one line (block source edits read it).
-      const rl = rawLinesRef.current[cur.lineIdx]
-      viewLinesRef.current[cur.lineIdx] = rl.endsWith('\r') ? rl.slice(0, -1) : rl
-      emitChange()
+      const nextLine = replaceCellInLine(rawLinesRef.current[cur.lineIdx], cur.colIdx, val)
+      applyRawPatch(cur.lineIdx, 1, [nextLine])
       // Scoped DOM update: a cell edit changes exactly one cell and shifts no line or
       // block index, so repaint just this <td>/<th> instead of rebuilding the whole
       // document. (A full rerender of a 2000-row table for one cell was seconds of
@@ -703,13 +752,13 @@ function KeepEditor({
       const cur = activeBlockEditRef.current
       if (!cur) return
       activeBlockEditRef.current = null
+      setDraftActive(false)
       if (commit) {
         const { ta, b } = cur
         // Inherit this block's original EOL style (\r presence) so untouched
         // bytes never shift; every replacement line follows the same convention.
         // (Pure helper — see replaceBlockLines in keep-parser.js, unit-tested.)
-        rawLinesRef.current = replaceBlockLines(rawLinesRef.current, b.start, b.end, ta.value)
-        emitChange()
+        applyRawLines(replaceBlockLines(rawLinesRef.current, b.start, b.end, ta.value))
         rerender() // line count may change → indices shift → rebuild the document
         return
       }
@@ -879,6 +928,7 @@ function KeepEditor({
         // falls back to the real cell. Re-resolve it too if it got detached.
         const anchorEl = anchor && anchor.isConnected ? anchor : td
         activeCellPopRef.current = { pop, td, anchor: anchorEl, raw, lineIdx, colIdx }
+        setDraftActive(true)
         repositionCellPop() // anchor below the cell, flip/clamp to stay on screen
         ta.focus()
         ta.select()
@@ -928,6 +978,7 @@ function KeepEditor({
         blockDiv.appendChild(act)
         ta.focus()
         activeBlockEditRef.current = { ta, b, originalRaw: raw }
+        setDraftActive(true)
         // Ctrl/Cmd+Enter commits; a plain Enter stays a newline (block source is
         // multi-line). Esc cancels.
         ta.addEventListener('keydown', (e) => {
@@ -958,8 +1009,7 @@ function KeepEditor({
       else at = (b.dataRows[ri]?.lineIdx ?? b.sepLine) + 1
       if (at == null) return
       const row = buildTableRow(b.headers.length, rawLinesRef.current[b.headerLine] || '')
-      rawLinesRef.current.splice(at, 0, row)
-      emitChange()
+      applyRawPatch(at, 0, [row])
       rerender()
     }
     const doDeleteRow = (ti, ri) => {
@@ -967,31 +1017,35 @@ function KeepEditor({
       if (!b) return
       const dr = b.dataRows[ri]
       if (!dr) return
-      rawLinesRef.current.splice(dr.lineIdx, 1)
-      emitChange()
+      applyRawPatch(dr.lineIdx, 1, [])
       rerender()
     }
     const doInsertColumn = (ti, colIdx) => {
       const b = getTable(ti)
       if (!b) return
-      for (let ln = b.start; ln <= b.end; ln++) {
-        const content = ln === b.sepLine ? '---' : ''
-        rawLinesRef.current[ln] = insertColumnInLine(rawLinesRef.current[ln], colIdx, content)
+      const nextLines = rawLinesRef.current.slice(b.start, b.end + 1)
+      for (let ln = 0; ln < nextLines.length; ln++) {
+        nextLines[ln] = insertColumnInLine(
+          nextLines[ln],
+          colIdx,
+          b.start + ln === b.sepLine ? '---' : ''
+        )
       }
       delete filterStateRef.current[ti] // column indices shifted — drop stale filters
       delete columnStateRef.current[ti] // manual widths / hidden indices shifted too
-      emitChange()
+      applyRawPatch(b.start, b.end - b.start + 1, nextLines)
       rerender()
     }
     const doDeleteColumn = (ti, colIdx) => {
       const b = getTable(ti)
       if (!b || b.headers.length <= 1) return // never delete the last column
-      for (let ln = b.start; ln <= b.end; ln++) {
-        rawLinesRef.current[ln] = removeColumnInLine(rawLinesRef.current[ln], colIdx)
+      const nextLines = rawLinesRef.current.slice(b.start, b.end + 1)
+      for (let ln = 0; ln < nextLines.length; ln++) {
+        nextLines[ln] = removeColumnInLine(nextLines[ln], colIdx)
       }
       delete filterStateRef.current[ti] // column indices shifted — drop stale filters
       delete columnStateRef.current[ti] // manual widths / hidden indices shifted too
-      emitChange()
+      applyRawPatch(b.start, b.end - b.start + 1, nextLines)
       rerender()
     }
 
@@ -1548,14 +1602,21 @@ function KeepEditor({
       tableScrollRef.current?.update()
     }
 
-    // Close every body-level popover at once (a cell editor included — its unsaved
-    // edits are dropped, which beats it floating over an unrelated document).
-    closeFloatingRef.current = () => {
+    // Hide body-level UI when this pane leaves view. A cell edit is suspended,
+    // not destroyed: switching tabs must never silently discard an unfinished
+    // value. It is restored when the pane becomes visible again.
+    suspendFloatingRef.current = () => {
       closePop()
       closeMenu()
       closeConfirm()
-      closeCellPop()
+      if (activeCellPopRef.current) activeCellPopRef.current.pop.style.display = 'none'
       tableScrollRef.current?.hide() // a fixed floating header would otherwise linger
+    }
+    resumeFloatingRef.current = () => {
+      const cell = activeCellPopRef.current
+      if (!cell) return
+      cell.pop.style.display = ''
+      repositionCellPop()
     }
     // Only worth re-measuring once the doc is fully streamed; mid-stream the next
     // chunk's finishRenderRange will measure the rest anyway (the host is visible again).
@@ -1587,10 +1648,10 @@ function KeepEditor({
       }
       return blocks.length - 1
     }
-    const markdownOffsetFromViewportTop = () => {
+    const markdownOffsetFromViewportTop = (ensureAll = true) => {
       const scroller = getScroller()
       if (!scroller) return null
-      flushRemaining()
+      if (ensureAll) flushRemaining()
       const scrollerTop = scroller.getBoundingClientRect().top + 8
       const blocks = [...host.querySelectorAll('.km-block[data-bi]')]
       const visible = blocks.find((block) => block.getBoundingClientRect().bottom >= scrollerTop) || blocks.at(-1)
@@ -1653,7 +1714,7 @@ function KeepEditor({
       closeMenu()
       filterStateRef.current = {}
       columnStateRef.current = {}
-      rawLinesRef.current = String(markdown ?? '').split('\n')
+      applyRawLines(String(markdown ?? '').split('\n'), { emit: false })
       rerender()
       onFilterChangeRef.current?.(null)
       return true
@@ -1687,10 +1748,45 @@ function KeepEditor({
       }
       if (after) payload += after.startsWith(eol) ? eol : eol + eol
       else if (raw.endsWith(eol)) payload += eol
-      rawLinesRef.current = (before + payload + after).split('\n')
-      emitChange()
+      applyRawLines((before + payload + after).split('\n'))
       rerender()
       return true
+    }
+
+    const performHistory = (direction) => {
+      if (destroyed || activeCellPopRef.current || activeBlockEditRef.current) return false
+      const from = direction === 'undo' ? 'undo' : 'redo'
+      const to = direction === 'undo' ? 'redo' : 'undo'
+      const entry = historyRef.current[from].pop()
+      if (!entry) return false
+      historyRef.current[to] = pushKeepHistory(historyRef.current[to], entry)
+      reportHistory()
+      rawLinesRef.current = applyKeepHistoryEntry(rawLinesRef.current, entry, direction)
+      viewLinesRef.current = toViewLines(rawLinesRef.current)
+      // Structural table changes can invalidate column/filter indices. Clearing
+      // preview-only table state makes every history step deterministic.
+      filterStateRef.current = {}
+      columnStateRef.current = {}
+      emitChange()
+      rerender()
+      onFilterChangeRef.current?.(null)
+      return true
+    }
+
+    const focusDraft = () => {
+      const cell = activeCellPopRef.current
+      if (cell) {
+        cell.pop.style.display = ''
+        repositionCellPop()
+        cell.pop.querySelector('textarea')?.focus()
+        return true
+      }
+      const block = activeBlockEditRef.current?.ta
+      if (block) {
+        block.focus()
+        return true
+      }
+      return false
     }
 
     onReady?.({
@@ -1698,8 +1794,13 @@ function KeepEditor({
       getScroller,
       replaceMarkdown,
       insertMarkdown,
+      undo: () => performHistory('undo'),
+      redo: () => performHistory('redo'),
+      hasDraft: () => !!(activeCellPopRef.current || activeBlockEditRef.current),
+      focusDraft,
       markdownOffsetFromSelection: () => null,
       markdownOffsetFromViewportTop,
+      navigationOffsetFromViewportTop: () => markdownOffsetFromViewportTop(false),
       restoreMarkdownOffset,
       isSelectionVisible: () => false,
       // PDF export: a clean snapshot without the edit affordances / filter ▼. The
@@ -1761,6 +1862,8 @@ function KeepEditor({
       tableScrollRef.current?.destroy() // remove body-appended floating headers
       tableScrollRef.current = null
       activeBlockEditRef.current = null // drop block-edit tracking (host is torn down)
+      onDraftChangeRef.current?.(false)
+      onHistoryChangeRef.current?.({ canUndo: false, canRedo: false })
       onFilterChangeRef.current?.(null) // drop this tab's filter badge on unmount
       host.removeEventListener('dblclick', onDblClick)
       host.removeEventListener('click', onClick)
@@ -1777,19 +1880,20 @@ function KeepEditor({
   // When this tab's pane leaves view (sidebar file click, tab switch, split
   // close), the wrapper goes display:none — but the floating popovers are
   // appended to document.body, so they'd keep showing over the next document.
-  // Tear them down here. (A still-open block source editor lives inside the
-  // hidden host, so it's hidden with the wrapper; no need to touch it.)
+  // Suspend them here. A still-open block source editor lives inside the hidden
+  // host; a body-appended cell editor is hidden and restored without losing text.
   const wasHiddenRef = useRef(false)
   useEffect(() => {
     if (!inView) {
       wasHiddenRef.current = true
-      closeFloatingRef.current?.()
+      suspendFloatingRef.current?.()
       setLightbox(null)
     } else if (wasHiddenRef.current) {
       // Only after a hide → show: fix km-multiline on blocks that streamed in while
       // the pane was display:none (they measured 0 height). Skips the no-op remeasure
       // on the very first mount, where the pane was visible the whole time.
       remeasureRef.current?.()
+      resumeFloatingRef.current?.()
     }
   }, [inView])
 

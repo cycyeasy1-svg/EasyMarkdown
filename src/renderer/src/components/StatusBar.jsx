@@ -141,6 +141,11 @@ function AboutControl() {
 function MobileMore({
   dirty,
   onSave,
+  showKeepHistory,
+  keepHistory,
+  hasDraft,
+  onUndoKeep,
+  onRedoKeep,
   sourceMode,
   onToggleSource,
   theme,
@@ -166,6 +171,9 @@ function MobileMore({
     if (!open) onRefreshThemes?.()
     setOpen((v) => !v)
   }
+  const historyBlocked = !!hasDraft
+  const undoTitle = historyBlocked ? t('keep.finishDraft') : t('keep.undoTitle')
+  const redoTitle = historyBlocked ? t('keep.finishDraft') : t('keep.redoTitle')
   return (
     <div className="block-switch" ref={ref}>
       <button className="status-btn hm-more-btn" onClick={toggle} title={t('status.more')}>
@@ -185,6 +193,34 @@ function MobileMore({
             <span className="block-menu-name">{t('status.save')}</span>
             {dirty && <span className="hm-sheet-save-dot" />}
           </button>
+          {showKeepHistory && (
+            <div className="hm-sheet-history" aria-label={t('keep.historyActions')}>
+              <button
+                className="block-menu-item"
+                title={undoTitle}
+                disabled={historyBlocked || !keepHistory?.canUndo}
+                onClick={() => {
+                  onUndoKeep?.()
+                  setOpen(false)
+                }}
+              >
+                <Icon name="undo" size={15} />
+                <span className="block-menu-name">{t('cmd.undoKeep')}</span>
+              </button>
+              <button
+                className="block-menu-item"
+                title={redoTitle}
+                disabled={historyBlocked || !keepHistory?.canRedo}
+                onClick={() => {
+                  onRedoKeep?.()
+                  setOpen(false)
+                }}
+              >
+                <Icon name="redo" size={15} />
+                <span className="block-menu-name">{t('cmd.redoKeep')}</span>
+              </button>
+            </div>
+          )}
           <div className="theme-menu-sep" />
           <button
             className="block-menu-item"
@@ -294,8 +330,12 @@ function MobileMore({
 
 function StatusBar({
   tab,
+  hasDraft = false,
+  keepHistory,
   isMobile,
   onSave,
+  onUndoKeep,
+  onRedoKeep,
   onShare,
   theme,
   setTheme,
@@ -326,7 +366,11 @@ function StatusBar({
   // render. The dirty dot stays on the live content so it flips instantly.
   const deferredContent = useDeferredValue(tab?.content)
   const s = useMemo(() => stats(deferredContent), [deferredContent])
-  const dirty = tab && tab.content !== tab.savedContent
+  const dirty = !!tab && (tab.content !== tab.savedContent || hasDraft)
+  const showKeepHistory = !!tab && keepEligible && keepMode && !sourceMode
+  const historyBlocked = !!hasDraft
+  const undoTitle = historyBlocked ? t('keep.finishDraft') : t('keep.undoTitle')
+  const redoTitle = historyBlocked ? t('keep.finishDraft') : t('keep.redoTitle')
   return (
     <div className="statusbar">
       <div className="status-left">
@@ -344,8 +388,34 @@ function StatusBar({
               <span className="status-path" title={tab.path || t('status.unsaved')}>
                 {tab.path || t('status.unsaved')}
               </span>
-              <span className={`status-dot ${dirty ? 'mod' : 'ok'}`}>
-                {dirty ? '● ' + t('status.modified') : '✓ ' + t('status.saved')}
+              <span className="status-state-group">
+                <span className={`status-dot ${dirty ? 'mod' : 'ok'}`}>
+                  {dirty ? '● ' + t('status.modified') : '✓ ' + t('status.saved')}
+                </span>
+                {showKeepHistory && (
+                  <span className="status-history" aria-label={t('keep.historyActions')}>
+                    <button
+                      type="button"
+                      className="status-history-btn undo"
+                      title={undoTitle}
+                      aria-label={undoTitle}
+                      disabled={historyBlocked || !keepHistory?.canUndo}
+                      onClick={onUndoKeep}
+                    >
+                      <Icon name="undo" size={14} />
+                    </button>
+                    <button
+                      type="button"
+                      className="status-history-btn redo"
+                      title={redoTitle}
+                      aria-label={redoTitle}
+                      disabled={historyBlocked || !keepHistory?.canRedo}
+                      onClick={onRedoKeep}
+                    >
+                      <Icon name="redo" size={14} />
+                    </button>
+                  </span>
+                )}
               </span>
               {filterInfo && (
                 <button
@@ -393,6 +463,11 @@ function StatusBar({
               <MobileMore
                 dirty={dirty}
                 onSave={onSave}
+                showKeepHistory={showKeepHistory}
+                keepHistory={keepHistory}
+                hasDraft={hasDraft}
+                onUndoKeep={onUndoKeep}
+                onRedoKeep={onRedoKeep}
                 sourceMode={sourceMode}
                 onToggleSource={onToggleSource}
                 theme={theme}

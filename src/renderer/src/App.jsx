@@ -73,11 +73,17 @@ import {
   sourceOffsetToDisplayOffset,
   displayOffsetToSourceOffset
 } from './source-position.js'
+import {
+  pruneNavigationHistory,
+  recordNavigationLocation,
+  stepNavigationHistory
+} from './navigation-history.js'
 
 const ONBOARDED_KEY = 'easymarkdown.onboarded.v1'
 // One-time coach-mark explaining Keep vs Milkdown, shown on first run only.
 const MODEHINT_KEY = 'easymarkdown.modehint.v1'
 const UPDATE_DISMISS_KEY = 'easymarkdown.update.dismissed'
+const EMPTY_PALETTE_HEADINGS = []
 
 // Resolve a relative link path against a base directory (handles ./ and ../).
 function resolveRelPath(dir, rel) {
@@ -601,11 +607,17 @@ export default function App() {
   // that was left in source returns there when re-activated; other tabs keep
   // their own Keep/Milkdown view.
   const [sourceModeIds, setSourceModeIds] = useState(() => new Set())
+  const sourceModeIdsRef = useRef(sourceModeIds)
+  sourceModeIdsRef.current = sourceModeIds
   const [sourceMountedIds, setSourceMountedIds] = useState(() => new Set())
   const sourceMode = activeId != null && sourceModeIds.has(activeId)
   const sourceModeRef = useRef(sourceMode)
   sourceModeRef.current = sourceMode
   const [paletteOpen, setPaletteOpen] = useState(false)
+  const navigationHistoryRef = useRef({ back: [], forward: [] })
+  const [, setNavigationVersion] = useState(0)
+  const rememberNavigationRef = useRef(() => {})
+  const cancelNavigationEffectsRef = useRef(() => {})
   // Unified settings modal (status-bar gear / command palette / File menu).
   const [settingsOpen, setSettingsOpen] = useState(false)
   // Bumped each time workspace search is invoked so an already-open panel
@@ -679,6 +691,15 @@ export default function App() {
   // Keep-mode table-filter results per tab id ({ shown, total } or null) — drives
   // the status-bar "filtered N/M" badge for the active tab.
   const [keepFilters, setKeepFilters] = useState({})
+  // Keep undo/redo availability per mounted tab. The editor owns the actual
+  // patch stacks; App only mirrors the two booleans needed by visible controls.
+  const [keepHistoryState, setKeepHistoryState] = useState({})
+  // Keep's cell/block editors hold an uncommitted textarea draft outside
+  // `tab.content`. Track those tabs separately so tab switches preserve the
+  // draft and close/save/mode-switch flows cannot silently drop it.
+  const [keepDraftIds, setKeepDraftIds] = useState(() => new Set())
+  const keepDraftIdsRef = useRef(keepDraftIds)
+  keepDraftIdsRef.current = keepDraftIds
 
   const editorHostRef = useRef(null) // active rich editor's scroll container
   const editorAreaRef = useRef(null) // flex row holding the editor panes (for split-drag math)
@@ -757,6 +778,10 @@ export default function App() {
   }, [])
 
   const activeTab = useMemo(() => tabs.find((t) => t.id === activeId) || null, [tabs, activeId])
+  const paletteHeadings = useMemo(
+    () => paletteOpen && activeTab ? parseHeadingDetails(activeTab.content) : EMPTY_PALETTE_HEADINGS,
+    [paletteOpen, activeTab]
+  )
   const activePath = activeTab?.path || null
   // Native (OS-separator) paths of every open tab — used by the sidebar to expand
   // the tree to each open file (must match the tree's `node.path` format).
@@ -778,7 +803,13 @@ export default function App() {
   // of those actually changes (same trick as openPathsKey above).
   const tabsStripKey = tabs
     .map(
-      (x) => JSON.stringify([x.id, x.title, x.path || '', x.content !== x.savedContent, !!x.pinned])
+      (x) => JSON.stringify([
+        x.id,
+        x.title,
+        x.path || '',
+        x.content !== x.savedContent || keepDraftIds.has(x.id),
+        !!x.pinned
+      ])
     )
     .join('\n')
   const tabsMeta = useMemo(
@@ -787,7 +818,7 @@ export default function App() {
         id: x.id,
         title: x.title,
         path: x.path,
-        dirty: x.content !== x.savedContent,
+        dirty: x.content !== x.savedContent || keepDraftIds.has(x.id),
         pinned: !!x.pinned
       })),
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -872,6 +903,24 @@ export default function App() {
     }
     setSourceModeIds(retainLiveIds)
     setSourceMountedIds(retainLiveIds)
+    setKeepDraftIds(retainLiveIds)
+    setKeepHistoryState((prev) => {
+      let changed = false
+      const next = {}
+      for (const [id, state] of Object.entries(prev)) {
+        if (live.has(id)) next[id] = state
+        else changed = true
+      }
+      return changed ? next : prev
+    })
+    const prunedHistory = pruneNavigationHistory(navigationHistoryRef.current, live)
+    if (
+      prunedHistory.back.length !== navigationHistoryRef.current.back.length ||
+      prunedHistory.forward.length !== navigationHistoryRef.current.forward.length
+    ) {
+      navigationHistoryRef.current = prunedHistory
+      setNavigationVersion((version) => version + 1)
+    }
     for (const id of Object.keys(sourceBaselinesRef.current)) {
       if (!live.has(id)) delete sourceBaselinesRef.current[id]
     }
@@ -1031,6 +1080,117 @@ export default function App() {
   // not be recreated on every language change.
   const tRef = useRef(t)
   tRef.current = t
+  const hasUnsavedTab = useCallback(
+    (tab) => !!tab && (tab.content !== tab.savedContent || keepDraftIdsRef.current.has(tab.id)),
+    []
+  )
+  const guardKeepDraft = useCallback((id) => {
+    if (!id || !keepDraftIdsRef.current.has(id)) return true
+    editorApis.current[id]?.focusDraft?.()
+    fireToast(tRef.current('keep.finishDraft'), { sticky: true })
+    return false
+  }, [])
+  const captureNavigationLocation = useCallback(() => {
+    const tabId = activeIdRef.current
+    if (!tabId || !tabsRef.current.some((tab) => tab.id === tabId)) return null
+    const inSource = sourceModeIdsRef.current.has(tabId)
+    const rawOffset = inSource
+      ? sourceRef.current?.__hmSourceApi?.getViewportOffset?.()
+      : editorApis.current[tabId]?.navigationOffsetFromViewportTop?.() ??
+        editorApis.current[tabId]?.markdownOffsetFromViewportTop?.()
+    return {
+      tabId,
+      rawOffset: Number.isFinite(rawOffset) ? rawOffset : 0,
+      sourceMode: inSource
+    }
+  }, [])
+  const rememberNavigation = useCallback(() => {
+    const location = captureNavigationLocation()
+    if (!location) return false
+    navigationHistoryRef.current = recordNavigationLocation(
+      navigationHistoryRef.current,
+      location
+    )
+    setNavigationVersion((version) => version + 1)
+    return true
+  }, [captureNavigationLocation])
+  rememberNavigationRef.current = rememberNavigation
+
+  const restoreNavigationLocation = useCallback((location) => {
+    if (!location?.tabId || !tabsRef.current.some((tab) => tab.id === location.tabId)) return false
+    setHome(false)
+    setFocusedPane('left')
+    if (location.sourceMode) {
+      pendingSourceRestoreRef.current = {
+        id: location.tabId,
+        rawOffset: location.rawOffset,
+        follow: false,
+        selectLine: false
+      }
+      setSourceMountedIds((prev) => prev.has(location.tabId) ? prev : new Set(prev).add(location.tabId))
+      setSourceModeIds((prev) => new Set(prev).add(location.tabId))
+    } else {
+      pendingPreviewRestoreRef.current = {
+        id: location.tabId,
+        rawOffset: location.rawOffset,
+        follow: false
+      }
+      setSourceModeIds((prev) => {
+        if (!prev.has(location.tabId)) return prev
+        const next = new Set(prev)
+        next.delete(location.tabId)
+        return next
+      })
+    }
+    setActiveId(location.tabId)
+    // A same-tab jump does not change the activeId/sourceMode effect dependencies,
+    // so also apply directly. Retries cover a different tab/view mounting.
+    const apply = () => {
+      if (activeIdRef.current !== location.tabId) return
+      if (location.sourceMode) {
+        sourceRef.current?.__hmSourceApi?.scrollToOffset?.(location.rawOffset, {
+          align: 'top',
+          placeCaret: false,
+          focus: false
+        })
+      } else {
+        editorApis.current[location.tabId]?.restoreMarkdownOffset?.(location.rawOffset, false)
+      }
+    }
+    requestAnimationFrame(apply)
+    setTimeout(apply, 90)
+    setTimeout(apply, 220)
+    return true
+  }, [])
+
+  const navigateHistory = useCallback((direction) => {
+    const valid = new Set(tabsRef.current.map((tab) => tab.id))
+    const pruned = pruneNavigationHistory(navigationHistoryRef.current, valid)
+    const result = stepNavigationHistory(pruned, captureNavigationLocation(), direction)
+    navigationHistoryRef.current = result.state
+    setNavigationVersion((version) => version + 1)
+    if (!result.target) return false
+    cancelNavigationEffectsRef.current()
+    return restoreNavigationLocation(result.target)
+  }, [captureNavigationLocation, restoreNavigationLocation])
+
+  useEffect(() => {
+    const onKeyDown = (e) => {
+      if (!e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return
+      if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return
+      if (navigateHistory(e.key === 'ArrowLeft' ? 'back' : 'forward')) e.preventDefault()
+    }
+    const onMouseUp = (e) => {
+      if (e.button !== 3 && e.button !== 4) return
+      if (navigateHistory(e.button === 3 ? 'back' : 'forward')) e.preventDefault()
+    }
+    window.addEventListener('keydown', onKeyDown, true)
+    window.addEventListener('mouseup', onMouseUp, true)
+    return () => {
+      window.removeEventListener('keydown', onKeyDown, true)
+      window.removeEventListener('mouseup', onMouseUp, true)
+    }
+  }, [navigateHistory])
   const cycleTheme = useCallback(() => {
     setTheme((cur) => {
       const i = THEMES.findIndex((x) => x.id === cur)
@@ -1046,6 +1206,7 @@ export default function App() {
     const id = activeIdRef.current
     const tab = tabsRef.current.find((item) => item.id === id)
     if (!id || !tab || isPlainTextDoc(tab)) return
+    if (!guardKeepDraft(id)) return
 
     if (sourceModeRef.current) {
       const source = sourceRef.current
@@ -1095,7 +1256,7 @@ export default function App() {
       setSourceMountedIds((prev) => prev.has(id) ? prev : new Set(prev).add(id))
       setSourceModeIds((prev) => new Set(prev).add(id))
     }
-  }, [])
+  }, [guardKeepDraft])
 
   // From keep mode's "open source here": enable source mode for this tab and
   // remember the 0-based source line to select once the textarea is visible.
@@ -1103,6 +1264,7 @@ export default function App() {
     const id = activeIdRef.current
     const tab = tabsRef.current.find((item) => item.id === id)
     if (!id || !tab) return
+    if (!guardKeepDraft(id)) return
     const line = Number.isFinite(lineIdx) ? Math.max(0, lineIdx) : 0
     pendingSourceRestoreRef.current = {
       id,
@@ -1112,7 +1274,7 @@ export default function App() {
     }
     setSourceMountedIds((prev) => prev.has(id) ? prev : new Set(prev).add(id))
     setSourceModeIds((prev) => new Set(prev).add(id))
-  }, [])
+  }, [guardKeepDraft])
 
   const applyEditorMode = useCallback((id, toMilkdown) => {
     if (toMilkdown) keepToMilkdownInitRef.current.add(id)
@@ -1133,6 +1295,7 @@ export default function App() {
     const id = activeIdRef.current
     const tab = tabsRef.current.find((t) => t.id === id)
     if (!tab || isPlainTextDoc(tab) || sourceModeRef.current) return
+    if (!guardKeepDraft(id)) return
     const toMilkdown = !milkdownForcedRef.current.has(id)
     if (tab.content !== tab.savedContent) {
       setModeSwitchSaving(false)
@@ -1140,7 +1303,7 @@ export default function App() {
       return
     }
     applyEditorMode(id, toMilkdown)
-  }, [applyEditorMode])
+  }, [applyEditorMode, guardKeepDraft])
 
   useLayoutEffect(() => {
     if (!sourceMode) return
@@ -1371,6 +1534,27 @@ export default function App() {
             if (!info && !(id in m)) return m
             return { ...m, [id]: info }
           }),
+        onDraftChange: (active) =>
+          setKeepDraftIds((prev) => {
+            if (!!active === prev.has(id)) return prev
+            const next = new Set(prev)
+            if (active) next.add(id)
+            else next.delete(id)
+            return next
+          }),
+        onHistoryChange: (state) =>
+          setKeepHistoryState((prev) => {
+            const nextState = {
+              canUndo: !!state?.canUndo,
+              canRedo: !!state?.canRedo
+            }
+            const current = prev[id]
+            if (
+              current?.canUndo === nextState.canUndo &&
+              current?.canRedo === nextState.canRedo
+            ) return prev
+            return { ...prev, [id]: nextState }
+          }),
         onPaneFocus: () => {
           focusedTabRef.current = id
           if (splitRef.current) setFocusedPane(id === splitIdRef.current ? 'right' : 'left')
@@ -1404,7 +1588,7 @@ export default function App() {
     (id) => {
       setTabs((prev) => {
         const tab = prev.find((x) => x.id === id)
-        if (tab && tab.content !== tab.savedContent) {
+        if (hasUnsavedTab(tab)) {
           if (!window.confirm(tRef.current('confirm.closeUnsaved', { name: tab.title }))) return prev
         }
         const idx = prev.findIndex((x) => x.id === id)
@@ -1417,7 +1601,7 @@ export default function App() {
         return next
       })
     },
-    []
+    [hasUnsavedTab]
   )
 
   // Show a tab in the right (split) pane. If it's currently the active tab, move
@@ -1571,7 +1755,7 @@ export default function App() {
     setTabs((prev) => {
       const others = prev.filter((t) => t.id !== keepId && !t.pinned)
       if (!others.length) return prev
-      const firstDirty = others.find((t) => t.content !== t.savedContent)
+      const firstDirty = others.find(hasUnsavedTab)
       if (firstDirty && !window.confirm(tRef.current('confirm.closeUnsaved', { name: firstDirty.title }))) {
         return prev
       }
@@ -1580,7 +1764,7 @@ export default function App() {
       setSplitId((cur) => (cur != null && next.some((t) => t.id === cur) ? cur : null))
       return next
     })
-  }, [])
+  }, [hasUnsavedTab])
 
   // Close every tab on one side of `pivotId` (from the tab right-click menu).
   // `side` is 'left' (lower indexes) or 'right' (higher indexes).
@@ -1591,7 +1775,7 @@ export default function App() {
       const range = side === 'left' ? prev.slice(0, idx) : prev.slice(idx + 1)
       const toClose = range.filter((t) => !t.pinned) // pinned tabs survive bulk closes
       if (!toClose.length) return prev
-      const firstDirty = toClose.find((t) => t.content !== t.savedContent)
+      const firstDirty = toClose.find(hasUnsavedTab)
       if (firstDirty && !window.confirm(tRef.current('confirm.closeUnsaved', { name: firstDirty.title }))) {
         return prev
       }
@@ -1602,7 +1786,7 @@ export default function App() {
       setSplitId((cur) => (survives(cur) ? cur : null))
       return next
     })
-  }, [])
+  }, [hasUnsavedTab])
 
   // Tab-strip drag & drop reorder + pin toggle. Both keep the pinned group at
   // the front (pure helpers in paths.js); tabsRef is synced by the render pass.
@@ -1621,6 +1805,7 @@ export default function App() {
     if (splitRef.current && focusedPaneRef.current === 'right' && id !== activeIdRef.current) {
       setSplitId(id)
     } else {
+      if (id !== activeIdRef.current) rememberNavigationRef.current()
       setActiveId(id)
     }
   }, [])
@@ -1873,7 +2058,11 @@ export default function App() {
 
   // Stable handler for the memoized Sidebar (an inline arrow would defeat memo).
   const onSidebarOpenFile = useCallback(
-    (p) => { openPaths([p]); if (isMobile) setSidebarOpen(false) },
+    (p) => {
+      rememberNavigationRef.current()
+      openPaths([p])
+      if (isMobile) setSidebarOpen(false)
+    },
     [openPaths, isMobile]
   )
 
@@ -2025,8 +2214,10 @@ export default function App() {
     job.scroller = null
     forcedActiveHeadingRef.current = null
   }, [])
+  cancelNavigationEffectsRef.current = cancelOutlineJump
 
   const jumpToHeading = useCallback((index, heading = null) => {
+    rememberNavigationRef.current()
     setHome(false)
     if (isMobile) setSidebarOpen(false)
     cancelOutlineJump()
@@ -2147,6 +2338,10 @@ export default function App() {
 
     tryJump()
   }, [activeId, cancelOutlineJump, isMobile])
+  const onPaletteOpenHeading = useCallback(
+    (index, heading) => jumpToHeading(index, heading),
+    [jumpToHeading]
+  )
 
   useEffect(() => {
     setActiveHeading(-1)
@@ -2296,6 +2491,46 @@ export default function App() {
     return activeId
   }
 
+  const runKeepHistory = useCallback((direction, targetId = null) => {
+    const focused = focusedTabRef.current
+    const id = targetId || (
+      focused && (
+        focused === activeIdRef.current ||
+        (splitRef.current && focused === splitIdRef.current)
+      )
+        ? focused
+        : activeIdRef.current
+    )
+    const tab = tabsRef.current.find((item) => item.id === id)
+    if (
+      !tab ||
+      isPlainTextDoc(tab) ||
+      milkdownForcedRef.current.has(id) ||
+      (id === activeIdRef.current && sourceModeRef.current)
+    ) return false
+    if (!guardKeepDraft(id)) return true
+    const changed = editorApis.current[id]?.[direction]?.() === true
+    if (changed) fireToast(tRef.current(direction === 'undo' ? 'keep.undoDone' : 'keep.redoDone'))
+    return changed
+  }, [guardKeepDraft])
+
+  useEffect(() => {
+    const onKeyDown = (e) => {
+      if (e.altKey || !(e.ctrlKey || e.metaKey)) return
+      if (e.target?.closest?.('input, textarea, [contenteditable="true"], .cm-editor')) return
+      const key = e.key.toLowerCase()
+      const direction =
+        key === 'z' && !e.shiftKey
+          ? 'undo'
+          : (key === 'z' && e.shiftKey) || (key === 'y' && !e.shiftKey)
+            ? 'redo'
+            : null
+      if (direction && runKeepHistory(direction)) e.preventDefault()
+    }
+    window.addEventListener('keydown', onKeyDown, true)
+    return () => window.removeEventListener('keydown', onKeyDown, true)
+  }, [runKeepHistory])
+
   const handlers = useRef({})
   handlers.current = {
     home: () => {
@@ -2307,11 +2542,11 @@ export default function App() {
     openFolder,
     save: () => {
       const id = pickEditableId()
-      if (id) saveTab(id)
+      if (id && guardKeepDraft(id)) saveTab(id)
     },
     saveAs: () => {
       const id = pickEditableId()
-      if (id) saveTab(id, true)
+      if (id && guardKeepDraft(id)) saveTab(id, true)
     },
     attach: async () => {
       const id = pickEditableId()
@@ -2399,6 +2634,10 @@ export default function App() {
       })
     },
     closeTab: () => activeId && closeTab(activeId),
+    undoKeep: () => runKeepHistory('undo'),
+    redoKeep: () => runKeepHistory('redo'),
+    navigateBack: () => navigateHistory('back'),
+    navigateForward: () => navigateHistory('forward'),
     palette: () => setPaletteOpen((v) => !v),
     toggleSidebar: () => setSidebarOpen((v) => !v),
     toggleOutline: () => {
@@ -2435,6 +2674,14 @@ export default function App() {
   // state through refs (handlers, tabsRef, activeIdRef) so their identity never
   // changes and typing doesn't force those components to re-render.
   const onStatusSave = useCallback(() => handlers.current.save(), [])
+  const onStatusUndoKeep = useCallback(
+    () => runKeepHistory('undo', activeIdRef.current),
+    [runKeepHistory]
+  )
+  const onStatusRedoKeep = useCallback(
+    () => runKeepHistory('redo', activeIdRef.current),
+    [runKeepHistory]
+  )
   const onStatusShare = useCallback(() => {
     const tab = tabsRef.current.find((x) => x.id === activeIdRef.current)
     if (!tab) return
@@ -2461,6 +2708,7 @@ export default function App() {
   const onPaletteClose = useCallback(() => setPaletteOpen(false), [])
   const onPaletteOpenFile = useCallback(
     (p) => {
+      rememberNavigationRef.current()
       openPaths([p])
       if (isMobile) setSidebarOpen(false)
     },
@@ -2482,7 +2730,7 @@ export default function App() {
       // Flush the latest session before we (maybe) quit, so a recent edit that's
       // still inside the debounce window isn't lost.
       flushSession()
-      const dirty = tabsRef.current.some((t) => t.content !== t.savedContent)
+      const dirty = tabsRef.current.some(hasUnsavedTab)
       if (!dirty || window.confirm(tRef.current('confirm.quitUnsaved'))) {
         window.api.confirmAppClose()
       } else {
@@ -2499,7 +2747,7 @@ export default function App() {
       offClose?.()
       window.removeEventListener('mm:openFolder', onOpenFolderEvt)
     }
-  }, [openPaths, openFolder, addWorkspace, flushSession])
+  }, [openPaths, openFolder, addWorkspace, flushSession, hasUnsavedTab])
 
   // --- Drop OS files/folders onto the window to open them ---
   // A markdown (or any) file dragged from the Finder/Explorer onto the app
@@ -2815,6 +3063,10 @@ export default function App() {
         { id: 'cmd.openFolder', title: t('cmd.openFolder'), icon: 'folder', run: () => handlers.current.openFolder() },
         { id: 'cmd.save', title: t('cmd.save'), icon: 'save', run: () => handlers.current.save() },
         { id: 'cmd.saveAs', title: t('cmd.saveAs'), icon: 'save', run: () => handlers.current.saveAs() },
+        { id: 'cmd.undoKeep', title: t('cmd.undoKeep'), icon: 'undo', run: () => handlers.current.undoKeep() },
+        { id: 'cmd.redoKeep', title: t('cmd.redoKeep'), icon: 'undo', run: () => handlers.current.redoKeep() },
+        { id: 'cmd.navigateBack', title: t('nav.back'), icon: 'chevron-right', run: () => handlers.current.navigateBack() },
+        { id: 'cmd.navigateForward', title: t('nav.forward'), icon: 'chevron-right', run: () => handlers.current.navigateForward() },
         caps.fileAttachments && { id: 'cmd.attach', title: t('cmd.attach'), icon: 'file-plus', run: () => handlers.current.attach() },
         // Export-to-PDF needs a save dialog / print pipeline that doesn't exist on mobile.
         caps.pdfExport && { id: 'cmd.exportPdf', title: t('cmd.exportPdf'), icon: 'file', run: () => handlers.current.exportPdf() },
@@ -3289,6 +3541,7 @@ export default function App() {
       const total = api?.getLineCount?.() || lines.length
       const n = parseInt(str, 10)
       if (!str || !Number.isFinite(n)) { setFind((f) => ({ ...f, matches: total, active: 0 })); return }
+      if (commit) rememberNavigationRef.current()
       const ln = Math.min(Math.max(1, n), total)
       if (api?.scrollToLine) {
         api.scrollToLine(ln, commit)
@@ -3311,6 +3564,7 @@ export default function App() {
     const n = parseInt(str, 10)
     const { bi, total } = blockIndexForLine(content, Number.isFinite(n) ? n : 1)
     if (!str || !Number.isFinite(n)) { lineBiRef.current = -1; setFind((f) => ({ ...f, matches: total, active: 0 })); return }
+    if (commit) rememberNavigationRef.current()
     lineBiRef.current = bi
     Object.values(editorApis.current).forEach((api) => api?.ensureRendered?.()) // flush keep chunks
     const root = richRoot()
@@ -3493,6 +3747,7 @@ export default function App() {
   // placeholder may still be filling when the first attempt fires.
   const jumpToTabLine = useCallback((tabId, line, waitActive = false) => {
     if (!tabId || !line) return
+    rememberNavigationRef.current()
     let tries = 0
     const attempt = () => {
       if (waitActive && activeIdRef.current !== tabId) {
@@ -4019,6 +4274,8 @@ export default function App() {
                       onChange={h.onChange}
                       onReady={h.onReady}
                       onFilterChange={h.onFilterChange}
+                      onDraftChange={h.onDraftChange}
+                      onHistoryChange={h.onHistoryChange}
                       onOpenSource={openSourceAtLine}
                       onOpenDocLink={openDocLink}
                     />
@@ -4106,8 +4363,12 @@ export default function App() {
 
       <StatusBar
         tab={home ? null : activeTab}
+        hasDraft={!!activeTab && keepDraftIds.has(activeTab.id)}
+        keepHistory={activeTab ? keepHistoryState[activeTab.id] : null}
         isMobile={isMobile}
         onSave={onStatusSave}
+        onUndoKeep={onStatusUndoKeep}
+        onRedoKeep={onStatusRedoKeep}
         onShare={onStatusShare}
         theme={theme}
         setTheme={pickBuiltinTheme}
@@ -4169,7 +4430,7 @@ export default function App() {
       />
 
       <SaveFab
-        visible={!home && !!activeTab && activeTab.content !== activeTab.savedContent}
+        visible={!home && !!activeTab && hasUnsavedTab(activeTab)}
         onSave={onStatusSave}
       />
 
@@ -4178,7 +4439,9 @@ export default function App() {
         onClose={onPaletteClose}
         commands={commands}
         files={files}
+        headings={paletteHeadings}
         onOpenFile={onPaletteOpenFile}
+        onOpenHeading={onPaletteOpenHeading}
       />
 
       {toast && (
