@@ -4,8 +4,10 @@
 // the find box is never itself matched. Highlighting uses the CSS Custom
 // Highlight API, which paints ranges without touching the DOM.
 import { parseDoc, toViewLines } from './keep-parser.js'
+import { syncTextareaMirrorStyle, textareaOffsetY } from './textarea-metrics.js'
 const FIND_HL = 'hm-find'
 const FIND_HL_CUR = 'hm-find-current'
+const SOURCE_FIND_MARK = 'hm-source-find-current'
 const findHighlightSupported =
   typeof window !== 'undefined' && !!window.CSS?.highlights && typeof window.Highlight === 'function'
 
@@ -182,6 +184,152 @@ export function findRangesInEl(root, query, options = {}, scopeRange = null) {
     }
   }
   return { ranges: error ? [] : ranges, error }
+}
+
+function clearSourceFindMarks(doc) {
+  doc?.querySelectorAll(`.${SOURCE_FIND_MARK}`).forEach((node) => node.remove())
+}
+
+function sourceRangeRects(textarea, start, end) {
+  const doc = textarea.ownerDocument
+  const mirror = doc.createElement('div')
+  syncTextareaMirrorStyle(textarea, mirror)
+  mirror.appendChild(doc.createTextNode((textarea.value || '').slice(0, start)))
+  const span = doc.createElement('span')
+  span.textContent = (textarea.value || '').slice(start, end) || '\u200b'
+  mirror.appendChild(span)
+  doc.body.appendChild(mirror)
+  try {
+    const base = mirror.getBoundingClientRect()
+    return Array.from(span.getClientRects()).map((rect) => ({
+      left: rect.left - base.left,
+      top: rect.top - base.top,
+      width: rect.width,
+      height: rect.height
+    }))
+  } finally {
+    mirror.remove()
+  }
+}
+
+function renderSourceFindHighlight(textarea) {
+  const fullRange = textarea?.__hmSourceFindRange
+  if (!textarea?.isConnected || !fullRange) return
+  const doc = textarea.ownerDocument
+  clearSourceFindMarks(doc)
+  const mapRange = textarea.__hmSourceApi?.fullRangeToDisplayRange
+  const displayRange = mapRange
+    ? mapRange(fullRange.start, fullRange.end, false)
+    : fullRange
+  if (!displayRange || displayRange.end <= displayRange.start) return
+  let rects
+  try {
+    rects = sourceRangeRects(textarea, displayRange.start, displayRange.end)
+  } catch {
+    return
+  }
+  const textareaRect = textarea.getBoundingClientRect()
+  rects.forEach((rect) => {
+    const left = textareaRect.left + rect.left - textarea.scrollLeft
+    const top = textareaRect.top + rect.top - textarea.scrollTop
+    const clippedLeft = Math.max(left, textareaRect.left)
+    const clippedTop = Math.max(top, textareaRect.top)
+    const clippedRight = Math.min(left + rect.width, textareaRect.right)
+    const clippedBottom = Math.min(top + rect.height, textareaRect.bottom)
+    if (clippedRight <= clippedLeft || clippedBottom <= clippedTop) return
+    const mark = doc.createElement('div')
+    mark.className = SOURCE_FIND_MARK
+    mark.style.left = `${clippedLeft}px`
+    mark.style.top = `${clippedTop}px`
+    mark.style.width = `${clippedRight - clippedLeft}px`
+    mark.style.height = `${clippedBottom - clippedTop}px`
+    doc.body.appendChild(mark)
+  })
+}
+
+export function paintSourceFindHighlight(textarea, start, end) {
+  if (!textarea) return
+  const doc = textarea.ownerDocument
+  textarea.__hmSourceFindRange = { start, end }
+  if (!textarea.__hmSourceFindCleanup) {
+    let raf = 0
+    let fallbackTimer = 0
+    const schedule = () => {
+      if (!raf) {
+        raf = doc.defaultView.requestAnimationFrame(() => {
+          raf = 0
+          renderSourceFindHighlight(textarea)
+        })
+      }
+      if (!fallbackTimer) {
+        fallbackTimer = doc.defaultView.setTimeout(() => {
+          fallbackTimer = 0
+          if (raf) doc.defaultView.cancelAnimationFrame(raf)
+          raf = 0
+          renderSourceFindHighlight(textarea)
+        }, 80)
+      }
+    }
+    ;['scroll', 'input', 'hm:source-layout'].forEach((event) =>
+      textarea.addEventListener(event, schedule, { passive: true })
+    )
+    doc.defaultView.addEventListener('resize', schedule)
+    textarea.__hmSourceFindCleanup = () => {
+      if (raf) doc.defaultView.cancelAnimationFrame(raf)
+      if (fallbackTimer) doc.defaultView.clearTimeout(fallbackTimer)
+      ;['scroll', 'input', 'hm:source-layout'].forEach((event) =>
+        textarea.removeEventListener(event, schedule)
+      )
+      doc.defaultView.removeEventListener('resize', schedule)
+      delete textarea.__hmSourceFindCleanup
+      delete textarea.__hmSourceFindRange
+      clearSourceFindMarks(doc)
+    }
+  }
+  renderSourceFindHighlight(textarea)
+}
+
+export function revealSourceFindMatch(textarea, start, end) {
+  if (!textarea || !Number.isInteger(start) || !Number.isInteger(end)) return false
+  textarea.__hmSourceApi?.fullRangeToDisplayRange?.(start, end, true)
+  let applied = false
+  const apply = () => {
+    if (applied) return true
+    const mapRange = textarea.__hmSourceApi?.fullRangeToDisplayRange
+    const displayRange = mapRange ? mapRange(start, end, false) : { start, end }
+    if (!displayRange) return false
+    textarea.setSelectionRange(displayRange.start, displayRange.end)
+    try {
+      const cs = textarea.ownerDocument.defaultView.getComputedStyle(textarea)
+      const fontPx = parseFloat(cs.fontSize) || 14
+      const linePx = parseFloat(cs.lineHeight) || fontPx * 1.75
+      const y = textareaOffsetY(textarea, displayRange.start)
+      const maxScroll = Math.max(0, textarea.scrollHeight - textarea.clientHeight)
+      textarea.scrollTop = Math.max(0, Math.min(maxScroll, y - (textarea.clientHeight - linePx) / 2))
+    } catch {
+      // The selection still identifies the hit if measurement is unavailable.
+    }
+    paintSourceFindHighlight(textarea, start, end)
+    applied = true
+    return true
+  }
+  apply()
+  requestAnimationFrame(apply)
+  setTimeout(apply, 90)
+  return true
+}
+
+export function clearSourceFindHighlight(textarea) {
+  if (textarea?.__hmSourceFindCleanup) {
+    textarea.__hmSourceFindCleanup()
+    return
+  }
+  if (textarea?.ownerDocument) {
+    delete textarea.__hmSourceFindRange
+    clearSourceFindMarks(textarea.ownerDocument)
+  } else if (typeof document !== 'undefined') {
+    clearSourceFindMarks(document)
+  }
 }
 
 // Pick the first match at or after the position where find was opened. Milkdown

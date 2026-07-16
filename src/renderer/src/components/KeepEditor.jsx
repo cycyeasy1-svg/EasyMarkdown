@@ -18,6 +18,7 @@ import { inlineRichStyles } from './editor-copy.js'
 import { dirOf } from './editor-images.js'
 import { getMermaidSvg, peekMermaidSvg } from './editor-mermaid.js'
 import { enhanceKeepTables } from './editor-tablescroll.js'
+import { lineColumnAtOffset, lineStartOffset } from '../source-position.js'
 import ZoomLightbox from './ZoomLightbox.jsx'
 import { ensureEmbedZoomButtons, zoomItemFromButton } from './editor-zoom.js'
 
@@ -199,9 +200,8 @@ function KeepEditor({
       viewLinesRef.current = viewLines
       computeTableIdx(blocks)
 
-      // Kana present → lang="ja" on the container so :lang(ja) switches the
-      // writing font to the Japanese stack (--font-write-ja). Re-evaluated per
-      // render, so an edit that adds/removes the only Japanese text updates it.
+      // Route the container to the Chinese/Japanese stack from the document
+      // content. Re-evaluated per render, so language-changing edits update it.
       const docLang = detectDocLang(viewLines)
       if (docLang) host.setAttribute('lang', docLang)
       else host.removeAttribute('lang')
@@ -1324,7 +1324,13 @@ function KeepEditor({
 
     // ── event delegation on the host container ──
     let linkTimerRef = null // pending single-click link-open (cancelled by dblclick)
+    let lastInteractedBi = -1
+    const trackInteraction = (target) => {
+      const block = target?.closest?.('.km-block[data-bi]')
+      if (block && host.contains(block)) lastInteractedBi = Number(block.getAttribute('data-bi'))
+    }
     const onDblClick = (e) => {
+      trackInteraction(e.target)
       clearTimeout(linkTimerRef) // a double-click is an edit, not a link navigation
       if (e.target.closest('.km-collapse-toggle')) return // a fold toggle, not an edit
       // Edit any table cell — body (<td>) or header (<th>). The filter ▼ lives in
@@ -1344,6 +1350,7 @@ function KeepEditor({
       }
     }
     const onClick = (e) => {
+      trackInteraction(e.target)
       const zoomButton = e.target.closest('.hm-embed-zoom')
       if (zoomButton && host.contains(zoomButton)) {
         const item = zoomItemFromButton(zoomButton)
@@ -1394,6 +1401,7 @@ function KeepEditor({
     // (copy selection / open source at its start); else a table cell shows copy +
     // open-source + its row/column ops; else a plain block shows copy + open-source.
     const onContextMenu = (e) => {
+      trackInteraction(e.target)
       const T = tRef.current
       const sel = window.getSelection()
       const hasSel =
@@ -1495,8 +1503,133 @@ function KeepEditor({
 
     rerender()
 
+    const getScroller = () => host.closest('.editor-scroll')
+    const blockIndexForOffset = (rawOffset) => {
+      const markdown = rawLinesRef.current.join('\n')
+      const { line } = lineColumnAtOffset(markdown, rawOffset)
+      const blocks = blocksRef.current
+      if (!blocks.length) return -1
+      for (let i = 0; i < blocks.length; i++) {
+        if (line >= blocks[i].start && line <= blocks[i].end) return i
+        if (blocks[i].start > line) return i
+      }
+      return blocks.length - 1
+    }
+    const markdownOffsetFromViewportTop = () => {
+      const scroller = getScroller()
+      if (!scroller) return null
+      flushRemaining()
+      const scrollerTop = scroller.getBoundingClientRect().top + 8
+      const blocks = [...host.querySelectorAll('.km-block[data-bi]')]
+      const visible = blocks.find((block) => block.getBoundingClientRect().bottom >= scrollerTop) || blocks.at(-1)
+      const bi = Number(visible?.getAttribute('data-bi'))
+      const sourceBlock = Number.isFinite(bi) ? blocksRef.current[bi] : null
+      if (sourceBlock?.type === 'table' && visible) {
+        const thead = visible.querySelector('thead')
+        const theadRect = thead?.getBoundingClientRect()
+        // A Keep table is one block, but its cells already carry exact source
+        // line numbers. Once the live header has scrolled above the viewport,
+        // anchor to the first body row that is actually readable below the
+        // floating header instead of always returning the table header line.
+        if (theadRect && theadRect.bottom < scrollerTop) {
+          const probeTop = scrollerTop + theadRect.height
+          const rows = [...visible.querySelectorAll('tbody tr')]
+            .filter((row) => row.getBoundingClientRect().height > 0)
+          const row = rows.find((candidate) => candidate.getBoundingClientRect().bottom >= probeTop) || rows.at(-1)
+          const rowLine = Number(row?.querySelector('[data-line]')?.getAttribute('data-line'))
+          if (Number.isFinite(rowLine)) {
+            return lineStartOffset(rawLinesRef.current.join('\n'), rowLine)
+          }
+        }
+      }
+      return sourceBlock
+        ? lineStartOffset(rawLinesRef.current.join('\n'), sourceBlock.start)
+        : 0
+    }
+    const restoreMarkdownOffset = (rawOffset, follow = false) => {
+      flushRemaining()
+      const markdown = rawLinesRef.current.join('\n')
+      const { line: sourceLine } = lineColumnAtOffset(markdown, rawOffset)
+      const bi = blockIndexForOffset(rawOffset)
+      const block = bi >= 0 ? host.querySelector(`.km-block[data-bi="${bi}"]`) : null
+      const scroller = getScroller()
+      if (!block || !scroller) return false
+      revealHeading(block)
+      const sourceBlock = blocksRef.current[bi]
+      let target = block
+      let topInset = 0
+      if (sourceBlock?.type === 'table') {
+        const rows = [...block.querySelectorAll('tbody tr')]
+          .filter((row) => row.getBoundingClientRect().height > 0)
+        target = rows.find((row) => Number(row.querySelector('[data-line]')?.getAttribute('data-line')) >= sourceLine)
+          || rows.at(-1)
+          || block
+        topInset = block.querySelector('thead')?.getBoundingClientRect().height || 0
+      }
+      const blockRect = target.getBoundingClientRect()
+      const scrollerRect = scroller.getBoundingClientRect()
+      scroller.scrollTop += follow
+        ? (blockRect.top + blockRect.bottom) / 2 - (scrollerRect.top + scrollerRect.bottom) / 2
+        : blockRect.top - scrollerRect.top - topInset
+      return true
+    }
+    const replaceMarkdown = (markdown) => {
+      if (destroyed) return false
+      closeBlockEdit(false)
+      closeCellPop()
+      closePop()
+      closeMenu()
+      filterStateRef.current = {}
+      columnStateRef.current = {}
+      rawLinesRef.current = String(markdown ?? '').split('\n')
+      rerender()
+      onFilterChangeRef.current?.(null)
+      return true
+    }
+    const insertMarkdown = (markdown) => {
+      if (destroyed) return false
+      const insert = String(markdown ?? '')
+      if (!insert) return false
+      const blockEdit = activeBlockEditRef.current?.ta
+      const cellEdit = activeCellPopRef.current?.pop?.querySelector('textarea')
+      const textarea = blockEdit?.isConnected ? blockEdit : cellEdit?.isConnected ? cellEdit : null
+      if (textarea) {
+        const start = textarea.selectionStart ?? textarea.value.length
+        textarea.setRangeText(insert, start, textarea.selectionEnd ?? start, 'end')
+        textarea.focus()
+        return true
+      }
+
+      const raw = rawLinesRef.current.join('\n')
+      const eol = raw.includes('\r\n') ? '\r\n' : '\n'
+      const block = blocksRef.current[lastInteractedBi]
+      const at = block ? lineStartOffset(raw, block.end + 1) : raw.length
+      const before = raw.slice(0, at)
+      const after = raw.slice(at)
+      let payload = insert.replace(/\r?\n/g, eol)
+      if (before) {
+        if (before.endsWith(eol + eol)) {
+          // already separated
+        } else if (before.endsWith(eol)) payload = eol + payload
+        else payload = eol + eol + payload
+      }
+      if (after) payload += after.startsWith(eol) ? eol : eol + eol
+      else if (raw.endsWith(eol)) payload += eol
+      rawLinesRef.current = (before + payload + after).split('\n')
+      emitChange()
+      rerender()
+      return true
+    }
+
     onReady?.({
       getMarkdown: () => rawLinesRef.current.join('\n'),
+      getScroller,
+      replaceMarkdown,
+      insertMarkdown,
+      markdownOffsetFromSelection: () => null,
+      markdownOffsetFromViewportTop,
+      restoreMarkdownOffset,
+      isSelectionVisible: () => false,
       // PDF export: a clean snapshot without the edit affordances / filter ▼. The
       // export render leaves mermaid/math as empty placeholders (they fill async in
       // the live DOM), so copy each already-rendered diagram/formula across by index

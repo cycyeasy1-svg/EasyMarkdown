@@ -7,7 +7,7 @@ const Editor = lazy(() => import('./components/Editor.jsx'))
 import KeepEditor from './components/KeepEditor.jsx'
 import Sidebar from './components/Sidebar.jsx'
 import Tabs from './components/Tabs.jsx'
-import Outline from './components/Outline.jsx'
+import Outline, { parseHeadingDetails } from './components/Outline.jsx'
 import StatusBar from './components/StatusBar.jsx'
 import SaveFab from './components/SaveFab.jsx'
 import CommandPalette from './components/CommandPalette.jsx'
@@ -39,13 +39,16 @@ import { fireToast, HM_TOAST_EVENT } from './ui.js'
 import logoUrl from './assets/logo.png'
 import {
   clearFindHighlights,
+  clearSourceFindHighlight,
   findRangesInEl,
   findRangeIndexFromStart,
   paintFindHighlights,
+  paintSourceFindHighlight,
   scrollRangeIntoView,
   findMatchesInText,
   replaceMatchesInText,
-  blockIndexForLine
+  blockIndexForLine,
+  revealSourceFindMatch
 } from './find.js'
 import {
   isNewerVersion, isAbsolutePath, sanitizeWorkspaces, baseName, dirName, joinPath,
@@ -61,6 +64,13 @@ import {
   computeFoldRows,
   patchFoldedSourceLines
 } from './sourceFold.js'
+import {
+  lineColumnAtOffset,
+  lineStartOffset,
+  offsetForLineColumn,
+  sourceOffsetToDisplayOffset,
+  displayOffsetToSourceOffset
+} from './source-position.js'
 
 const ONBOARDED_KEY = 'easymarkdown.onboarded.v1'
 // One-time coach-mark explaining Keep vs Milkdown, shown on first run only.
@@ -123,6 +133,9 @@ const SourceEditorPane = memo(function SourceEditorPane({
   const foldGutterRef = useRef(null)
   const [collapsedKeys, setCollapsedKeys] = useState(() => new Set())
   const [sourceMetrics, setSourceMetrics] = useState({ lineHeight: 24, padTop: 40 })
+  const interactionRef = useRef({ revision: 0, kind: 'none' })
+  const programmaticUntilRef = useRef(0)
+  const pendingCaretRef = useRef(null)
   const hasFolds = collapsedKeys.size > 0
 
   // Two regimes, split on purpose:
@@ -185,6 +198,13 @@ const SourceEditorPane = memo(function SourceEditorPane({
     []
   )
 
+  const markInteraction = useCallback((kind) => {
+    interactionRef.current = {
+      revision: interactionRef.current.revision + 1,
+      kind
+    }
+  }, [])
+
   const setTextareaRef = useCallback((node) => {
     localTextareaRef.current = node
     if (textareaRef) textareaRef.current = node
@@ -199,6 +219,47 @@ const SourceEditorPane = memo(function SourceEditorPane({
     if (nums) nums.style.transform = transform
     if (folds) folds.style.transform = transform
   }, [])
+
+  const fullLinesNow = useCallback(
+    () => hasFoldsRef.current && foldLinesRef.current
+      ? foldLinesRef.current
+      : String(valueRef.current ?? '').split('\n'),
+    []
+  )
+
+  const fullOffsetFromDisplay = useCallback((displayOffset) => {
+    if (!hasFoldsRef.current || !foldViewRef.current) return displayOffset
+    return displayOffsetToSourceOffset(
+      fullLinesNow(),
+      foldViewRef.current.displayLines,
+      foldViewRef.current.visibleMap,
+      displayOffset
+    )
+  }, [fullLinesNow])
+
+  const displayOffsetFromFull = useCallback((rawOffset, expand = false) => {
+    const lines = fullLinesNow()
+    const full = lines.join('\n')
+    const { line } = lineColumnAtOffset(full, rawOffset)
+    if (!hasFoldsRef.current || !foldViewRef.current) return rawOffset
+    const hiddenBy = foldViewRef.current.hiddenByLine.get(line)
+    if (hiddenBy?.length) {
+      if (expand) {
+        setCollapsedKeys((prev) => {
+          const next = new Set(prev)
+          hiddenBy.forEach((key) => next.delete(key))
+          return next
+        })
+      }
+      return null
+    }
+    return sourceOffsetToDisplayOffset(
+      lines,
+      foldViewRef.current.displayLines,
+      foldViewRef.current.visibleMap,
+      rawOffset
+    )
+  }, [fullLinesNow])
 
   const measureSourceMetrics = useCallback(() => {
     const el = localTextareaRef.current
@@ -275,25 +336,149 @@ const SourceEditorPane = memo(function SourceEditorPane({
     setTimeout(apply, hiddenBy?.length ? 90 : 0)
   }, [syncSourceGutters, totalLines])
 
+  const scrollToSourceOffset = useCallback((rawOffset, options = {}) => {
+    const lines = fullLinesNow()
+    const full = lines.join('\n')
+    const safeOffset = Math.max(0, Math.min(Number(rawOffset) || 0, full.length))
+    displayOffsetFromFull(safeOffset, true)
+    let applied = false
+
+    const apply = () => {
+      if (applied) return true
+      const el = localTextareaRef.current
+      if (!el) return false
+      const displayOffset = displayOffsetFromFull(safeOffset, false)
+      if (!Number.isFinite(displayOffset)) return false
+      const displayed = el.value || ''
+      const displayPos = lineColumnAtOffset(displayed, displayOffset)
+      const cs = getComputedStyle(el)
+      const padTop = parseFloat(cs.paddingTop) || sourceMetrics.padTop || 40
+      const lineHeight = parseFloat(cs.lineHeight) || sourceMetrics.lineHeight || 24
+      programmaticUntilRef.current = performance.now() + 180
+      if (options.selectLine) {
+        const start = displayOffset - displayPos.column
+        const end = start + String(displayed.split('\n')[displayPos.line] || '').length
+        el.setSelectionRange(start, end)
+      } else if (options.placeCaret) {
+        el.setSelectionRange(displayOffset, displayOffset)
+      }
+      if (options.focus) el.focus({ preventScroll: true })
+      const y = padTop + displayPos.line * lineHeight
+      el.scrollTop = Math.max(
+        0,
+        options.align === 'top' ? y - padTop : y - (el.clientHeight - lineHeight) / 2
+      )
+      syncSourceGutters()
+      el.dispatchEvent(new CustomEvent('hm:source-layout'))
+      if (options.userNavigation) markInteraction('selection')
+      applied = true
+      return true
+    }
+
+    const raf = requestAnimationFrame(apply)
+    const timer = setTimeout(apply, 90)
+    return () => {
+      cancelAnimationFrame(raf)
+      clearTimeout(timer)
+    }
+  }, [
+    displayOffsetFromFull,
+    fullLinesNow,
+    markInteraction,
+    sourceMetrics.lineHeight,
+    sourceMetrics.padTop,
+    syncSourceGutters
+  ])
+
+  const insertMarkdown = useCallback((markdown) => {
+    const el = localTextareaRef.current
+    if (!el) return false
+    const full = String(valueRef.current ?? '')
+    const start = fullOffsetFromDisplay(el.selectionStart)
+    const end = fullOffsetFromDisplay(el.selectionEnd)
+    const insert = String(markdown ?? '').replace(/\r?\n/g, full.includes('\r\n') ? '\r\n' : '\n')
+    const next = full.slice(0, start) + insert + full.slice(end)
+    pendingCaretRef.current = start + insert.length
+    if (hasFoldsRef.current) setCollapsedKeys(new Set())
+    markInteraction('edit')
+    onChange({ target: { value: next } })
+    return true
+  }, [fullOffsetFromDisplay, markInteraction, onChange])
+
+  useLayoutEffect(() => {
+    if (!Number.isFinite(pendingCaretRef.current)) return
+    const el = localTextareaRef.current
+    if (!el) return
+    const caret = pendingCaretRef.current
+    const displayCaret = displayOffsetFromFull(caret, false)
+    if (!Number.isFinite(displayCaret)) return
+    pendingCaretRef.current = null
+    programmaticUntilRef.current = performance.now() + 180
+    el.focus({ preventScroll: true })
+    el.setSelectionRange(displayCaret, displayCaret)
+  }, [displayedValue, displayOffsetFromFull])
+
   useLayoutEffect(() => {
     const el = localTextareaRef.current
     if (!el) return
     el.__hmSourceApi = {
       getFullValue: () => valueRef.current,
       getLineCount: totalLines,
-      scrollToLine: scrollToSourceLine
+      scrollToLine: scrollToSourceLine,
+      scrollToOffset: scrollToSourceOffset,
+      insertMarkdown,
+      getFullSelection: () => ({
+        start: fullOffsetFromDisplay(el.selectionStart),
+        end: fullOffsetFromDisplay(el.selectionEnd)
+      }),
+      getViewportOffset: () => {
+        const lines = fullLinesNow()
+        const row = Math.max(
+          0,
+          Math.floor((el.scrollTop + sourceMetrics.lineHeight * 0.5) / sourceMetrics.lineHeight)
+        )
+        const sourceLine = hasFoldsRef.current && foldViewRef.current
+          ? foldViewRef.current.visibleMap[Math.min(row, foldViewRef.current.visibleMap.length - 1)]
+          : Math.min(row, lines.length - 1)
+        return offsetForLineColumn(lines, sourceLine, 0)
+      },
+      fullRangeToDisplayRange: (start, end, expand = false) => {
+        const displayStart = displayOffsetFromFull(start, expand)
+        const displayEnd = displayOffsetFromFull(end, expand)
+        return Number.isFinite(displayStart) && Number.isFinite(displayEnd)
+          ? { start: displayStart, end: displayEnd }
+          : null
+      },
+      isSelectionVisible: () => {
+        const { line } = lineColumnAtOffset(el.value || '', el.selectionEnd)
+        const top = sourceMetrics.padTop + line * sourceMetrics.lineHeight
+        return top >= el.scrollTop && top <= el.scrollTop + el.clientHeight - sourceMetrics.lineHeight
+      },
+      getInteractionState: () => ({ ...interactionRef.current })
     }
     return () => {
       if (el.__hmSourceApi?.scrollToLine === scrollToSourceLine) delete el.__hmSourceApi
     }
-  }, [scrollToSourceLine, totalLines])
+  }, [
+    displayOffsetFromFull,
+    fullLinesNow,
+    fullOffsetFromDisplay,
+    insertMarkdown,
+    scrollToSourceLine,
+    scrollToSourceOffset,
+    sourceMetrics.lineHeight,
+    sourceMetrics.padTop,
+    totalLines
+  ])
 
   useLayoutEffect(() => {
     measureSourceMetrics()
     syncSourceGutters()
+    localTextareaRef.current?.dispatchEvent(new CustomEvent('hm:source-layout'))
   }, [lineNumbers, foldRows, measureSourceMetrics, syncSourceGutters])
 
   const handleChange = useCallback((e) => {
+    markInteraction('edit')
     if (!collapsedKeysRef.current.size) {
       onChange(e)
       return
@@ -309,7 +494,18 @@ const SourceEditorPane = memo(function SourceEditorPane({
       fv.visibleMap
     )
     onChange({ target: { value: nextContent } })
-  }, [onChange])
+  }, [markInteraction, onChange])
+
+  const handleScroll = useCallback(() => {
+    syncSourceGutters()
+    if (performance.now() > programmaticUntilRef.current) markInteraction('scroll')
+  }, [markInteraction, syncSourceGutters])
+
+  const handleSelect = useCallback((e) => {
+    if (document.activeElement === e.currentTarget && performance.now() > programmaticUntilRef.current) {
+      markInteraction('selection')
+    }
+  }, [markInteraction])
 
   const toggleFold = useCallback((key) => {
     setCollapsedKeys((prev) => {
@@ -325,7 +521,10 @@ const SourceEditorPane = memo(function SourceEditorPane({
       className={`source-editor-wrap${paneClass || ''}`}
       style={style}
       onFocusCapture={onPaneFocus}
-      onMouseDownCapture={onPaneMouseDown}
+      onMouseDownCapture={(e) => {
+        markInteraction('selection')
+        onPaneMouseDown?.(e)
+      }}
     >
       <textarea
         ref={setTextareaRef}
@@ -333,9 +532,14 @@ const SourceEditorPane = memo(function SourceEditorPane({
         value={displayedValue}
         spellCheck={false}
         wrap="off"
-        onScroll={syncSourceGutters}
+        onScroll={handleScroll}
+        onKeyDown={(e) => {
+          if (/^(Arrow|Home|End|Page)/.test(e.key)) markInteraction('selection')
+        }}
+        onSelect={handleSelect}
         onChange={handleChange}
       />
+      <div className="source-gutter-mask" aria-hidden="true" />
       <pre ref={lineNumbersRef} className="source-line-numbers" aria-hidden="true">
         {lineNumbers}
       </pre>
@@ -391,8 +595,12 @@ export default function App() {
   const [customThemes, setCustomThemes] = useState([])
   const [lang, setLang] = useState(session.lang || DEFAULT_LANG)
   const [recents, setRecents] = useState(session.recents || [])
-  const [sourceMode, setSourceMode] = useState(false)
-  // Live mirror of sourceMode for ref-based reads inside stable callbacks.
+  // Source mode is remembered per tab for the lifetime of the workspace. A tab
+  // that was left in source returns there when re-activated; other tabs keep
+  // their own Keep/Milkdown view.
+  const [sourceModeIds, setSourceModeIds] = useState(() => new Set())
+  const [sourceMountedIds, setSourceMountedIds] = useState(() => new Set())
+  const sourceMode = activeId != null && sourceModeIds.has(activeId)
   const sourceModeRef = useRef(sourceMode)
   sourceModeRef.current = sourceMode
   const [paletteOpen, setPaletteOpen] = useState(false)
@@ -439,6 +647,7 @@ export default function App() {
   // Current match set: Range objects (rich editor) or character offsets (source
   // textarea). Held in a ref so next/prev don't trigger re-renders.
   const findRangesRef = useRef([])
+  const sourceFindTextareaRef = useRef(null)
   // Editor change handlers are cached before the find callbacks below are
   // declared. Route committed/live content edits through a ref so those stable
   // handlers can request a fresh find pass without being recreated per keypress.
@@ -473,8 +682,9 @@ export default function App() {
   const editorAreaRef = useRef(null) // flex row holding the editor panes (for split-drag math)
   const paneLeftRef = useRef(null) // sidebar <aside> (for resize-drag math)
   const sourceRef = useRef(null) // active source-mode <textarea>
-  const scrollRatioRef = useRef(null) // pending scroll position to restore across a mode switch
-  const pendingSourceLineRef = useRef(null) // 0-based line to select after entering source mode
+  const sourceBaselinesRef = useRef({}) // tab id -> source value + interaction revision at entry
+  const pendingSourceRestoreRef = useRef(null)
+  const pendingPreviewRestoreRef = useRef(null)
   const findInputRef = useRef(null)
   const openFindRef = useRef(null)
   const findStartRef = useRef(null)
@@ -649,6 +859,20 @@ export default function App() {
       }
       return changed ? next : prev
     })
+    const retainLiveIds = (prev) => {
+      let changed = false
+      const next = new Set()
+      for (const id of prev) {
+        if (live.has(id)) next.add(id)
+        else changed = true
+      }
+      return changed ? next : prev
+    }
+    setSourceModeIds(retainLiveIds)
+    setSourceMountedIds(retainLiveIds)
+    for (const id of Object.keys(sourceBaselinesRef.current)) {
+      if (!live.has(id)) delete sourceBaselinesRef.current[id]
+    }
   }, [tabs])
 
   // Mark the active tab as mounted (and keep it mounted thereafter).
@@ -805,29 +1029,79 @@ export default function App() {
     setCustomTheme(null)
   }, [])
 
-  // Toggle source/rich mode while keeping the reading position. The two modes
-  // use different DOM (a <textarea> vs. the Crepe editor) with different content
-  // heights, so we preserve a *scroll ratio* (0…1) rather than a pixel offset:
-  // capture it from the outgoing view here, restore it onto the incoming view in
-  // the layout effect below once it has rendered.
+  // Toggle source/preview mode without unmounting either editor. Transfer a
+  // Markdown offset (caret when visible, otherwise the top visible block) so the
+  // two differently-shaped DOM trees still land on the same source structure.
   const toggleSource = useCallback(() => {
-    const el = sourceModeRef.current ? sourceRef.current : editorHostRef.current
-    if (el) {
-      const denom = el.scrollHeight - el.clientHeight
-      scrollRatioRef.current = denom > 0 ? el.scrollTop / denom : 0
+    const id = activeIdRef.current
+    const tab = tabsRef.current.find((item) => item.id === id)
+    if (!id || !tab || isPlainTextDoc(tab)) return
+
+    if (sourceModeRef.current) {
+      const source = sourceRef.current
+      const sourceApi = source?.__hmSourceApi
+      const markdown = sourceApi?.getFullValue?.() ?? source?.value ?? tab.content
+      const baseline = sourceBaselinesRef.current[id]
+      const interaction = sourceApi?.getInteractionState?.() || { revision: 0, kind: 'none' }
+      const contentChanged = !baseline || markdown !== baseline.value
+      const positionChanged = !baseline || interaction.revision !== baseline.revision
+      const selection = sourceApi?.getFullSelection?.()
+      const followCaret =
+        positionChanged &&
+        (interaction.kind === 'edit' || interaction.kind === 'selection') &&
+        sourceApi?.isSelectionVisible?.()
+      const rawOffset = followCaret ? selection?.end : sourceApi?.getViewportOffset?.()
+
+      if (contentChanged) {
+        const api = editorApis.current[id]
+        if (!api?.replaceMarkdown?.(markdown)) {
+          setTabs((prev) => prev.map((item) =>
+            item.id === id
+              ? { ...item, reloadNonce: item.reloadNonce + 1, heavy: isHeavyDoc(markdown) }
+              : item
+          ))
+        }
+      }
+      pendingPreviewRestoreRef.current =
+        (contentChanged || positionChanged) && Number.isFinite(rawOffset)
+          ? { id, rawOffset, follow: !!followCaret }
+          : null
+      setSourceModeIds((prev) => {
+        const next = new Set(prev)
+        next.delete(id)
+        return next
+      })
     } else {
-      scrollRatioRef.current = null
+      const api = editorApis.current[id]
+      const followCaret = !!api?.isSelectionVisible?.()
+      const caretOffset = followCaret ? api?.markdownOffsetFromSelection?.() : null
+      const viewportOffset = api?.markdownOffsetFromViewportTop?.()
+      pendingSourceRestoreRef.current = {
+        id,
+        rawOffset: Number.isFinite(caretOffset) ? caretOffset : (Number.isFinite(viewportOffset) ? viewportOffset : 0),
+        follow: Number.isFinite(caretOffset) && followCaret,
+        selectLine: false
+      }
+      setSourceMountedIds((prev) => prev.has(id) ? prev : new Set(prev).add(id))
+      setSourceModeIds((prev) => new Set(prev).add(id))
     }
-    setSourceMode((v) => !v)
   }, [])
 
-  // From keep mode's "open source here": force global source mode on and remember
-  // the 0-based source line to select once the textarea mounts. We null the scroll
-  // ratio so the scroll-restore effect yields to our line-positioning effect.
+  // From keep mode's "open source here": enable source mode for this tab and
+  // remember the 0-based source line to select once the textarea is visible.
   const openSourceAtLine = useCallback((lineIdx) => {
-    pendingSourceLineRef.current = Number.isFinite(lineIdx) ? lineIdx : 0
-    scrollRatioRef.current = null
-    setSourceMode(true)
+    const id = activeIdRef.current
+    const tab = tabsRef.current.find((item) => item.id === id)
+    if (!id || !tab) return
+    const line = Number.isFinite(lineIdx) ? Math.max(0, lineIdx) : 0
+    pendingSourceRestoreRef.current = {
+      id,
+      rawOffset: lineStartOffset(tab.content, line),
+      follow: true,
+      selectLine: true
+    }
+    setSourceMountedIds((prev) => prev.has(id) ? prev : new Set(prev).add(id))
+    setSourceModeIds((prev) => new Set(prev).add(id))
   }, [])
 
   const applyEditorMode = useCallback((id, toMilkdown) => {
@@ -848,7 +1122,7 @@ export default function App() {
   const toggleEditorMode = useCallback(() => {
     const id = activeIdRef.current
     const tab = tabsRef.current.find((t) => t.id === id)
-    if (!tab || isPlainTextDoc(tab)) return
+    if (!tab || isPlainTextDoc(tab) || sourceModeRef.current) return
     const toMilkdown = !milkdownForcedRef.current.has(id)
     if (tab.content !== tab.savedContent) {
       setModeSwitchSaving(false)
@@ -859,18 +1133,30 @@ export default function App() {
   }, [applyEditorMode])
 
   useLayoutEffect(() => {
-    const ratio = scrollRatioRef.current
-    if (ratio == null) return
-    scrollRatioRef.current = null
+    if (!sourceMode) return
+    const pending = pendingSourceRestoreRef.current
+    if (!pending || pending.id !== activeId) return
+    let applied = false
     const apply = () => {
-      const el = sourceMode ? sourceRef.current : editorHostRef.current
-      if (!el) return
-      const denom = el.scrollHeight - el.clientHeight
-      if (denom > 0) el.scrollTop = ratio * denom
+      if (applied) return
+      const source = sourceRef.current
+      const api = source?.__hmSourceApi
+      if (!api) return
+      api.scrollToOffset?.(pending.rawOffset, {
+        align: pending.follow ? 'center' : 'top',
+        placeCaret: pending.follow && !pending.selectLine,
+        selectLine: pending.selectLine,
+        focus: pending.follow && !findOpenRef.current
+      })
+      const interaction = api.getInteractionState?.() || { revision: 0 }
+      sourceBaselinesRef.current[pending.id] = {
+        value: api.getFullValue?.() ?? source.value,
+        revision: interaction.revision
+      }
+      pendingSourceRestoreRef.current = null
+      applied = true
     }
-    // Apply immediately, then again as async layout settles — the rich editor
-    // (Crepe) fills its content over a few frames after it remounts, growing
-    // scrollHeight, so a single pass would land short.
+    // Apply immediately, then retry while the newly-visible textarea settles.
     const raf = requestAnimationFrame(apply)
     const t1 = setTimeout(apply, 90)
     const t2 = setTimeout(apply, 220)
@@ -879,31 +1165,18 @@ export default function App() {
       clearTimeout(t1)
       clearTimeout(t2)
     }
-  }, [sourceMode])
+  }, [activeId, sourceMode])
 
-  // After "open source here" flips into source mode, select the target line and
-  // center it. Retried as the textarea mounts/grows over a few frames.
+  // Restore the preview position after leaving source mode. The preview stays
+  // mounted, but a short retry covers layout work after it becomes visible.
   useEffect(() => {
-    if (!sourceMode) return
-    const line = pendingSourceLineRef.current
-    if (line == null) return
-    pendingSourceLineRef.current = null
+    if (sourceMode) return
+    const pending = pendingPreviewRestoreRef.current
+    if (!pending || pending.id !== activeId) return
     const apply = () => {
-      const el = sourceRef.current
-      if (!el) return
-      if (el.__hmSourceApi?.scrollToLine) {
-        el.__hmSourceApi.scrollToLine(line + 1, true)
-        return
-      }
-      const lines = el.value.split('\n')
-      const ln = Math.min(Math.max(0, line), lines.length - 1)
-      let off = 0
-      for (let k = 0; k < ln; k++) off += lines[k].length + 1
-      el.focus()
-      el.setSelectionRange(off, off + (lines[ln] || '').length)
-      const cs = getComputedStyle(el)
-      const lh = parseFloat(cs.lineHeight) || parseFloat(cs.fontSize) * 1.5 || 20
-      el.scrollTop = Math.max(0, ln * lh - el.clientHeight / 2)
+      const api = editorApis.current[pending.id]
+      if (!api?.restoreMarkdownOffset?.(pending.rawOffset, pending.follow)) return
+      pendingPreviewRestoreRef.current = null
     }
     const raf = requestAnimationFrame(apply)
     const t1 = setTimeout(apply, 90)
@@ -911,7 +1184,7 @@ export default function App() {
       cancelAnimationFrame(raf)
       clearTimeout(t1)
     }
-  }, [sourceMode])
+  }, [activeId, sourceMode])
 
   // --------------------------- open files --------------------------
   // Read a session-restore PLACEHOLDER tab's file from disk and fill its content
@@ -1738,10 +2011,29 @@ export default function App() {
     forcedActiveHeadingRef.current = null
   }, [])
 
-  const jumpToHeading = useCallback((index) => {
+  const jumpToHeading = useCallback((index, heading = null) => {
     setHome(false)
     if (isMobile) setSidebarOpen(false)
     cancelOutlineJump()
+
+    if (sourceModeRef.current) {
+      const source = sourceRef.current
+      const currentDetails = parseHeadingDetails(
+        source?.__hmSourceApi?.getFullValue?.() ??
+        tabsRef.current.find((tab) => tab.id === activeIdRef.current)?.content ??
+        ''
+      )
+      const details = currentDetails[index] || heading
+      if (source && Number.isFinite(details?.charOffset)) {
+        source.__hmSourceApi?.scrollToOffset?.(details.charOffset, {
+          align: 'top',
+          placeCaret: true,
+          userNavigation: true
+        })
+        setActiveHeading(index)
+      }
+      return
+    }
 
     const job = outlineJumpRef.current
     const token = job.token
@@ -1846,16 +2138,55 @@ export default function App() {
     return cancelOutlineJump
   }, [activeId, cancelOutlineJump])
 
+  useEffect(() => {
+    if (home || !sidebarOpen || sidebarMode !== 'outline' || !sourceMode) return
+    const source = sourceRef.current
+    if (!source) return
+    let cachedText = null
+    let headings = []
+    let raf = 0
+    let lastIndex = -1
+    const compute = () => {
+      raf = 0
+      const text = source.__hmSourceApi?.getFullValue?.() ?? source.value
+      if (text !== cachedText) {
+        cachedText = text
+        headings = parseHeadingDetails(text)
+      }
+      const offset = source.__hmSourceApi?.getViewportOffset?.() ?? 0
+      let index = headings.length ? 0 : -1
+      for (let i = 0; i < headings.length; i++) {
+        if (headings[i].charOffset <= offset + 1) index = i
+        else break
+      }
+      if (index !== lastIndex) {
+        lastIndex = index
+        setActiveHeading(index)
+      }
+    }
+    const schedule = () => {
+      if (!raf) raf = requestAnimationFrame(compute)
+    }
+    compute()
+    source.addEventListener('scroll', schedule, { passive: true })
+    source.addEventListener('input', schedule, { passive: true })
+    return () => {
+      if (raf) cancelAnimationFrame(raf)
+      source.removeEventListener('scroll', schedule)
+      source.removeEventListener('input', schedule)
+    }
+  }, [activeId, home, sidebarMode, sidebarOpen, sourceMode])
+
   // Outline scrollspy: highlight the heading you're currently viewing (the last
   // one scrolled past the top), mirroring how the file tree marks the open file.
-  // Rich editor only — editorHostRef is the active pane's .editor-scroll; in
-  // source mode it isn't attached, so the outline shows no active item there.
+  // Preview editor only — source mode has the offset-based scrollspy above.
   // On large docs the per-scroll querySelectorAll + getBoundingClientRect chain
   // is a forced reflow that freezes the main thread → scroll "chase" (#17).
   // Throttle to at most once per 300ms (not per frame) and skip entirely while
   // the user is actively scrolling fast (resume on settle).
   useEffect(() => {
-    if (home || !sidebarOpen || sidebarMode !== 'outline' || sourceMode) {
+    if (sourceMode) return
+    if (home || !sidebarOpen || sidebarMode !== 'outline') {
       setActiveHeading(-1)
       return
     }
@@ -2440,8 +2771,9 @@ export default function App() {
     [t, settings.spellcheck, updateSettings]
   )
 
-  // Discriminate the active view: the source <textarea> sets sourceRef only when
-  // it's mounted (source mode or a .txt doc); otherwise we're in the rich editor.
+  // Discriminate the active view: the visible source <textarea> sets sourceRef;
+  // otherwise we're in the rich editor. A previously-used hidden source pane does
+  // not retain this ref.
   // Keep mode has no ProseMirror — fall back to the visible rendered `.km-doc`
   // so find still searches the document content there.
   const richRoot = () => {
@@ -2456,7 +2788,14 @@ export default function App() {
   // Milkdown uses its live ProseMirror selection head; keep mode has no caret,
   // so its visible viewport top becomes the stable start for this find session.
   const captureFindStart = () => {
-    if (sourceRef.current) return null
+    if (sourceRef.current) {
+      const api = sourceRef.current.__hmSourceApi
+      const selection = api?.getFullSelection?.()
+      return {
+        kind: 'source',
+        offset: selection?.end ?? api?.getViewportOffset?.() ?? 0
+      }
+    }
     const root = richRoot()
     if (!root) return null
 
@@ -2552,9 +2891,11 @@ export default function App() {
       source.selectionEnd != null &&
       source.selectionStart !== source.selectionEnd
     ) {
-      const start = Math.min(source.selectionStart, source.selectionEnd)
-      const end = Math.max(source.selectionStart, source.selectionEnd)
-      const text = normalizeSelectedFindText(source.value.slice(start, end))
+      const fullSelection = source.__hmSourceApi?.getFullSelection?.()
+      const start = Math.min(fullSelection?.start ?? source.selectionStart, fullSelection?.end ?? source.selectionEnd)
+      const end = Math.max(fullSelection?.start ?? source.selectionStart, fullSelection?.end ?? source.selectionEnd)
+      const fullValue = source.__hmSourceApi?.getFullValue?.() ?? source.value
+      const text = normalizeSelectedFindText(fullValue.slice(start, end))
       return text ? { text, source: { start, end } } : null
     }
 
@@ -2591,6 +2932,8 @@ export default function App() {
     const scope = options.inSelection ? activeFindScope() : null
     findQueryRef.current = q
     clearFindHighlights()
+    clearSourceFindHighlight(sourceFindTextareaRef.current || sourceRef.current)
+    sourceFindTextareaRef.current = null
     findRangesRef.current = []
     activeIdxRef.current = -1
     let nextMatches = 0
@@ -2598,16 +2941,27 @@ export default function App() {
     let error = ''
 
     if (sourceRef.current) {
-      // Source textarea: live-count only (selecting would steal the find input's
-      // focus); Enter / next / prev jump to a match.
-      const result = q ? matchInSource(sourceRef.current.value, q, options, scope) : { matches: [], error: '' }
+      const source = sourceRef.current
+      const sourceText = source.__hmSourceApi?.getFullValue?.() ?? source.value
+      const result = q ? matchInSource(sourceText, q, options, scope) : { matches: [], error: '' }
       const hits = result.matches
       findRangesRef.current = hits
       error = result.error
       nextMatches = error ? 0 : hits.length
-      if (nextMatches && preferredActiveIdx != null) {
-        nextActiveIdx = Math.min(Math.max(0, preferredActiveIdx), nextMatches - 1)
+      if (nextMatches) {
+        if (preferredActiveIdx != null) {
+          nextActiveIdx = Math.min(Math.max(0, preferredActiveIdx), nextMatches - 1)
+        } else {
+          const start = findStartRef.current?.kind === 'source' ? findStartRef.current.offset : 0
+          nextActiveIdx = hits.findIndex((match) => match.index >= start)
+          if (nextActiveIdx < 0) nextActiveIdx = 0
+        }
         activeIdxRef.current = nextActiveIdx
+        const start = hits[nextActiveIdx].index
+        const end = start + hits[nextActiveIdx].length
+        if (behavior.reveal === false) paintSourceFindHighlight(source, start, end)
+        else revealSourceFindMatch(source, start, end)
+        sourceFindTextareaRef.current = source
       }
       setFind((f) => ({
         ...f,
@@ -2757,8 +3111,8 @@ export default function App() {
       const item = items[i]
       const start = typeof item === 'number' ? item : item.index
       const length = typeof item === 'number' ? findQueryRef.current.length : item.length
-      el.focus()
-      el.setSelectionRange(start, start + length)
+      revealSourceFindMatch(el, start, start + length)
+      sourceFindTextareaRef.current = el
     } else {
       paintFindHighlights(items, i)
       scrollRangeIntoView(items[i], richRoot()?.closest('.editor-scroll'))
@@ -2921,6 +3275,8 @@ export default function App() {
 
     clearTimeout(findDebounceRef.current)
     clearFindHighlights()
+    clearSourceFindHighlight(sourceFindTextareaRef.current || sourceRef.current)
+    sourceFindTextareaRef.current = null
     findRangesRef.current = []
     activeIdxRef.current = -1
     lineBiRef.current = -1
@@ -3168,6 +3524,8 @@ export default function App() {
 
   const toggleFindMode = useCallback(() => {
     clearFindHighlights()
+    clearSourceFindHighlight(sourceFindTextareaRef.current || sourceRef.current)
+    sourceFindTextareaRef.current = null
     findRangesRef.current = []
     activeIdxRef.current = -1
     lineBiRef.current = -1
@@ -3188,6 +3546,8 @@ export default function App() {
     clearTimeout(findEditDebounceRef.current)
     findOpenRef.current = false
     clearFindHighlights()
+    clearSourceFindHighlight(sourceFindTextareaRef.current || sourceRef.current)
+    sourceFindTextareaRef.current = null
     findRangesRef.current = []
     activeIdxRef.current = -1
     lineBiRef.current = -1
@@ -3221,7 +3581,7 @@ export default function App() {
     if (mode === 'line') runLineJump(query, false)
     else runFind(query, options, sourceRef.current ? session.activeIdx ?? 0 : null)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeId])
+  }, [activeId, sourceMode])
 
   const platformClass =
     ({ win32: ' is-win', darwin: ' is-mac', ios: ' is-ios is-mobile', android: ' is-android is-mobile' }[
@@ -3529,8 +3889,8 @@ export default function App() {
               // grows to fill the rest. Outside split, panes fill the row.
               const paneFlex = split && isLeft ? `0 0 calc(${(splitRatio * 100).toFixed(2)}% - 3px)` : undefined
 
-              // Plain-text docs always use the textarea; the active pane also uses
-              // it in global source mode (the right pane never shows it).
+              // Plain-text docs always use the textarea; a Markdown tab can enable
+              // its own source pane on the left (the right split pane stays preview).
               // "Heavy" only matters for the Milkdown (Crepe) editor — its
               // near-quadratic handling of one giant paragraph freezes the thread.
               // The source-backed keep editor is plain DOM and renders heavy docs
@@ -3538,40 +3898,49 @@ export default function App() {
               // (and only until the user opts into rich-despite-heavy).
               const heavyAsSource =
                 tab.heavy && milkdownForced.has(tab.id) && !richForced.has(tab.id)
-              const usesTextarea = isPlainTextDoc(tab) || heavyAsSource || (sourceMode && isLeft)
-              if (usesTextarea) {
-                if (!inView) return null
-                return (
-                  <SourceEditorPane
-                    key={tab.id}
-                    textareaRef={isLeft ? sourceRef : undefined}
-                    paneClass={paneClass}
-                    style={isRight ? rightPaneStyle : leftPaneStyle}
-                    value={tab.content}
-                    onChange={h.onSourceChange}
-                    onPaneFocus={h.onPaneFocus}
-                    onPaneMouseDown={h.onPaneFocus}
-                  />
-                )
+              const plainText = isPlainTextDoc(tab)
+              const sourceForActivePreview = sourceMode && isLeft && !plainText && !heavyAsSource
+              const sourceVisible = inView && (plainText || heavyAsSource || sourceForActivePreview)
+              const shouldMountSource = (plainText || heavyAsSource)
+                ? inView
+                : sourceMountedIds.has(tab.id) || sourceForActivePreview
+              const sourceStyle = {
+                ...(isRight ? rightPaneStyle : leftPaneStyle),
+                display: sourceVisible ? undefined : 'none'
               }
+              const sourceNode = shouldMountSource ? (
+                <SourceEditorPane
+                  key={`source:${tab.id}:${tab.reloadNonce}`}
+                  textareaRef={isLeft && sourceVisible ? sourceRef : undefined}
+                  paneClass={paneClass}
+                  style={sourceStyle}
+                  value={tab.content}
+                  onChange={h.onSourceChange}
+                  onPaneFocus={h.onPaneFocus}
+                  onPaneMouseDown={h.onPaneFocus}
+                />
+              ) : null
+              if (plainText || heavyAsSource) return sourceNode
+              const previewVisible = inView && !sourceForActivePreview
               // `.md` default: the source-backed "keep" editor (zero-diff saves).
               // The user can opt this tab into Milkdown WYSIWYG (milkdownForced).
               // Reaching here means it's a Markdown doc not shown as plain source.
               const usesKeep = !milkdownForced.has(tab.id)
               if (usesKeep) {
-                if (!inView && !mountedIds.has(tab.id)) return null
-                return (
+                if (!inView && !mountedIds.has(tab.id) && !sourceNode) return null
+                return [
+                  sourceNode,
                   <div
                     // Distinct key prefix from the Milkdown wrapper so toggling
                     // modes fully remounts (no ref/child reconciliation surprises).
                     key={`keep:${tab.id}:${tab.reloadNonce}`}
                     className={`editor-scroll km-scroll${paneClass}`}
-                    style={{ display: inView ? undefined : 'none', order, flex: paneFlex }}
+                    style={{ display: previewVisible ? undefined : 'none', order, flex: paneFlex }}
                     onFocusCapture={h.onPaneFocus}
                     onMouseDownCapture={h.onPaneFocus}
                   >
                     <KeepEditor
-                      inView={inView}
+                      inView={previewVisible}
                       initialContent={tab.content}
                       docPath={tab.path}
                       blankLineSpacing={settings.blankLineSpacing}
@@ -3582,21 +3951,22 @@ export default function App() {
                       onOpenDocLink={openDocLink}
                     />
                   </div>
-                )
+                ]
               }
               // Lazy mount: don't create a Crepe editor for a tab the user hasn't
               // opened yet (keeps session-restore of many tabs fast). Panes in
               // view always mount; visited tabs stay mounted.
-              if (!inView && !mountedIds.has(tab.id)) return null
-              return (
+              if (!inView && !mountedIds.has(tab.id) && !sourceNode) return null
+              return [
+                sourceNode,
                 <div
                   // Include reloadNonce so an external-edit reload remounts the
                   // Crepe editor with the new content (the create effect only
                   // runs on mount). tab switches keep the same key → stay mounted.
                   key={`${tab.id}:${tab.reloadNonce}`}
                   className={`editor-scroll${paneClass}`}
-                  ref={isLeft && !sourceMode ? editorHostRef : undefined}
-                  style={{ display: inView ? undefined : 'none', order, flex: paneFlex }}
+                  ref={isLeft && previewVisible ? editorHostRef : undefined}
+                  style={{ display: previewVisible ? undefined : 'none', order, flex: paneFlex }}
                   onFocusCapture={h.onPaneFocus}
                   onMouseDownCapture={h.onPaneFocus}
                 >
@@ -3610,7 +3980,7 @@ export default function App() {
                     />
                   </Suspense>
                 </div>
-              )
+              ]
             })}
 
             {/* Heavy-doc notice: only shown when a Milkdown-bound doc is being

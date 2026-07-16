@@ -6,15 +6,17 @@ import {
   nodeViewCtx,
   parserCtx,
   prosePluginsCtx,
+  remarkCtx,
   remarkPluginsCtx,
   remarkStringifyOptionsCtx
 } from '@milkdown/kit/core'
+import { replaceAll } from '@milkdown/kit/utils'
 import { imageBlockConfig } from '@milkdown/kit/component/image-block'
 import { inlineImageConfig } from '@milkdown/kit/component/image-inline'
 import { codeBlockConfig } from '@milkdown/kit/component/code-block'
 import { LanguageDescription, LanguageSupport, StreamLanguage } from '@codemirror/language'
 import { inlineCodeSchema } from '@milkdown/kit/preset/commonmark'
-import { TextSelection } from '@milkdown/prose/state'
+import { NodeSelection, TextSelection } from '@milkdown/prose/state'
 import '@milkdown/crepe/theme/common/style.css'
 import '@milkdown/crepe/theme/frame.css'
 import '@milkdown/crepe/theme/common/link-tooltip.css'
@@ -29,10 +31,12 @@ import { createMermaidPreviewRenderer, createMermaidSplitPlugin } from './editor
 import { tableBreakKeymap, tableCellBreakHandler, brToBreakRemarkPlugin } from './editor-tablebreak.js'
 import { attachMdPasteHandler } from './editor-md-paste.js'
 import { normalizeDisplayMath } from './editor-math.js'
+import { mathPreviewPlugin } from './editor-math-preview.js'
 import { createSafeUnderscoreEmphasisInputRule } from './editor-inputrules.js'
 import { tabAtCursorKeymap } from './editor-codeblock-tab.js'
 import { remarkRepairNonAsciiAutolinks } from './editor-autolink.js'
 import { createSlashPlugin, disableCrepeSlash } from './editor-slash-menu.js'
+import { markdownOffsetToPmPos, pmPosToMarkdownOffset } from './editor-source-map.js'
 import ZoomLightbox from './ZoomLightbox.jsx'
 import { ensureEmbedZoomButtons, zoomItemFromButton } from './editor-zoom.js'
 import './editor-codeblock-eager.js' // side effect: stable code-block heights (scroll-jump fix)
@@ -157,6 +161,7 @@ function Editor({
   const viewRef = useRef(null)
   const apiRef = useRef(null)
   const crepeRef = useRef(null)
+  const mappingMarkdownRef = useRef(initialContent || '')
   const lastBlockRef = useRef(null)
   const [ctxMenu, setCtxMenu] = useState(null) // { x, y } viewport coords, or null
   // Floating "block level" indicator that tracks the caret (H1…H6 / Text).
@@ -337,6 +342,7 @@ function Editor({
         ...plugins,
         // Table-cell line break (issue #7): keymap first so it wins Enter inside a cell.
         tableBreakKeymap(),
+        mathPreviewPlugin(),
         createSlashPlugin(ctx, (key) => tRef.current(key)),
         // Split a mermaid block that holds 2+ diagrams (e.g. a 2nd paste appended
         // into the same block) back into one block per diagram.
@@ -495,9 +501,9 @@ function Editor({
       if (levelTimer) clearTimeout(levelTimer)
     })
 
-    // Kana present → lang="ja" on the host so .milkdown:lang(ja) switches the
-    // writing font to the Japanese stack (--font-write-ja). Kept in sync on
-    // every content update (the regex short-circuits on the first kana hit).
+    // Route the host to the Chinese/Japanese stack from the document content.
+    // Kana wins over Han so Japanese prose keeps Japanese glyph forms. Kept in
+    // sync on every content update.
     const syncDocLang = (md) => {
       const docLang = detectDocLang(md || '')
       if (docLang) host.setAttribute('lang', docLang)
@@ -511,6 +517,7 @@ function Editor({
     // frozen at the initial value while the editor was actually edited.
     crepe.on((api) => {
       api.markdownUpdated((_ctx, md) => {
+        mappingMarkdownRef.current = md
         if (ready) {
           onChange?.(md, false)
           syncDocLang(md)
@@ -1140,8 +1147,143 @@ function Editor({
             return ''
           }
         }
-        apiRef.current = { setBlock, getDocHTML, getMarkdown }
-        onReady?.({ setBlock, getView: () => viewRef.current, getDocHTML, getMarkdown })
+        const replaceMarkdown = (markdown) => {
+          if (destroyed || !crepeRef.current) return false
+          try {
+            const next = normalizeDisplayMath(markdown || '')
+            mappingMarkdownRef.current = next
+            crepe.editor.action(replaceAll(next))
+            return true
+          } catch (error) {
+            console.error('Replace markdown failed', error)
+            return false
+          }
+        }
+        const markdownOffsetFromSelection = () => {
+          const v = viewRef.current
+          if (!v || !crepeRef.current) return null
+          try {
+            const remark = crepe.editor.ctx.get(remarkCtx)
+            return pmPosToMarkdownOffset(
+              mappingMarkdownRef.current || getMarkdown(),
+              v.state.selection.head,
+              v.state.doc,
+              remark
+            )
+          } catch {
+            return null
+          }
+        }
+        const markdownOffsetFromViewportTop = () => {
+          const v = viewRef.current
+          const scroller = v?.dom.closest('.editor-scroll')
+          if (!v || !scroller || !crepeRef.current) return null
+          try {
+            const rect = scroller.getBoundingClientRect()
+            const point = v.dom.ownerDocument.caretPositionFromPoint?.(
+              rect.left + Math.min(rect.width / 2, 320),
+              rect.top + 12
+            )
+            if (!point || !v.dom.contains(point.offsetNode)) return null
+            const pos = v.posAtDOM(point.offsetNode, point.offset)
+            const remark = crepe.editor.ctx.get(remarkCtx)
+            return pmPosToMarkdownOffset(
+              mappingMarkdownRef.current || getMarkdown(),
+              pos,
+              v.state.doc,
+              remark
+            )
+          } catch {
+            return null
+          }
+        }
+        const restoreMarkdownOffset = (rawOffset, follow = false) => {
+          const v = viewRef.current
+          if (!v || !crepeRef.current) return false
+          try {
+            const remark = crepe.editor.ctx.get(remarkCtx)
+            const target = markdownOffsetToPmPos(
+              mappingMarkdownRef.current || getMarkdown(),
+              rawOffset,
+              v.state.doc,
+              remark
+            )
+            const pos = typeof target === 'number' ? target : target?.pos
+            if (!Number.isFinite(pos)) return false
+            const size = v.state.doc.content.size
+            const safePos = Math.max(0, Math.min(pos, size))
+            let selection
+            if (target?.atom) {
+              try {
+                selection = NodeSelection.create(v.state.doc, Math.min(safePos, Math.max(0, size - 1)))
+              } catch {
+                selection = TextSelection.near(v.state.doc.resolve(Math.max(0, safePos)))
+              }
+            } else {
+              selection = TextSelection.near(v.state.doc.resolve(Math.max(0, safePos)))
+            }
+            let tr = v.state.tr.setSelection(selection)
+            if (follow) tr = tr.scrollIntoView()
+            v.dispatch(tr)
+            if (follow) v.focus()
+            if (!follow) {
+              const scroller = v.dom.closest('.editor-scroll')
+              const dom = v.domAtPos(v.state.selection.head)
+              const node = dom.node.nodeType === Node.TEXT_NODE ? dom.node.parentElement : dom.node
+              const sr = scroller?.getBoundingClientRect()
+              const nr = node?.getBoundingClientRect?.()
+              if (scroller && sr && nr) scroller.scrollTop += nr.top - sr.top
+            }
+            return true
+          } catch {
+            return false
+          }
+        }
+        const isSelectionVisible = () => {
+          const v = viewRef.current
+          const scroller = v?.dom.closest('.editor-scroll')
+          if (!v || !scroller) return false
+          try {
+            const coords = v.coordsAtPos(v.state.selection.head)
+            const rect = scroller.getBoundingClientRect()
+            return coords.bottom >= rect.top + 8 && coords.top <= rect.bottom - 8
+          } catch {
+            return false
+          }
+        }
+        const insertMarkdown = (markdown) => {
+          const v = viewRef.current
+          if (!v || !crepeRef.current) return false
+          try {
+            const current = mappingMarkdownRef.current || getMarkdown()
+            const remark = crepe.editor.ctx.get(remarkCtx)
+            const from = pmPosToMarkdownOffset(current, v.state.selection.from, v.state.doc, remark)
+            const to = pmPosToMarkdownOffset(current, v.state.selection.to, v.state.doc, remark)
+            const start = Number.isFinite(from) ? from : current.length
+            const end = Number.isFinite(to) ? to : start
+            const insert = String(markdown ?? '')
+            if (!replaceMarkdown(current.slice(0, start) + insert + current.slice(end))) return false
+            requestAnimationFrame(() => restoreMarkdownOffset(start + insert.length, true))
+            return true
+          } catch {
+            return false
+          }
+        }
+        const editorApi = {
+          setBlock,
+          getView: () => viewRef.current,
+          getDocHTML,
+          getMarkdown,
+          getScroller: () => viewRef.current?.dom.closest('.editor-scroll') || null,
+          replaceMarkdown,
+          insertMarkdown,
+          markdownOffsetFromSelection,
+          markdownOffsetFromViewportTop,
+          restoreMarkdownOffset,
+          isSelectionVisible
+        }
+        apiRef.current = editorApi
+        onReady?.(editorApi)
 
         // Compute the initial markdown snapshot (content baseline for dirty
         // tracking / outline / word count). On a big doc serializing the whole

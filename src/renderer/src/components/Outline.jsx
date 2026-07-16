@@ -7,8 +7,14 @@ import { Icon } from './icons.jsx'
 // outline matches what's actually shown. Fenced code is skipped, and a leading
 // `---` YAML front-matter block is stepped over so its closing fence isn't
 // mistaken for a Setext underline.
-export function parseHeadings(md) {
+export function parseHeadingDetails(md) {
   const lines = (md || '').split('\n')
+  const lineOffsets = []
+  let offset = 0
+  lines.forEach((line) => {
+    lineOffsets.push(offset)
+    offset += line.length + 1
+  })
   const out = []
   let inFence = false
   let fence = ''
@@ -36,13 +42,18 @@ export function parseHeadings(md) {
     // ATX: # … ######
     const hm = line.match(/^(#{1,6})\s+(.+?)\s*#*\s*$/)
     if (hm) {
-      out.push({ level: hm[1].length, text: hm[2].trim() })
+      out.push({ level: hm[1].length, text: hm[2].trim(), line: i, charOffset: lineOffsets[i] })
       continue
     }
     // Inline HTML heading: <h2 …>text</h2> (single line).
     const htm = line.match(/<h([1-6])\b[^>]*>(.*?)<\/h\1>/i)
     if (htm) {
-      out.push({ level: Number(htm[1]), text: htm[2].replace(/<[^>]+>/g, '').trim() })
+      out.push({
+        level: Number(htm[1]),
+        text: htm[2].replace(/<[^>]+>/g, '').trim(),
+        line: i,
+        charOffset: lineOffsets[i]
+      })
       continue
     }
     // Setext: a paragraph line underlined by === (h1) or --- (h2). The text line
@@ -54,12 +65,21 @@ export function parseHeadings(md) {
       /\S/.test(line) &&
       !/^(#{1,6}\s|[-*+]\s|\d+\.\s|>\s|\||\s*$)/.test(line)
     ) {
-      out.push({ level: next.trim()[0] === '=' ? 1 : 2, text: line.trim() })
+      out.push({
+        level: next.trim()[0] === '=' ? 1 : 2,
+        text: line.trim(),
+        line: i,
+        charOffset: lineOffsets[i]
+      })
       i++ // consume the underline
       continue
     }
   }
   return out
+}
+
+export function parseHeadings(md) {
+  return parseHeadingDetails(md).map(({ level, text }) => ({ level, text }))
 }
 
 export default function Outline({ content, activeIndex = -1, onJump }) {
@@ -68,7 +88,7 @@ export default function Outline({ content, activeIndex = -1, onJump }) {
   // can lag a beat behind the cursor. Deferring the content keeps typing smooth on
   // large docs (React renders the heavy parse at low priority).
   const deferredContent = useDeferredValue(content)
-  const headings = useMemo(() => parseHeadings(deferredContent), [deferredContent])
+  const headings = useMemo(() => parseHeadingDetails(deferredContent), [deferredContent])
 
   // Section fold state. A heading is collapsible when a deeper heading follows
   // it; collapsing hides every descendant (deeper heading) until a sibling/uncle
@@ -142,7 +162,7 @@ export default function Outline({ content, activeIndex = -1, onJump }) {
                 ref={i === effectiveActive ? activeRef : undefined}
                 className={`outline-item lvl-${h.level}${i === effectiveActive ? ' active' : ''}`}
                 style={{ paddingLeft: 8 + (h.level - 1) * 12 }}
-                onClick={() => onJump(i)}
+                onClick={() => onJump(i, h)}
                 title={h.text}
               >
                 {view.hasChildren[i] ? (

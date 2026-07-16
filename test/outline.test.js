@@ -1,8 +1,16 @@
 // @vitest-environment happy-dom
 import { describe, it, expect } from 'vitest'
-import { parseHeadings } from '../src/renderer/src/components/Outline.jsx'
+import { parseHeadingDetails, parseHeadings } from '../src/renderer/src/components/Outline.jsx'
 
 describe('parseHeadings', () => {
+  it('keeps exact source offsets for source-mode navigation', () => {
+    const md = '# First\n\nBody\n\nSecond\n------'
+    expect(parseHeadingDetails(md)).toEqual([
+      { level: 1, text: 'First', line: 0, charOffset: 0 },
+      { level: 2, text: 'Second', line: 4, charOffset: md.indexOf('Second') }
+    ])
+  })
+
   it('reads ATX headings with their level', () => {
     expect(parseHeadings('# A\n## B\n###### F')).toEqual([
       { level: 1, text: 'A' },
