@@ -145,12 +145,16 @@ const readTree = async (dir) => {
   return nodes
 }
 
-const readTreeRecursive = async (dir, depth = 0, acc = {}) => {
-  if (depth > 12) return acc
+const readTreeRecursive = async (dir, options = {}, depth = 0, acc = {}) => {
+  const requestedDepth = Number(options?.maxDepth)
+  const maxDepth = Number.isFinite(requestedDepth)
+    ? Math.min(30, Math.max(0, requestedDepth))
+    : 12
+  if (depth > maxDepth) return acc
   const nodes = await readTree(dir)
   acc[dir] = nodes
   for (const node of nodes) {
-    if (node.type === 'dir') await readTreeRecursive(node.path, depth + 1, acc)
+    if (node.type === 'dir') await readTreeRecursive(node.path, options, depth + 1, acc)
   }
   return acc
 }

@@ -1,9 +1,10 @@
-import { useEffect } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Icon } from './icons.jsx'
 import { useI18n, LANGS } from '../i18n.jsx'
 import { THEMES } from '../themes.js'
 import { TypographyGroups } from './TypographyControls.jsx'
 import { fireToast } from '../ui.js'
+import { resolveDefaultFontName } from '../../../shared/fonts.js'
 
 // One labeled row with a toggle switch on the right.
 function SwitchRow({ label, desc, checked, onChange }) {
@@ -22,6 +23,43 @@ function SwitchRow({ label, desc, checked, onChange }) {
       >
         <span className="hm-switch-knob" />
       </button>
+    </div>
+  )
+}
+
+function FontRow({ id, label, desc, value, defaultValue, fonts, resetLabel, onLoadFonts, onChange, onReset }) {
+  const displayValue = value || defaultValue
+  const options = [...new Set([displayValue, defaultValue, ...(fonts || [])].filter(Boolean))]
+  return (
+    <div className="hm-set-row hm-font-row">
+      <label className="hm-set-text" htmlFor={`hm-font-${id}`}>
+        <span className="hm-set-label">{label}</span>
+        {desc && <span className="hm-set-desc">{desc}</span>}
+      </label>
+      <div className="hm-font-control">
+        <select
+          id={`hm-font-${id}`}
+          value={displayValue}
+          style={{ fontFamily: `'${displayValue}'` }}
+          onFocus={onLoadFonts}
+          onPointerDown={onLoadFonts}
+          onChange={(e) => onChange(e.target.value === defaultValue ? '' : e.target.value)}
+        >
+          {options.map((font) => (
+            <option value={font} key={font} style={{ fontFamily: `'${font}'` }}>{font}</option>
+          ))}
+        </select>
+        <button
+          type="button"
+          className="hm-font-reset"
+          onClick={onReset}
+          disabled={!value}
+          title={resetLabel}
+        >
+          <Icon name="undo" size={12} />
+          <span>{resetLabel}</span>
+        </button>
+      </div>
     </div>
   )
 }
@@ -47,6 +85,44 @@ export default function Settings({
   const { lang, t, setLang } = useI18n()
   const caps = window.api.capabilities || {}
   const isMac = window.api.platform === 'darwin'
+  const fontsLoadedRef = useRef(false)
+  const [fontFamilies, setFontFamilies] = useState([])
+
+  const ensureFonts = useCallback(async () => {
+    if (fontsLoadedRef.current || typeof window.queryLocalFonts !== 'function') return
+    fontsLoadedRef.current = true
+    try {
+      await window.api.allowLocalFonts?.()
+      const fonts = await window.queryLocalFonts()
+      setFontFamilies(
+        [...new Set(fonts.map((font) => font.family).filter(Boolean))]
+          .sort((a, b) => a.localeCompare(b))
+      )
+    } catch {
+      fontsLoadedRef.current = false
+    }
+  }, [])
+
+  useEffect(() => {
+    if (open && caps.nativeMenus) ensureFonts()
+  }, [caps.nativeMenus, ensureFonts, open])
+
+  const defaultEnglishFont = useMemo(
+    () => resolveDefaultFontName('en', window.api.platform, fontFamilies),
+    [fontFamilies]
+  )
+  const defaultChineseFont = useMemo(
+    () => resolveDefaultFontName('zh', window.api.platform, fontFamilies),
+    [fontFamilies]
+  )
+  const defaultJapaneseFont = useMemo(
+    () => resolveDefaultFontName('ja', window.api.platform, fontFamilies),
+    [fontFamilies]
+  )
+  const defaultMonoFont = useMemo(
+    () => resolveDefaultFontName('mono', window.api.platform, fontFamilies),
+    [fontFamilies]
+  )
 
   // "Set as default Markdown app" — Windows pops the system "open with" picker
   // (main registers the exe first); macOS has no API, so the row's description
@@ -127,6 +203,58 @@ export default function Settings({
           {/* ── Typography (same controls as the status-bar Layout popover) ── */}
           <div className="hm-set-section">
             <div className="hm-set-section-title">{t('settings.sectionTypography')}</div>
+            {caps.nativeMenus && (
+              <div className="hm-font-pickers">
+                <FontRow
+                  id="en"
+                  label={t('settings.fontEnglish')}
+                  desc={t('settings.fontEnglishDesc')}
+                  value={settings.fontWriteEn}
+                  defaultValue={defaultEnglishFont}
+                  fonts={fontFamilies}
+                  resetLabel={t('settings.fontReset')}
+                  onLoadFonts={ensureFonts}
+                  onChange={(fontWriteEn) => updateSettings({ fontWriteEn })}
+                  onReset={() => updateSettings({ fontWriteEn: '' })}
+                />
+                <FontRow
+                  id="zh"
+                  label={t('settings.fontChinese')}
+                  desc={t('settings.fontChineseDesc')}
+                  value={settings.fontWriteZh}
+                  defaultValue={defaultChineseFont}
+                  fonts={fontFamilies}
+                  resetLabel={t('settings.fontReset')}
+                  onLoadFonts={ensureFonts}
+                  onChange={(fontWriteZh) => updateSettings({ fontWriteZh })}
+                  onReset={() => updateSettings({ fontWriteZh: '' })}
+                />
+                <FontRow
+                  id="ja"
+                  label={t('settings.fontJapanese')}
+                  desc={t('settings.fontJapaneseDesc')}
+                  value={settings.fontWriteJa}
+                  defaultValue={defaultJapaneseFont}
+                  fonts={fontFamilies}
+                  resetLabel={t('settings.fontReset')}
+                  onLoadFonts={ensureFonts}
+                  onChange={(fontWriteJa) => updateSettings({ fontWriteJa })}
+                  onReset={() => updateSettings({ fontWriteJa: '' })}
+                />
+                <FontRow
+                  id="mono"
+                  label={t('settings.fontMono')}
+                  desc={t('settings.fontMonoDesc')}
+                  value={settings.fontMono}
+                  defaultValue={defaultMonoFont}
+                  fonts={fontFamilies}
+                  resetLabel={t('settings.fontReset')}
+                  onLoadFonts={ensureFonts}
+                  onChange={(fontMono) => updateSettings({ fontMono })}
+                  onReset={() => updateSettings({ fontMono: '' })}
+                />
+              </div>
+            )}
             <TypographyGroups {...typographyProps} />
             <SwitchRow
               label={t('settings.blankLineSpacing')}
@@ -173,22 +301,32 @@ export default function Settings({
           </div>
 
           {/* ── System (default Markdown opener) ── */}
-          {caps.defaultOpener && (
+          {(caps.defaultOpener || caps.folderWorkspace) && (
             <div className="hm-set-section">
               <div className="hm-set-section-title">{t('settings.sectionSystem')}</div>
-              <div className="hm-set-row">
-                <div className="hm-set-text">
-                  <div className="hm-set-label">{t('settings.defaultOpener')}</div>
-                  <div className="hm-set-desc">
-                    {t(isMac ? 'settings.defaultOpenerDescMac' : 'settings.defaultOpenerDescWin')}
+              {caps.folderWorkspace && (
+                <SwitchRow
+                  label={t('settings.showHiddenFiles')}
+                  desc={t('settings.showHiddenFilesDesc')}
+                  checked={settings.showHiddenFiles}
+                  onChange={(showHiddenFiles) => updateSettings({ showHiddenFiles })}
+                />
+              )}
+              {caps.defaultOpener && (
+                <div className="hm-set-row">
+                  <div className="hm-set-text">
+                    <div className="hm-set-label">{t('settings.defaultOpener')}</div>
+                    <div className="hm-set-desc">
+                      {t(isMac ? 'settings.defaultOpenerDescMac' : 'settings.defaultOpenerDescWin')}
+                    </div>
                   </div>
+                  {!isMac && (
+                    <button className="hm-set-btn" onClick={onSetDefaultOpener}>
+                      {t('settings.defaultOpenerButton')}
+                    </button>
+                  )}
                 </div>
-                {!isMac && (
-                  <button className="hm-set-btn" onClick={onSetDefaultOpener}>
-                    {t('settings.defaultOpenerButton')}
-                  </button>
-                )}
-              </div>
+              )}
             </div>
           )}
 

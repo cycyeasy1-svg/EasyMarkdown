@@ -2,6 +2,7 @@ import { memo, useCallback, useEffect, useRef, useState } from 'react'
 import { Icon } from './icons.jsx'
 import { useI18n } from '../i18n.jsx'
 import { baseName, dirName as parentDir, joinPath as join, isMarkdownName, isValidName, isExistsError } from '../paths.js'
+import { selectMarkdownBranches } from '../sidebar-tree.js'
 import { copyToClipboard, fireToast } from '../ui.js'
 
 // Memoized: the parent (App) re-renders on every keystroke, but the file tree only
@@ -9,7 +10,7 @@ import { copyToClipboard, fireToast } from '../ui.js'
 // which change while typing. With stable props (App useCallbacks its handlers and
 // keys the open-path set by its contents), memo skips re-rendering the whole tree
 // on each content edit. See the openTabPaths memo + onSidebarOpenFile in App.jsx.
-function Sidebar({ workspaces, activePath, openTabPaths, openTabPathsRaw, onOpenFile, onOpenRight, onExportPdf, onAddFolder, onRemoveFolder, onReorderFolder, refreshNonce }) {
+function Sidebar({ workspaces, activePath, openTabPaths, openTabPathsRaw, onOpenFile, onOpenRight, onExportPdf, onAddFolder, onRemoveFolder, onReorderFolder, refreshNonce, showHiddenFiles = false }) {
   const { t } = useI18n()
   const copyText = (text) => copyToClipboard(text, t('code.copied'))
   const [childrenMap, setChildrenMap] = useState({}) // path -> nodes[]
@@ -18,6 +19,9 @@ function Sidebar({ workspaces, activePath, openTabPaths, openTabPathsRaw, onOpen
   const [rename, setRename] = useState(null) // { path, value }
   // Inline creation: { dir, type: 'file'|'folder', value }
   const [creating, setCreating] = useState(null)
+  const [isExpandingAll, setIsExpandingAll] = useState(false)
+  const expandAllActiveRef = useRef(false)
+  const expandAllRunRef = useRef(0)
   // Guards against committing a creation twice (e.g. Enter immediately followed
   // by the input's blur, or a click on the confirm button + blur).
   const committingRef = useRef(false)
@@ -42,6 +46,8 @@ function Sidebar({ workspaces, activePath, openTabPaths, openTabPathsRaw, onOpen
   // Open-tab paths we've already auto-revealed, so re-expanding doesn't fight a
   // folder the user later collapses by hand (reset when the workspace changes).
   const revealedRef = useRef(new Set())
+  const showHiddenRef = useRef(showHiddenFiles)
+  showHiddenRef.current = showHiddenFiles
 
   const roots = workspaces || []
   // Stable identity for the set of roots, so the init effect only re-runs when the
@@ -50,10 +56,12 @@ function Sidebar({ workspaces, activePath, openTabPaths, openTabPathsRaw, onOpen
   const rootsKey = roots.map((w) => w.rootPath).join('\n')
 
   const loadDir = useCallback(async (dir) => {
-    const nodes = await window.api.readDir(dir)
+    const requestedHidden = showHiddenFiles
+    const nodes = await window.api.readDir(dir, { showHidden: requestedHidden })
+    if (requestedHidden !== showHiddenRef.current) return nodes
     setChildrenMap((m) => ({ ...m, [dir]: nodes }))
     return nodes
-  }, [])
+  }, [showHiddenFiles])
 
   // Load + expand any root we haven't seen yet, leaving already-loaded roots'
   // expansion and children untouched — adding a folder must not collapse the
@@ -77,6 +85,12 @@ function Sidebar({ workspaces, activePath, openTabPaths, openTabPathsRaw, onOpen
     Object.keys(childrenMap).forEach((dir) => loadDir(dir))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refreshNonce])
+
+  // The preference applies to every already-expanded lazy directory, not only
+  // folders opened after the toggle. Expansion and watcher state stay intact.
+  useEffect(() => {
+    Object.keys(childrenRef.current).forEach((dir) => loadDir(dir))
+  }, [showHiddenFiles, loadDir])
 
   // Lazy folder watching: watch exactly the directories the tree has actually
   // loaded (each root + every folder the user expanded or that was revealed for an
@@ -105,6 +119,7 @@ function Sidebar({ workspaces, activePath, openTabPaths, openTabPathsRaw, onOpen
     () => () => {
       watchedDirsRef.current.forEach((d) => window.api.watchStop(d))
       watchedDirsRef.current = new Set()
+      expandAllRunRef.current += 1
     },
     []
   )
@@ -235,7 +250,7 @@ function Sidebar({ workspaces, activePath, openTabPaths, openTabPathsRaw, onOpen
   const refreshDir = async (dir) => {
     fireToast(t('side.refreshing'), { sticky: true, kind: 'progress' })
     try {
-      const nextMap = await window.api.readDirRecursive(dir)
+      const nextMap = await window.api.readDirRecursive(dir, { showHidden: showHiddenFiles })
       const root = dir.replace(/\\/g, '/')
       setChildrenMap((prev) => {
         const next = { ...prev }
@@ -330,27 +345,61 @@ function Sidebar({ workspaces, activePath, openTabPaths, openTabPathsRaw, onOpen
     }
   }
 
-  // Recursively load every subfolder and expand them all. Depth-capped and
-  // visited-guarded so a symlink cycle or a pathologically deep tree can't spin
-  // into unbounded IPC recursion.
+  // Scan the complete trees once, then expand only branches that actually lead
+  // to Markdown. Empty/non-Markdown directories remain visible but collapsed,
+  // and are omitted from childrenMap so the lazy watcher does not watch them.
   const expandAll = async () => {
-    if (!roots.length) return
-    const dirs = new Set(roots.map((w) => w.rootPath))
-    const seen = new Set()
-    const walk = async (dir, depth) => {
-      if (depth > 30 || seen.has(dir)) return
-      seen.add(dir)
-      let nodes = childrenMap[dir]
-      if (nodes === undefined) nodes = await loadDir(dir)
-      for (const n of nodes || []) {
-        if (n.type === 'dir') {
-          dirs.add(n.path)
-          await walk(n.path, depth + 1)
+    if (!roots.length || expandAllActiveRef.current) return
+    expandAllActiveRef.current = true
+    const run = ++expandAllRunRef.current
+    setIsExpandingAll(true)
+    try {
+      const scanned = {}
+      // Keep root scans sequential so several large workspaces do not saturate
+      // the disk at once. The inline progress state has already painted before
+      // the first IPC completes.
+      for (const workspace of roots) {
+        Object.assign(
+          scanned,
+          await window.api.readDirRecursive(workspace.rootPath, {
+            showHidden: showHiddenFiles,
+            maxDepth: 30
+          })
+        )
+      }
+      if (run !== expandAllRunRef.current) return
+
+      const rootPaths = roots.map((workspace) => workspace.rootPath)
+      const plan = selectMarkdownBranches(scanned, rootPaths)
+      const normalizedRoots = rootPaths.map((path) => path.replace(/\\/g, '/').replace(/\/+$/, ''))
+      setChildrenMap((prev) => {
+        const next = { ...prev }
+        for (const key of Object.keys(next)) {
+          const normalized = key.replace(/\\/g, '/').replace(/\/+$/, '')
+          if (normalizedRoots.some((root) => normalized === root || normalized.startsWith(root + '/'))) {
+            delete next[key]
+          }
         }
+        return { ...next, ...plan.childrenMap }
+      })
+      setExpanded(plan.expanded)
+      fireToast(t('side.expandComplete', { n: plan.markdownDirectoryCount }), {
+        duration: 1800,
+        kind: 'success'
+      })
+    } catch (e) {
+      if (run === expandAllRunRef.current) {
+        fireToast(t('side.expandFailed', { msg: e?.message || String(e) }), {
+          sticky: true,
+          kind: 'error'
+        })
+      }
+    } finally {
+      if (run === expandAllRunRef.current) {
+        expandAllActiveRef.current = false
+        setIsExpandingAll(false)
       }
     }
-    for (const w of roots) await walk(w.rootPath, 0)
-    setExpanded(dirs)
   }
 
   // Move a dragged file/folder into a destination directory.
@@ -679,7 +728,7 @@ function Sidebar({ workspaces, activePath, openTabPaths, openTabPathsRaw, onOpen
   const collapsed = expanded.size <= roots.length
 
   return (
-    <div className="sidebar">
+    <div className="sidebar" aria-busy={isExpandingAll}>
       <div className="sidebar-head">
         <span className="sidebar-title">{t('cmd.files')}</span>
         <div className="sidebar-head-actions">
@@ -687,13 +736,27 @@ function Sidebar({ workspaces, activePath, openTabPaths, openTabPathsRaw, onOpen
             <Icon name="plus" size={15} />
           </button>
           <button
-            title={collapsed ? t('side.expandAll') : t('side.collapseAll')}
+            className="sidebar-expand-all"
+            title={isExpandingAll ? t('side.expandingMarkdown') : (collapsed ? t('side.expandAll') : t('side.collapseAll'))}
             onClick={collapsed ? expandAll : () => setExpanded(new Set(roots.map((w) => w.rootPath)))}
+            disabled={isExpandingAll}
           >
             <Icon name={collapsed ? 'expand' : 'collapse'} size={15} />
           </button>
         </div>
       </div>
+      {isExpandingAll && (
+        <div className="sidebar-expand-progress" role="status" aria-live="polite">
+          <span>{t('side.expandingMarkdown')}</span>
+          <span
+            className="sidebar-expand-progress-track"
+            role="progressbar"
+            aria-label={t('side.expandingMarkdown')}
+          >
+            <span />
+          </span>
+        </div>
+      )}
       <div className="tree">
         {roots.map((ws) => renderRoot(ws))}
       </div>

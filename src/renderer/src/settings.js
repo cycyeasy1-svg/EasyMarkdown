@@ -3,6 +3,13 @@
 // and zoom. Kept small and self-contained so the Settings modal and App can
 // share one source of truth.
 
+import {
+  DEFAULT_FONT_MONO,
+  fontStack,
+  normalizeFontName,
+  writingFontStacks
+} from '../../shared/fonts.js'
+
 export const SETTINGS_KEY = 'easymarkdown.settings.v1'
 
 // Page-width slider bounds (px). 'full' (a preset, not a slider value) fills the
@@ -83,6 +90,13 @@ export const DEFAULT_SETTINGS = {
   zoom: DEFAULT_ZOOM,
   lineHeight: DEFAULT_LINE_HEIGHT,
   paragraphSpacing: DEFAULT_PARA_SPACING,
+  // Empty values use the built-in language-specific stacks. English leads
+  // Latin glyphs in every document; Chinese/Japanese choices take over the CJK
+  // glyphs only when that document language is detected.
+  fontWriteEn: '',
+  fontWriteZh: '',
+  fontWriteJa: '',
+  fontMono: '',
   // Chromium's built-in spellchecker (red squiggles + right-click suggestions).
   // Off by default: CJK prose has no dictionaries and mixed-language documents
   // would light up with false positives.
@@ -99,7 +113,8 @@ export const DEFAULT_SETTINGS = {
   // preview, this app's own rich editor) collapses them — and because writers who
   // habitually leave two blank lines before a heading would see their documents
   // suddenly loosen. Purely visual: the source bytes never change.
-  blankLineSpacing: false
+  blankLineSpacing: false,
+  showHiddenFiles: false
 }
 
 const round1 = (n) => Math.round(n * 10) / 10
@@ -147,10 +162,18 @@ export function loadSettings() {
         PARA_SPACING_MAX,
         DEFAULT_PARA_SPACING
       ),
+      // Migrate the short-lived single-font preference by applying it to all
+      // three language slots. Once any new slot exists, its explicit value
+      // (including an empty reset) wins over the legacy field.
+      fontWriteEn: normalizeFontName(raw.fontWriteEn ?? raw.fontWrite),
+      fontWriteZh: normalizeFontName(raw.fontWriteZh ?? raw.fontWrite),
+      fontWriteJa: normalizeFontName(raw.fontWriteJa ?? raw.fontWrite),
+      fontMono: normalizeFontName(raw.fontMono),
       spellcheck: raw.spellcheck === true,
       autosave: raw.autosave === true,
       defaultEditorMode: raw.defaultEditorMode === 'rich' ? 'rich' : 'keep',
-      blankLineSpacing: raw.blankLineSpacing === true
+      blankLineSpacing: raw.blankLineSpacing === true,
+      showHiddenFiles: raw.showHiddenFiles === true
     }
   } catch {
     return { ...DEFAULT_SETTINGS }
@@ -187,6 +210,22 @@ export function applyFontSize(size) {
     '--editor-font-size',
     normalizeFontSize(size) + 'px'
   )
+}
+
+export function applyEditorFonts(fontWriteEn, fontWriteZh, fontWriteJa, fontMono) {
+  const writeEn = normalizeFontName(fontWriteEn)
+  const writeZh = normalizeFontName(fontWriteZh)
+  const writeJa = normalizeFontName(fontWriteJa)
+  const mono = normalizeFontName(fontMono)
+  const stacks = writingFontStacks({ fontWriteEn: writeEn, fontWriteZh: writeZh, fontWriteJa: writeJa })
+  const root = document.documentElement.style
+  root.setProperty('--font-write', stacks.en)
+  root.setProperty('--font-write-en', stacks.en)
+  root.setProperty('--font-write-zh', stacks.zh)
+  root.setProperty('--font-write-ja', stacks.ja)
+  root.setProperty('--font-mono', fontStack(mono, DEFAULT_FONT_MONO))
+  document.body.classList.toggle('hm-user-write-font', !!(writeEn || writeZh || writeJa))
+  document.body.classList.toggle('hm-user-mono-font', !!mono)
 }
 
 // Apply the overall editor zoom as a CSS variable. The editor content layers

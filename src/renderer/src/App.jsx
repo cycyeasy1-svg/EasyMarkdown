@@ -27,6 +27,7 @@ import {
   saveSettings,
   applyPageWidth,
   applyFontSize,
+  applyEditorFonts,
   applyZoom,
   applyLineHeight,
   applyParagraphSpacing,
@@ -34,6 +35,7 @@ import {
   ZOOM_STEP,
   DEFAULT_ZOOM
 } from './settings.js'
+import { attachmentLinkMarkdown } from '../../main/helpers.js'
 import { applyCustomTheme } from './customThemes.js'
 import { fireToast, HM_TOAST_EVENT } from './ui.js'
 import logoUrl from './assets/logo.png'
@@ -947,6 +949,14 @@ export default function App() {
     applyFontSize(settings.fontSize)
   }, [settings.fontSize])
   useEffect(() => {
+    applyEditorFonts(
+      settings.fontWriteEn,
+      settings.fontWriteZh,
+      settings.fontWriteJa,
+      settings.fontMono
+    )
+  }, [settings.fontWriteEn, settings.fontWriteZh, settings.fontWriteJa, settings.fontMono])
+  useEffect(() => {
     applyZoom(settings.zoom)
   }, [settings.zoom])
   useEffect(() => {
@@ -1813,9 +1823,14 @@ export default function App() {
         return
       }
       const base = (tab.title || 'Untitled').replace(/\.(md|markdown|mdx|txt)$/i, '')
-      await window.api.exportPDF(html, base + '.pdf')
+      await window.api.exportPDF(html, base + '.pdf', {
+        fontWriteEn: settings.fontWriteEn,
+        fontWriteZh: settings.fontWriteZh,
+        fontWriteJa: settings.fontWriteJa,
+        fontMono: settings.fontMono
+      })
     },
-    [openPaths]
+    [openPaths, settings.fontWriteEn, settings.fontWriteZh, settings.fontWriteJa, settings.fontMono]
   )
 
   // --------------------------- workspace ---------------------------
@@ -2298,6 +2313,45 @@ export default function App() {
       const id = pickEditableId()
       if (id) saveTab(id, true)
     },
+    attach: async () => {
+      const id = pickEditableId()
+      const tab = tabsRef.current.find((item) => item.id === id)
+      if (!tab || !tab.path || !MD_DOC_RE.test(tab.path)) {
+        fireToast(tRef.current('attach.needsSave'), { sticky: true })
+        return
+      }
+      if (!window.api.capabilities?.fileAttachments) {
+        fireToast(tRef.current('attach.unsupported'), { sticky: true })
+        return
+      }
+      const picked = await window.api.openAttachments?.()
+      if (!picked?.length) return
+      const links = []
+      for (const sourcePath of picked) {
+        const res = await window.api.saveAttachment?.(tab.path, sourcePath)
+        if (!res?.ok) {
+          fireToast(tRef.current('attach.failed', { msg: res?.error || baseName(sourcePath) }), {
+            kind: 'error',
+            sticky: true
+          })
+          return
+        }
+        links.push(attachmentLinkMarkdown(res.name || baseName(sourcePath), res.path))
+      }
+      const markdown = links.join('\n')
+      const sourceApi = id === activeIdRef.current && sourceModeRef.current
+        ? sourceRef.current?.__hmSourceApi
+        : null
+      const inserted = sourceApi?.insertMarkdown?.(markdown) || editorApis.current[id]?.insertMarkdown?.(markdown)
+      if (!inserted) {
+        fireToast(tRef.current('attach.failed', { msg: 'Editor is still loading.' }), {
+          kind: 'error',
+          sticky: true
+        })
+        return
+      }
+      fireToast(tRef.current('attach.inserted', { n: links.length }))
+    },
     exportPdf: async () => {
       const id = pickEditableId()
       const html = editorApis.current[id]?.getDocHTML?.()
@@ -2307,7 +2361,12 @@ export default function App() {
       }
       const tab = tabs.find((x) => x.id === id)
       const base = (tab?.title || 'Untitled').replace(/\.(md|markdown|mdx|txt)$/i, '')
-      await window.api.exportPDF(html, base + '.pdf')
+      await window.api.exportPDF(html, base + '.pdf', {
+        fontWriteEn: settings.fontWriteEn,
+        fontWriteZh: settings.fontWriteZh,
+        fontWriteJa: settings.fontWriteJa,
+        fontMono: settings.fontMono
+      })
     },
     exportHtml: async () => {
       const id = pickEditableId()
@@ -2318,7 +2377,12 @@ export default function App() {
       }
       const tab = tabs.find((x) => x.id === id)
       const base = (tab?.title || 'Untitled').replace(/\.(md|markdown|mdx|txt)$/i, '')
-      await window.api.exportHTML?.(html, base + '.html', base)
+      await window.api.exportHTML?.(html, base + '.html', base, {
+        fontWriteEn: settings.fontWriteEn,
+        fontWriteZh: settings.fontWriteZh,
+        fontWriteJa: settings.fontWriteJa,
+        fontMono: settings.fontMono
+      })
     },
     print: async () => {
       const id = pickEditableId()
@@ -2327,7 +2391,12 @@ export default function App() {
         window.alert(tRef.current('error.printUnavailable'))
         return
       }
-      await window.api.printHTML?.(html)
+      await window.api.printHTML?.(html, {
+        fontWriteEn: settings.fontWriteEn,
+        fontWriteZh: settings.fontWriteZh,
+        fontWriteJa: settings.fontWriteJa,
+        fontMono: settings.fontMono
+      })
     },
     closeTab: () => activeId && closeTab(activeId),
     palette: () => setPaletteOpen((v) => !v),
@@ -2746,6 +2815,7 @@ export default function App() {
         { id: 'cmd.openFolder', title: t('cmd.openFolder'), icon: 'folder', run: () => handlers.current.openFolder() },
         { id: 'cmd.save', title: t('cmd.save'), icon: 'save', run: () => handlers.current.save() },
         { id: 'cmd.saveAs', title: t('cmd.saveAs'), icon: 'save', run: () => handlers.current.saveAs() },
+        caps.fileAttachments && { id: 'cmd.attach', title: t('cmd.attach'), icon: 'file-plus', run: () => handlers.current.attach() },
         // Export-to-PDF needs a save dialog / print pipeline that doesn't exist on mobile.
         caps.pdfExport && { id: 'cmd.exportPdf', title: t('cmd.exportPdf'), icon: 'file', run: () => handlers.current.exportPdf() },
         caps.htmlExport && { id: 'cmd.exportHtml', title: t('cmd.exportHtml'), icon: 'file', run: () => handlers.current.exportHtml() },
@@ -3704,6 +3774,7 @@ export default function App() {
                 onRemoveFolder={removeWorkspace}
                 onReorderFolder={reorderWorkspaces}
                 refreshNonce={refreshNonce}
+                showHiddenFiles={settings.showHiddenFiles}
               />
             ) : sidebarMode === 'search' ? (
               <SearchPanel
@@ -3711,6 +3782,7 @@ export default function App() {
                 onOpenResult={openSearchResult}
                 onAddFolder={openFolder}
                 focusNonce={searchFocusNonce}
+                showHiddenFiles={settings.showHiddenFiles}
               />
             ) : (
               <Outline content={activeTab?.content || ''} activeIndex={activeHeading} onJump={jumpToHeading} />

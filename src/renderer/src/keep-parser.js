@@ -37,12 +37,14 @@ import { HIGHLIGHT_STICKY_RE, MARK_HTML_STICKY_RE } from './highlight-syntax.js'
 // attribute; CSS `:lang(ja)` then switches the writing font to the Japanese
 // stack (--font-write-ja) so kanji get Japanese glyph forms instead of the
 // Chinese-font fallback. Covers hiragana, katakana and halfwidth katakana.
-// (main/helpers.js docLangAttr mirrors this regex for the PDF/HTML export —
+// (main/helpers.js docLangAttr mirrors these regexes for the PDF/HTML export —
 // keep the two in sync.)
 const KANA_RE = /[ぁ-ゖァ-ヺｦ-ﾝ]/
+const HAN_RE = /[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]/
 export function detectDocLang(text) {
   const lines = Array.isArray(text) ? text : [text]
   for (const line of lines) if (KANA_RE.test(line)) return 'ja'
+  for (const line of lines) if (HAN_RE.test(line)) return 'zh'
   return ''
 }
 

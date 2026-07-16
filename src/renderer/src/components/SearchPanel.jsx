@@ -7,7 +7,7 @@ import { baseName, dirName } from '../paths.js'
 // process (search:start walks the roots and streams per-file batches); this
 // panel only renders the stream. Options mirror the in-document find bar so
 // both searches behave identically.
-function SearchPanel({ workspaces, onOpenResult, onAddFolder, focusNonce }) {
+function SearchPanel({ workspaces, onOpenResult, onAddFolder, focusNonce, showHiddenFiles = false }) {
   const { t } = useI18n()
   const inputRef = useRef(null)
   const [query, setQuery] = useState('')
@@ -54,7 +54,11 @@ function SearchPanel({ workspaces, onOpenResult, onAddFolder, focusNonce }) {
       return
     }
     setStatus({ running: true, done: false, total: 0, truncated: false, error: '' })
-    const res = await window.api.searchStart?.({ roots, query: q, options: opts })
+    const res = await window.api.searchStart?.({
+      roots,
+      query: q,
+      options: { ...opts, showHidden: showHiddenFiles }
+    })
     searchIdRef.current = res?.id ?? 0
     if (res?.error) {
       setStatus({ running: false, done: true, total: 0, truncated: false, error: res.error })
@@ -72,6 +76,13 @@ function SearchPanel({ workspaces, onOpenResult, onAddFolder, focusNonce }) {
     setOptions(next)
     if (query.trim()) runSearch(query, next)
   }
+
+  useEffect(() => {
+    if (query.trim()) runSearch(query, options)
+    // The search must be restarted against the same query when hidden-file
+    // visibility changes; other state changes already call runSearch directly.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showHiddenFiles])
 
   const opt = (key, label, tip) => (
     <button

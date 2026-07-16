@@ -1,8 +1,5 @@
-// Per-document Japanese font: a doc containing kana gets lang="ja" on .km-doc
-// (detectDocLang in keep-parser.js) so CSS :lang(ja) switches the writing font
-// to the Japanese stack; a kana-free doc must NOT get it (Han characters alone
-// are not a Japanese signal). See the "Per-document Japanese font" note in
-// CLAUDE.md.
+// Per-document CJK font routing: kana wins as Japanese, while Han without kana
+// is Chinese. Latin-only documents stay unmarked and use the English stack.
 import { test, expect } from '@playwright/test'
 import { launchApp, fixture } from './helpers.js'
 
@@ -22,7 +19,20 @@ test('a Japanese document marks its keep-mode container lang="ja"', async () => 
   }
 })
 
-test('a kana-free document keeps the default writing font (no lang attr)', async () => {
+test('a Chinese document marks its keep-mode container lang="zh"', async () => {
+  const { page, cleanup } = await launchApp([fixture('chinese.md')])
+  try {
+    await page.locator('.tab', { hasText: 'chinese.md' }).click()
+    const doc = page.locator('.km-doc[lang="zh"]')
+    await expect(doc).toBeVisible()
+    const family = await doc.evaluate((el) => getComputedStyle(el).fontFamily)
+    expect(family).toMatch(/PingFang SC|Microsoft YaHei|Noto Sans SC/)
+  } finally {
+    await cleanup()
+  }
+})
+
+test('a Latin-only document keeps the English writing font (no lang attr)', async () => {
   const { page, cleanup } = await launchApp([fixture('welcome.md')])
   try {
     await page.locator('.tab', { hasText: 'welcome.md' }).click()

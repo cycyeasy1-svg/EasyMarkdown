@@ -9,6 +9,9 @@ import {
   isAbsolutePath,
   isRestrictedRoot,
   imageNameParts,
+  attachmentNameParts,
+  attachmentLinkMarkdown,
+  shouldSkipWorkspaceEntry,
   getAllowedExternalUrl,
   searchContentLines,
   docLangAttr,
@@ -68,8 +71,8 @@ describe('docLangAttr', () => {
     expect(docLangAttr('<p>これは日本語の資料です</p>')).toBe(' lang="ja"')
     expect(docLangAttr('<p>カタカナ</p>')).toBe(' lang="ja"')
   })
-  it('returns empty for Han-only / Latin / empty content', () => {
-    expect(docLangAttr('<p>中文文档</p>')).toBe('')
+  it('returns lang="zh" for Han-only content and empty for Latin / empty content', () => {
+    expect(docLangAttr('<p>中文文档</p>')).toBe(' lang="zh"')
     expect(docLangAttr('<p>English</p>')).toBe('')
     expect(docLangAttr('')).toBe('')
     expect(docLangAttr(null)).toBe('')
@@ -137,6 +140,29 @@ describe('imageNameParts', () => {
   })
   it('keeps a dotfile name intact with a default extension', () => {
     expect(imageNameParts('.gitignore')).toEqual({ stem: '.gitignore', ext: '.png' })
+  })
+})
+
+describe('attachment helpers', () => {
+  it('keeps ordinary extensions, supports extensionless files, and sanitizes names', () => {
+    expect(attachmentNameParts('archive.tar.gz')).toEqual({ stem: 'archive.tar', ext: '.gz' })
+    expect(attachmentNameParts('LICENSE')).toEqual({ stem: 'LICENSE', ext: '' })
+    expect(attachmentNameParts('a/b:c.pdf')).toEqual({ stem: 'a_b_c', ext: '.pdf' })
+  })
+  it('escapes Markdown labels and wraps link targets safely', () => {
+    expect(attachmentLinkMarkdown('a[b].pdf', 'assets/a b.pdf')).toBe('[a\\[b\\].pdf](<assets/a b.pdf>)')
+    expect(attachmentLinkMarkdown('x', 'assets/a<b>.txt')).toBe('[x](<assets/a%3Cb%3E.txt>)')
+  })
+})
+
+describe('shouldSkipWorkspaceEntry', () => {
+  it('reveals dotfiles only when requested while keeping hard exclusions', () => {
+    expect(shouldSkipWorkspaceEntry('.claude', true, false)).toBe(true)
+    expect(shouldSkipWorkspaceEntry('.claude', true, true)).toBe(false)
+    expect(shouldSkipWorkspaceEntry('.env', false, true)).toBe(false)
+    expect(shouldSkipWorkspaceEntry('.gitignore', false, false)).toBe(false)
+    expect(shouldSkipWorkspaceEntry('.git', true, true)).toBe(true)
+    expect(shouldSkipWorkspaceEntry('node_modules', true, true)).toBe(true)
   })
 })
 

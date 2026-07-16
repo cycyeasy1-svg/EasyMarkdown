@@ -27,11 +27,13 @@ html {
   /* Typography */
   --font-ui: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   /* Writing font — matches the EasyMarkdown website (website/styles.css). */
-  --font-write: 'Helvetica Neue', Helvetica, Arial, 'PingFang SC', 'Hiragino Sans GB',
+  --font-write-en: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+  --font-write-zh: 'Helvetica Neue', Helvetica, Arial, 'PingFang SC', 'Hiragino Sans GB',
     'Source Han Sans SC', 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
+  --font-write: var(--font-write-en);
   /* Japanese writing font — applied per document via `lang="ja"` on the doc
      container (kana detected by detectDocLang in keep-parser.js). Same Latin
-     head as --font-write, then Japanese fonts in QUALITY order:
+     head as --font-write-en, then Japanese fonts in QUALITY order:
        • Noto Sans JP  — the de-facto modern-Japanese screen font (= Source Han
          Sans); best on-screen look and the target we may bundle later.
        • BIZ UDPGothic — Win10 1809+ built-in UD gothic; clearer & fuller than
@@ -1674,6 +1676,50 @@ body.dark .milkdown .ProseMirror mark.hm-hl-blue { background: #2f4a6b; }
   background: var(--hover);
   color: var(--text);
 }
+.sidebar-head-actions button:disabled {
+  cursor: wait;
+  opacity: 0.5;
+}
+.sidebar-head-actions button:disabled:hover {
+  background: transparent;
+  color: var(--muted);
+}
+.sidebar-expand-progress {
+  display: grid;
+  gap: 5px;
+  padding: 0 14px 8px;
+  color: var(--faint);
+  font-size: 11.5px;
+  line-height: 1.35;
+}
+.sidebar-expand-progress-track {
+  position: relative;
+  display: block;
+  height: 3px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 14%, var(--border-soft));
+}
+.sidebar-expand-progress-track > span {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 38%;
+  border-radius: inherit;
+  background: var(--accent);
+  transform: translateX(-110%);
+  animation: sidebar-expand-progress 1.1s cubic-bezier(0.22, 1, 0.36, 1) infinite;
+}
+@keyframes sidebar-expand-progress {
+  to { transform: translateX(365%); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sidebar-expand-progress-track > span {
+    width: 100%;
+    opacity: 0.58;
+    transform: none;
+    animation: none;
+  }
+}
 
 .tree {
   flex: 1;
@@ -2704,11 +2750,26 @@ body.hm-full-width .editor-skeleton {
   position: relative;
   z-index: 1;
 }
+.source-gutter-mask {
+  position: absolute;
+  top: 0;
+  bottom: 10px;
+  left: 0;
+  z-index: 2;
+  width: calc(
+    var(--source-editor-pad-inline) +
+    var(--source-line-number-width) +
+    var(--source-fold-gutter-width) +
+    var(--source-gutter-text-gap)
+  );
+  background: var(--bg-editor);
+  pointer-events: none;
+}
 .source-line-numbers {
   position: absolute;
   top: 0;
   left: var(--source-editor-pad-inline);
-  z-index: 2;
+  z-index: 3;
   width: var(--source-line-number-width);
   box-sizing: border-box;
   margin: 0;
@@ -2724,14 +2785,14 @@ body.hm-full-width .editor-skeleton {
   opacity: 0.84;
   will-change: transform;
 }
-.source-editor:focus + .source-line-numbers {
+.source-editor:focus ~ .source-line-numbers {
   color: var(--muted);
 }
 .source-fold-gutter {
   position: absolute;
   top: 0;
   left: calc(var(--source-editor-pad-inline) + var(--source-line-number-width));
-  z-index: 3;
+  z-index: 4;
   width: var(--source-fold-gutter-width);
   margin: 0;
   padding: 0;
@@ -2842,6 +2903,16 @@ body.hm-full-width .source-editor-wrap {
 ::highlight(hm-find-current) {
   background-color: var(--accent);
   color: #fff;
+}
+.hm-source-find-current {
+  position: fixed;
+  z-index: 45;
+  pointer-events: none;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--accent) 52%, transparent);
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--accent) 82%, transparent),
+    0 0 0 1px color-mix(in srgb, var(--bg-editor) 65%, transparent);
 }
 .findbar-count {
   font-size: 12px;
@@ -3470,11 +3541,14 @@ body.dark .milkdown {
   /* Overall zoom — see .km-doc. Magnifies the rich-editor document content. */
   zoom: var(--editor-zoom, 1);
 }
-/* Japanese document (lang="ja" set on .editor-host by Editor.jsx when the
-   content contains kana): Japanese glyph forms for the writing font. */
+/* CJK document language is set on .editor-host by Editor.jsx. */
 .milkdown:lang(ja) {
   --crepe-font-title: var(--font-write-ja);
   --crepe-font-default: var(--font-write-ja);
+}
+.milkdown:lang(zh) {
+  --crepe-font-title: var(--font-write-zh);
+  --crepe-font-default: var(--font-write-zh);
 }
 .milkdown .ProseMirror {
   /* Body font size is user-adjustable (status bar). Headings/code use em, so the
@@ -4153,13 +4227,16 @@ body.dark .milkdown {
      rendered preview supports drag-select + Ctrl/Cmd+C (keep-mode rich copy). */
   user-select: text;
 }
-/* Japanese document (lang="ja" set by KeepEditor when the content contains
-   kana): Japanese glyph forms. .km-float-header is the cloned table header,
+/* CJK document language is set by KeepEditor. .km-float-header is the cloned table header,
    which lives OUTSIDE .km-doc (appended to .pane-center) — editor-tablescroll
    copies the host's lang onto it so this selector still matches. */
 .km-doc:lang(ja),
 .km-float-header:lang(ja) {
   font-family: var(--font-write-ja);
+}
+.km-doc:lang(zh),
+.km-float-header:lang(zh) {
+  font-family: var(--font-write-zh);
 }
 body.hm-full-width .km-doc {
   max-width: none;
@@ -4488,6 +4565,59 @@ body.hm-full-width .km-doc {
     0.8em * var(--editor-para-scale, 1) +
     var(--km-gap, 0) * var(--editor-line-height, 1.8) * 1em * var(--editor-para-scale, 1)
   );
+}
+
+.hm-math-preview {
+  position: fixed;
+  z-index: 1500;
+  max-width: min(420px, calc(100vw - 24px));
+  padding: 7px 10px;
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-elevated);
+  color: var(--text);
+  box-shadow: var(--shadow-float);
+  pointer-events: none;
+  animation: fadeIn 0.1s var(--ease-out);
+}
+.hm-math-preview .katex { font-size: 1.08em; }
+/* An explicit user choice wins over built-in and Typora-compatible theme font
+   declarations. The class only exists while a non-empty override is selected,
+   so custom themes retain full control by default. */
+body.hm-user-write-font .milkdown,
+body.hm-user-write-font .milkdown .ProseMirror,
+body.hm-user-write-font .km-doc,
+body.hm-user-write-font .km-float-header,
+body.hm-user-write-font #write,
+body.hm-user-write-font .markdown-body {
+  font-family: var(--font-write) !important;
+}
+body.hm-user-write-font .milkdown:lang(ja),
+body.hm-user-write-font .milkdown:lang(ja) .ProseMirror,
+body.hm-user-write-font .km-doc:lang(ja),
+body.hm-user-write-font .editor-host:lang(ja) #write,
+body.hm-user-write-font .editor-host:lang(ja) .markdown-body {
+  font-family: var(--font-write-ja) !important;
+}
+body.hm-user-write-font .milkdown:lang(zh),
+body.hm-user-write-font .milkdown:lang(zh) .ProseMirror,
+body.hm-user-write-font .km-doc:lang(zh),
+body.hm-user-write-font .editor-host:lang(zh) #write,
+body.hm-user-write-font .editor-host:lang(zh) .markdown-body {
+  font-family: var(--font-write-zh) !important;
+}
+body.hm-user-mono-font .source-editor,
+body.hm-user-mono-font .source-line-numbers,
+body.hm-user-mono-font .milkdown code,
+body.hm-user-mono-font .milkdown pre,
+body.hm-user-mono-font .milkdown .cm-editor,
+body.hm-user-mono-font .milkdown .cm-scroller,
+body.hm-user-mono-font .milkdown .cm-content,
+body.hm-user-mono-font .km-doc code,
+body.hm-user-mono-font .km-doc pre,
+body.hm-user-mono-font .km-block-edit {
+  font-family: var(--font-mono) !important;
 }
 .km-list-inline-gap {
   display: block;
@@ -5212,6 +5342,54 @@ body.hm-has-custom-theme .km-doc {
 .hm-set-text { min-width: 0; }
 .hm-set-label { font-size: 13px; color: var(--text); }
 .hm-set-desc { font-size: 11.5px; color: var(--faint); margin-top: 2px; line-height: 1.5; }
+.hm-font-pickers {
+  padding-bottom: 10px;
+  margin-bottom: 8px;
+  border-bottom: 1px solid var(--border-soft);
+}
+.hm-font-row .hm-set-text { flex: 1 1 auto; }
+.hm-font-row .hm-set-label,
+.hm-font-row .hm-set-desc { display: block; }
+.hm-font-control {
+  flex: 0 1 280px;
+  min-width: 180px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.hm-font-control select {
+  min-width: 0;
+  flex: 1 1 auto;
+  height: 32px;
+  padding: 0 28px 0 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-editor);
+  color: var(--text);
+  font-size: 12.5px;
+}
+.hm-font-control select:hover { border-color: var(--accent); }
+.hm-font-control select:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.hm-font-reset {
+  flex: 0 0 auto;
+  height: 30px;
+  padding: 0 9px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+  font-size: 11.5px;
+}
+.hm-font-reset:hover { background: var(--hover); color: var(--text); }
+.hm-font-reset:disabled { opacity: 0.4; cursor: default; }
+.hm-font-reset:disabled:hover { background: var(--bg-elevated); color: var(--muted); }
 /* Toggle switch */
 .hm-switch {
   flex: 0 0 auto;

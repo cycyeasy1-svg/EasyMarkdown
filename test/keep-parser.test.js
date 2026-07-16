@@ -27,19 +27,19 @@ describe('detectDocLang', () => {
     expect(detectDocLang('カタカナ only')).toBe('ja')
     expect(detectDocLang('ﾊﾝｶｸ')).toBe('ja')
   })
-  it('does NOT treat Han-only or Latin text as Japanese', () => {
-    expect(detectDocLang('这是中文文档,汉字与英文 mixed。')).toBe('')
+  it('detects Han-only content as Chinese and leaves Latin-only content unmarked', () => {
+    expect(detectDocLang('这是中文文档,汉字与英文 mixed。')).toBe('zh')
     expect(detectDocLang('plain English only')).toBe('')
     expect(detectDocLang('')).toBe('')
   })
   it('accepts an array of lines and short-circuits on the first kana hit', () => {
     expect(detectDocLang(['# title', '中文', '仕様です'])).toBe('ja')
-    expect(detectDocLang(['# title', '中文'])).toBe('')
+    expect(detectDocLang(['# title', '中文'])).toBe('zh')
   })
   it('ignores kana-range punctuation lookalikes (・ ー are excluded from the range)', () => {
     // U+30FB katakana middle dot / U+30FC prolonged mark appear in Chinese text
     // (names, loanwords) — they alone must not flip a doc to Japanese.
-    expect(detectDocLang('乔治・R・R・马丁')).toBe('')
+    expect(detectDocLang('乔治・R・R・马丁')).toBe('zh')
   })
 })
 

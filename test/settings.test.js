@@ -40,10 +40,15 @@ describe('loadSettings / saveSettings', () => {
       zoom: 1.25,
       lineHeight: 2.0,
       paragraphSpacing: 1.2,
+      fontWriteEn: 'Inter',
+      fontWriteZh: 'Noto Sans SC',
+      fontWriteJa: 'Noto Sans JP',
+      fontMono: 'Fira Code',
       spellcheck: true,
       autosave: true,
       defaultEditorMode: 'rich',
-      blankLineSpacing: true
+      blankLineSpacing: true,
+      showHiddenFiles: true
     }
     saveSettings(saved)
     expect(loadSettings()).toEqual(saved)
@@ -53,6 +58,14 @@ describe('loadSettings / saveSettings', () => {
     const s = loadSettings()
     expect(s.lineHeight).toBe(DEFAULT_SETTINGS.lineHeight)
     expect(s.paragraphSpacing).toBe(DEFAULT_SETTINGS.paragraphSpacing)
+  })
+  it('migrates the former single document font into all three language slots', () => {
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify({ fontWrite: 'Noto Sans CJK' }))
+    expect(loadSettings()).toMatchObject({
+      fontWriteEn: 'Noto Sans CJK',
+      fontWriteZh: 'Noto Sans CJK',
+      fontWriteJa: 'Noto Sans CJK'
+    })
   })
   it('clamps out-of-range stored values on load', () => {
     localStorage.setItem(
@@ -65,10 +78,15 @@ describe('loadSettings / saveSettings', () => {
       zoom: 2,
       lineHeight: 2.4,
       paragraphSpacing: 2,
+      fontWriteEn: '',
+      fontWriteZh: '',
+      fontWriteJa: '',
+      fontMono: '',
       spellcheck: false,
       autosave: false,
       defaultEditorMode: 'keep',
-      blankLineSpacing: false
+      blankLineSpacing: false,
+      showHiddenFiles: false
     })
   })
   it('coerces the boolean flags strictly', () => {
