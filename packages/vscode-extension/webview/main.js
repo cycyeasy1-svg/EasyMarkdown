@@ -143,6 +143,8 @@ window.addEventListener('message', (e) => {
     const p = imgPending.get(msg.reqId)
     imgPending.delete(msg.reqId)
     if (p) showToast(msg.code === 'untitled' ? t('img.untitled') : t('img.saveFailed') + ' ' + (msg.code || ''))
+  } else if (msg.type === 'insertAttachment') {
+    insertAttachmentMarkdown(msg.markdown)
   }
 })
 
@@ -215,8 +217,9 @@ function rerender() {
   blocks = r.blocks
   const html = r.html
 
-  // Kana present → lang="ja" on the container so :lang(ja) switches the writing
-  // font to the Japanese stack (--font-write-ja). Mirrors KeepEditor.jsx.
+  // Keep the document-language attribute aligned with the desktop Keep editor.
+  // Japanese gets an explicit glyph stack; Chinese continues to inherit the
+  // font family supplied by the VS Code host.
   const docLang = detectDocLang(lines)
   if (docLang) host.setAttribute('lang', docLang)
   else host.removeAttribute('lang')
@@ -2259,6 +2262,27 @@ function onImageSaved(msg) {
       el?.scrollIntoView({ behavior: 'smooth', block: 'center' })
     })
   )
+}
+
+function insertAttachmentMarkdown(markdown) {
+  const value = String(markdown || '')
+  if (!value) return
+  const blockTa = activeBlockEdit?.ta
+  const cellTa = activeCellPop?.pop?.querySelector('textarea')
+  const ta = blockTa?.isConnected ? blockTa : cellTa?.isConnected ? cellTa : null
+  if (ta) {
+    const start = ta.selectionStart ?? ta.value.length
+    ta.setRangeText(value, start, ta.selectionEnd ?? start, 'end')
+    ta.focus()
+    return
+  }
+  const at = Math.max(0, Math.min(insertAnchor(), lines.length))
+  const insert = []
+  if (at > 0 && (lines[at - 1] || '').trim() !== '') insert.push('')
+  insert.push(...value.split('\n'))
+  if (at < lines.length && (lines[at] || '').trim() !== '') insert.push('')
+  mutate(() => lines.splice(at, 0, ...insert))
+  rerender()
 }
 
 function onPaste(e) {

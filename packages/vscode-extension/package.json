@@ -35,7 +35,8 @@
     "onCustomEditor:easymarkdown.keep",
     "onCommand:easymarkdown.openWithKeep",
     "onCommand:easymarkdown.openWithText",
-    "onCommand:easymarkdown.openKeepToSide"
+    "onCommand:easymarkdown.openKeepToSide",
+    "onCommand:easymarkdown.attachFile"
   ],
   "contributes": {
     "customEditors": [
@@ -88,6 +89,12 @@
         "title": "Open Keep View to the Side",
         "category": "EasyMarkdown",
         "icon": "$(split-horizontal)"
+      },
+      {
+        "command": "easymarkdown.attachFile",
+        "title": "Attach Files…",
+        "category": "EasyMarkdown",
+        "icon": "$(attach)"
       }
     ],
     "menus": {
@@ -106,6 +113,11 @@
           "command": "easymarkdown.openWithText",
           "when": "activeCustomEditorId == easymarkdown.keep",
           "group": "navigation@9"
+        },
+        {
+          "command": "easymarkdown.attachFile",
+          "when": "resourceExtname =~ /\\.(md|markdown)$/ && !inDiffEditor",
+          "group": "navigation@11"
         }
       ],
       "editor/context": [
@@ -118,6 +130,11 @@
           "command": "easymarkdown.openKeepToSide",
           "when": "editorLangId == markdown && !inDiffEditor",
           "group": "navigation@10"
+        },
+        {
+          "command": "easymarkdown.attachFile",
+          "when": "editorLangId == markdown && !inDiffEditor",
+          "group": "navigation@11"
         }
       ],
       "editor/title/context": [
@@ -130,6 +147,11 @@
           "command": "easymarkdown.openKeepToSide",
           "when": "resourceExtname =~ /\\.(md|markdown)$/ && !inDiffEditor",
           "group": "navigation@10"
+        },
+        {
+          "command": "easymarkdown.attachFile",
+          "when": "resourceExtname =~ /\\.(md|markdown)$/ && !inDiffEditor",
+          "group": "navigation@11"
         }
       ],
       "commandPalette": [
@@ -143,6 +165,10 @@
         },
         {
           "command": "easymarkdown.openKeepToSide",
+          "when": "resourceExtname =~ /\\.(md|markdown)$/ && !inDiffEditor"
+        },
+        {
+          "command": "easymarkdown.attachFile",
           "when": "resourceExtname =~ /\\.(md|markdown)$/ && !inDiffEditor"
         }
       ]

@@ -317,6 +317,10 @@ function activate(context) {
         )
       }
     }),
+    vscode.commands.registerCommand('easymarkdown.attachFile', async (uriArg) => {
+      const uri = activeResourceUri(uriArg)
+      if (isMarkdownFileUri(uri)) await keepProvider.attachFiles(uri)
+    }),
     vscode.languages.registerCodeLensProvider({ language: 'markdown' }, keepCodeLensProvider)
   )
 }

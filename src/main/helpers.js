@@ -112,7 +112,13 @@ export function searchContentLines(content, query, options = {}, cap = 50) {
 // (Mirrors detectDocLang in src/renderer/src/keep-parser.js — keep in sync;
 // duplicated because main must not import renderer modules.)
 const KANA_RE = /[ぁ-ゖァ-ヺｦ-ﾝ]/
-export const docLangAttr = (html) => (KANA_RE.test(String(html ?? '')) ? ' lang="ja"' : '')
+const HAN_RE = /[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]/
+export const docLangAttr = (html) => {
+  const value = String(html ?? '')
+  if (KANA_RE.test(value)) return ' lang="ja"'
+  if (HAN_RE.test(value)) return ' lang="zh"'
+  return ''
+}
 
 // reg.exe argument lists that register `exePath` as a per-user (HKCU, no admin)
 // handler for the given Markdown extensions, so "set as default opener" works
@@ -149,4 +155,35 @@ export const imageNameParts = (name) => {
   const ext = dot > 0 ? safe.slice(dot) : '.png'
   const stem = (dot > 0 ? safe.slice(0, dot) : safe) || 'image'
   return { stem, ext }
+}
+
+// Ordinary attachments keep their original extension (or lack of one), unlike
+// images which default to .png. Reserved path characters are replaced so a
+// picked file can never escape the document's assets directory.
+export const attachmentNameParts = (name) => {
+  const safe = (name || 'attachment').replace(/[\\/:*?"<>|]/g, '_') || 'attachment'
+  const dot = safe.lastIndexOf('.')
+  const hasExt = dot > 0
+  return {
+    stem: (hasExt ? safe.slice(0, dot) : safe) || 'attachment',
+    ext: hasExt ? safe.slice(dot) : ''
+  }
+}
+
+export const attachmentLinkMarkdown = (name, path) => {
+  const label = String(name || 'attachment').replace(/([\\[\]])/g, '\\$1')
+  const target = String(path || '').replace(/[<>]/g, (ch) => (ch === '<' ? '%3C' : '%3E'))
+  return `[${label}](<${target}>)`
+}
+
+const ALWAYS_IGNORED_WORKSPACE_DIRS = new Set(['.git', 'node_modules', '.obsidian', 'out', 'dist'])
+
+// Shared gate for the lazy tree, recursive refresh, and workspace search.
+// Hidden entries may be shown, but expensive/private implementation trees stay
+// excluded even when the preference is enabled.
+export function shouldSkipWorkspaceEntry(name, isDirectory, showHidden = false) {
+  if (!name) return true
+  if (isDirectory && ALWAYS_IGNORED_WORKSPACE_DIRS.has(name)) return true
+  if (name === '.DS_Store') return true
+  return name.startsWith('.') && name !== '.gitignore' && !showHidden
 }

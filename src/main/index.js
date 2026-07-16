@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, dialog, Menu, MenuItem, shell, net, nativeTheme } from 'electron'
+import { app, BrowserWindow, ipcMain, dialog, Menu, MenuItem, shell, net, nativeTheme, session } from 'electron'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { dirname, join, basename, extname, resolve, sep } from 'node:path'
 import fs from 'node:fs/promises'
@@ -10,11 +10,20 @@ import {
   MD_RE,
   isRestrictedRoot,
   imageNameParts,
+  attachmentNameParts,
   getAllowedExternalUrl,
   searchContentLines,
+  shouldSkipWorkspaceEntry,
   docLangAttr,
   winDefaultOpenerRegOps
 } from './helpers.js'
+import { canGrantLocalFonts, createLocalFontGrant } from './security.js'
+import {
+  DEFAULT_FONT_WRITE_EN,
+  DEFAULT_FONT_WRITE_ZH,
+  DEFAULT_FONT_WRITE_JA,
+  exportTypographyCss
+} from '../shared/fonts.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -53,19 +62,18 @@ const PDF_CSS = `
   * { box-sizing: border-box; }
   html, body { margin: 0; padding: 0; background: #fff; }
   .doc {
-    font-family: 'Helvetica Neue', Helvetica, Arial, 'PingFang SC', 'Hiragino Sans GB',
-      'Source Han Sans SC', 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
+    font-family: ${DEFAULT_FONT_WRITE_EN};
     font-size: 14.5px; line-height: 1.75; color: #2a2620;
     -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility;
     word-wrap: break-word;
   }
-  /* Japanese document (docLangAttr put lang="ja" on .doc): Japanese glyph forms.
-     Quality order — Noto Sans JP → BIZ UDPGothic → Hiragino → Yu Gothic Medium
-     → Meiryo. Mirrors --font-write-ja in app.css — keep the two stacks in sync. */
+  /* docLangAttr selects the CJK fallback stack while Latin glyphs continue to
+     come from the English stack. Keep these defaults aligned with app.css. */
+  .doc:lang(zh) {
+    font-family: ${DEFAULT_FONT_WRITE_ZH};
+  }
   .doc:lang(ja) {
-    font-family: 'Helvetica Neue', Helvetica, Arial, 'Noto Sans JP', 'BIZ UDPGothic',
-      'Hiragino Kaku Gothic ProN', 'Hiragino Sans', 'Yu Gothic Medium', 'Yu Gothic',
-      Meiryo, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+    font-family: ${DEFAULT_FONT_WRITE_JA};
   }
   .doc > :first-child { margin-top: 0 !important; }
   .doc h1, .doc h2, .doc h3, .doc h4, .doc h5, .doc h6 {
@@ -123,6 +131,7 @@ const PDF_CSS = `
 `
 
 let mainWindow = null
+let localFontGrant = null
 // When true, the window is allowed to close without re-prompting (the renderer
 // has confirmed there are no unsaved changes, or the user chose to discard).
 let allowClose = false
@@ -384,6 +393,23 @@ app.on('open-file', (event, path) => {
 app.whenReady().then(() => {
   ensureThemesDir()
   buildMenu()
+  const allowLocalFonts = (webContents, permission, requestingUrl, isMainFrame) =>
+    canGrantLocalFonts({
+      permission,
+      webContentsId: webContents?.id,
+      trustedWebContentsId: mainWindow?.webContents.id,
+      requestingUrl,
+      currentUrl: webContents?.getURL() || '',
+      devRendererUrl: process.env.ELECTRON_RENDERER_URL,
+      isMainFrame,
+      grant: localFontGrant
+    })
+  session.defaultSession.setPermissionRequestHandler((webContents, permission, callback, details) => {
+    callback(allowLocalFonts(webContents, permission, details?.requestingUrl || '', details?.isMainFrame))
+  })
+  session.defaultSession.setPermissionCheckHandler((webContents, permission, requestingOrigin, details) =>
+    allowLocalFonts(webContents, permission, details?.requestingUrl || requestingOrigin, details?.isMainFrame)
+  )
   createWindow()
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
@@ -413,6 +439,14 @@ ipcMain.handle('dialog:openFiles', async () => {
   return res.canceled ? [] : res.filePaths
 })
 
+ipcMain.handle('dialog:openAttachments', async () => {
+  const res = await dialog.showOpenDialog(mainWindow, {
+    properties: ['openFile', 'multiSelections'],
+    title: 'Attach Files'
+  })
+  return res.canceled ? [] : res.filePaths
+})
+
 ipcMain.handle('dialog:openFolder', async () => {
   const res = await dialog.showOpenDialog(mainWindow, { properties: ['openDirectory'] })
   return res.canceled ? null : res.filePaths[0]
@@ -428,14 +462,14 @@ ipcMain.handle('dialog:saveAs', async (_e, defaultName) => {
 
 // Export the current document (inline-styled HTML from the renderer) to a PDF
 // by rendering it in a hidden window and using Chromium's printToPDF.
-ipcMain.handle('export:pdf', async (_e, { html, defaultName }) => {
+ipcMain.handle('export:pdf', async (_e, { html, defaultName, typography }) => {
   const res = await dialog.showSaveDialog(mainWindow, {
     defaultPath: defaultName || 'Untitled.pdf',
     filters: [{ name: 'PDF', extensions: ['pdf'] }]
   })
   if (res.canceled || !res.filePath) return { canceled: true }
 
-  const doc = `<!doctype html><html><head><meta charset="utf-8"><style>${PDF_CSS}</style></head><body><div class="doc"${docLangAttr(html)}>${html}</div></body></html>`
+  const doc = `<!doctype html><html><head><meta charset="utf-8"><style>${PDF_CSS}${exportTypographyCss(typography)}</style></head><body><div class="doc"${docLangAttr(html)}>${html}</div></body></html>`
 
   const tmp = join(app.getPath('temp'), `easymarkdown-export-${Date.now()}.html`)
   await fs.writeFile(tmp, doc, 'utf8')
@@ -493,7 +527,7 @@ async function inlineFileImages(html) {
 const escapeHtml = (s) =>
   String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c])
 
-ipcMain.handle('export:html', async (_e, { html, defaultName, title }) => {
+ipcMain.handle('export:html', async (_e, { html, defaultName, title, typography }) => {
   const res = await dialog.showSaveDialog(mainWindow, {
     defaultPath: defaultName || 'Untitled.html',
     filters: [{ name: 'HTML', extensions: ['html'] }]
@@ -504,7 +538,7 @@ ipcMain.handle('export:html', async (_e, { html, defaultName, title }) => {
     `<!doctype html><html><head><meta charset="utf-8">` +
     `<meta name="viewport" content="width=device-width, initial-scale=1">` +
     `<title>${escapeHtml(title)}</title>` +
-    `<style>${PDF_CSS}${HTML_EXPORT_CSS}</style></head>` +
+    `<style>${PDF_CSS}${exportTypographyCss(typography)}${HTML_EXPORT_CSS}</style></head>` +
     `<body><div class="doc"${docLangAttr(body)}>${body}</div></body></html>`
   await fs.writeFile(res.filePath, doc, 'utf8')
   shell.openPath(res.filePath)
@@ -541,10 +575,9 @@ async function runWorkspaceSearch(id, roots, query, options) {
     }
     for (const e of entries) {
       if (stale() || truncated) return
-      if (e.name.startsWith('.')) continue
+      if (shouldSkipWorkspaceEntry(e.name, e.isDirectory(), options?.showHidden)) continue
       const p = join(dir, e.name)
       if (e.isDirectory()) {
-        if (IGNORED_DIRS.has(e.name)) continue
         await walk(p, depth + 1)
       } else if (e.isFile() && MD_RE.test(e.name)) {
         try {
@@ -600,8 +633,8 @@ ipcMain.handle('search:cancel', () => {
 // Print the current document via the system print dialog. Same hidden-window
 // rendering pipeline as export:pdf, but ends in webContents.print() so the
 // user picks a printer / paper / copies natively.
-ipcMain.handle('print:html', async (_e, { html }) => {
-  const doc = `<!doctype html><html><head><meta charset="utf-8"><style>${PDF_CSS}</style></head><body><div class="doc"${docLangAttr(html)}>${html}</div></body></html>`
+ipcMain.handle('print:html', async (_e, { html, typography }) => {
+  const doc = `<!doctype html><html><head><meta charset="utf-8"><style>${PDF_CSS}${exportTypographyCss(typography)}</style></head><body><div class="doc"${docLangAttr(html)}>${html}</div></body></html>`
   const tmp = join(app.getPath('temp'), `easymarkdown-print-${Date.now()}.html`)
   await fs.writeFile(tmp, doc, 'utf8')
   const win = new BrowserWindow({ show: false, webPreferences: { webSecurity: false } })
@@ -659,7 +692,7 @@ ipcMain.handle('fs:createDir', async (_e, path) => {
 
 const IGNORED_DIRS = new Set(['.git', 'node_modules', '.DS_Store', '.obsidian', 'out', 'dist'])
 
-async function readTree(dir, depth = 0) {
+async function readTree(dir, { showHidden = false } = {}) {
   let entries
   try {
     entries = await fs.readdir(dir, { withFileTypes: true })
@@ -668,8 +701,7 @@ async function readTree(dir, depth = 0) {
   }
   const nodes = []
   for (const e of entries) {
-    if (e.name.startsWith('.') && e.name !== '.gitignore') continue
-    if (e.isDirectory() && IGNORED_DIRS.has(e.name)) continue
+    if (shouldSkipWorkspaceEntry(e.name, e.isDirectory(), showHidden)) continue
     const full = join(dir, e.name)
     if (e.isDirectory()) {
       nodes.push({ name: e.name, path: full, type: 'dir', children: null })
@@ -684,19 +716,23 @@ async function readTree(dir, depth = 0) {
   return nodes
 }
 
-ipcMain.handle('fs:readDir', async (_e, dir) => readTree(dir))
+ipcMain.handle('fs:readDir', async (_e, dir, options) => readTree(dir, options))
 
-async function readTreeRecursive(dir, depth = 0, acc = {}) {
-  if (depth > 12) return acc
-  const nodes = await readTree(dir)
+async function readTreeRecursive(dir, options = {}, depth = 0, acc = {}) {
+  const requestedDepth = Number(options?.maxDepth)
+  const maxDepth = Number.isFinite(requestedDepth)
+    ? Math.min(30, Math.max(0, requestedDepth))
+    : 12
+  if (depth > maxDepth) return acc
+  const nodes = await readTree(dir, options)
   acc[dir] = nodes
   for (const node of nodes) {
-    if (node.type === 'dir') await readTreeRecursive(node.path, depth + 1, acc)
+    if (node.type === 'dir') await readTreeRecursive(node.path, options, depth + 1, acc)
   }
   return acc
 }
 
-ipcMain.handle('fs:readDirRecursive', async (_e, dir) => readTreeRecursive(dir))
+ipcMain.handle('fs:readDirRecursive', async (_e, dir, options) => readTreeRecursive(dir, options))
 
 async function listFilesFlat(root, dir, acc, depth) {
   if (depth > 12 || acc.length > 5000) return
@@ -838,6 +874,12 @@ ipcMain.handle('shell:openExternal', async (event, url) => {
   }
   return openExternalUrl(url)
 })
+
+ipcMain.handle('permissions:allowLocalFonts', (event) => {
+  if (!mainWindow || event.sender.id !== mainWindow.webContents.id) return false
+  localFontGrant = createLocalFontGrant(event.sender.id)
+  return true
+})
 ipcMain.handle('shell:showInFolder', async (_e, path) => shell.showItemInFolder(path))
 
 // ----------------------------- custom themes -------------------------------
@@ -919,6 +961,34 @@ const uniqueImageFile = (dir, name) => {
   while (existsSync(file)) file = join(dir, `${stem}-${n++}${ext}`)
   return file
 }
+
+const uniqueAttachmentFile = (dir, name) => {
+  const { stem, ext } = attachmentNameParts(name)
+  let file = join(dir, `${stem}${ext}`)
+  let n = 1
+  while (existsSync(file)) file = join(dir, `${stem}-${n++}${ext}`)
+  return file
+}
+
+ipcMain.handle('attachment:save', async (_e, docPath, sourcePath) => {
+  try {
+    if (!docPath) return { ok: false, error: 'Save the document before attaching files.' }
+    if (!sourcePath) return { ok: false, error: 'No attachment selected.' }
+    const stat = await fs.stat(sourcePath)
+    if (!stat.isFile()) return { ok: false, error: 'Only files can be attached.' }
+    const assetsDir = join(dirname(docPath), 'assets')
+    await fs.mkdir(assetsDir, { recursive: true })
+    const [sourceReal, assetsReal] = await Promise.all([fs.realpath(sourcePath), fs.realpath(assetsDir)])
+    if (dirname(sourceReal) === assetsReal) {
+      return { ok: true, path: 'assets/' + basename(sourceReal), name: basename(sourceReal) }
+    }
+    const file = uniqueAttachmentFile(assetsDir, basename(sourcePath))
+    await fs.copyFile(sourcePath, file, fsConstants.COPYFILE_EXCL)
+    return { ok: true, path: 'assets/' + basename(file), name: basename(sourcePath) }
+  } catch (error) {
+    return { ok: false, error: error?.message || String(error) }
+  }
+})
 
 // The app-global folder where images pasted into an UNSAVED doc are parked (we
 // don't know a document folder yet). Mirrors Typora's global image folder; on
@@ -1118,6 +1188,7 @@ const MENU_STRINGS = {
     openFolder: 'Open Folder…',
     save: 'Save',
     saveAs: 'Save As…',
+    attach: 'Attach Files…',
     exportPdf: 'Export as PDF…',
     exportHtml: 'Export as HTML…',
     print: 'Print…',
@@ -1145,6 +1216,7 @@ const MENU_STRINGS = {
     openFolder: '打开文件夹…',
     save: '保存',
     saveAs: '另存为…',
+    attach: '添加附件…',
     exportPdf: '导出为 PDF…',
     exportHtml: '导出为 HTML…',
     print: '打印…',
@@ -1183,6 +1255,7 @@ const MENU_STRINGS = {
     openFolder: 'フォルダーを開く…',
     save: '保存',
     saveAs: '名前を付けて保存…',
+    attach: '添付ファイルを追加…',
     exportPdf: 'PDF として書き出す…',
     exportHtml: 'HTML として書き出す…',
     print: '印刷…',
@@ -1238,6 +1311,7 @@ function buildMenu() {
         { type: 'separator' },
         { label: L.save, accelerator: 'CmdOrCtrl+S', click: menuCmd('save') },
         { label: L.saveAs, accelerator: 'CmdOrCtrl+Shift+S', click: menuCmd('saveAs') },
+        { label: L.attach, click: menuCmd('attach') },
         { label: L.exportPdf, accelerator: 'CmdOrCtrl+Shift+E', click: menuCmd('exportPdf') },
         { label: L.exportHtml, accelerator: 'CmdOrCtrl+Shift+H', click: menuCmd('exportHtml') },
         // Ctrl/Cmd+P is the command palette, so print gets the Alt variant.

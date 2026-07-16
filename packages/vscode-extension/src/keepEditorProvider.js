@@ -1,7 +1,12 @@
 const vscode = require('vscode')
 // Pure filename sanitizer shared with the desktop app's image:save IPC — same
 // naming convention for pasted images on both sides.
-const { imageNameParts, getAllowedExternalUrl } = require('../../../src/main/helpers.js')
+const {
+  imageNameParts,
+  attachmentNameParts,
+  attachmentLinkMarkdown,
+  getAllowedExternalUrl
+} = require('../../../src/main/helpers.js')
 
 const VIEW_TYPE = 'easymarkdown.keep'
 const LAYOUT_KEY = 'easymarkdown.keep.layout'
@@ -304,6 +309,67 @@ class KeepEditorProvider {
       webview.postMessage({ type: 'imageSaved', reqId: msg.reqId, relPath: 'assets/' + fileName })
     } catch (e) {
       fail((e && e.message) || String(e))
+    }
+  }
+
+  async attachFiles(uri) {
+    const zh = (vscode.env.language || '').toLowerCase().startsWith('zh')
+    const ja = (vscode.env.language || '').toLowerCase().startsWith('ja')
+    const fail = (detail) => vscode.window.showErrorMessage(
+      zh ? `EasyMarkdown：添加附件失败：${detail}` :
+        ja ? `EasyMarkdown：添付ファイルを追加できませんでした：${detail}` :
+          `EasyMarkdown: could not add attachment: ${detail}`
+    )
+    try {
+      if (!(uri instanceof vscode.Uri) || uri.scheme !== 'file') return fail('Save the document first.')
+      const picked = await vscode.window.showOpenDialog({
+        canSelectFiles: true,
+        canSelectFolders: false,
+        canSelectMany: true,
+        title: zh ? '添加附件' : ja ? '添付ファイルを追加' : 'Attach Files'
+      })
+      if (!picked?.length) return
+      const assetsDir = vscode.Uri.joinPath(uri, '..', 'assets')
+      await vscode.workspace.fs.createDirectory(assetsDir)
+      const links = []
+      for (const source of picked) {
+        const originalName = source.path.split('/').pop()
+        const { stem, ext } = attachmentNameParts(originalName)
+        const sourceDir = vscode.Uri.joinPath(source, '..').toString()
+        let fileName = sourceDir === assetsDir.toString() ? originalName : stem + ext
+        if (sourceDir !== assetsDir.toString()) {
+          for (let n = 1; ; n++) {
+            try {
+              await vscode.workspace.fs.stat(vscode.Uri.joinPath(assetsDir, fileName))
+              fileName = `${stem}-${n}${ext}`
+            } catch {
+              break
+            }
+          }
+          await vscode.workspace.fs.copy(source, vscode.Uri.joinPath(assetsDir, fileName), { overwrite: false })
+        }
+        links.push(attachmentLinkMarkdown(originalName, 'assets/' + fileName))
+      }
+      const markdown = links.join('\n')
+      const activeInput = vscode.window.tabGroups.activeTabGroup?.activeTab?.input
+      const activeCustom = activeInput instanceof vscode.TabInputCustom && activeInput.uri?.toString() === uri.toString()
+      const panel = this.panels.get(uri.toString())
+      if (activeCustom && panel) {
+        await panel.webview.postMessage({ type: 'insertAttachment', markdown })
+      } else {
+        const editor = vscode.window.visibleTextEditors.find((item) => item.document.uri.toString() === uri.toString())
+        if (!editor) return fail('No active editor.')
+        const eol = editor.document.eol === vscode.EndOfLine.CRLF ? '\r\n' : '\n'
+        const sourceMarkdown = markdown.replace(/\n/g, eol)
+        await editor.edit((edit) => edit.replace(editor.selection, sourceMarkdown), { undoStopBefore: true, undoStopAfter: true })
+      }
+      vscode.window.showInformationMessage(
+        zh ? `EasyMarkdown：已添加 ${links.length} 个附件。` :
+          ja ? `EasyMarkdown：${links.length} 件の添付ファイルを追加しました。` :
+            `EasyMarkdown: added ${links.length} attachment(s).`
+      )
+    } catch (error) {
+      fail(error?.message || String(error))
     }
   }
 

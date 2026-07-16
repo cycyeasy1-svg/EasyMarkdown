@@ -33,12 +33,14 @@ const on = (channel) => (cb) => {
 const api = {
   // dialogs
   openFiles: () => ipcRenderer.invoke('dialog:openFiles'),
+  openAttachments: () => ipcRenderer.invoke('dialog:openAttachments'),
   openFolder: () => ipcRenderer.invoke('dialog:openFolder'),
   saveAs: (defaultName) => ipcRenderer.invoke('dialog:saveAs', defaultName),
-  exportPDF: (html, defaultName) => ipcRenderer.invoke('export:pdf', { html, defaultName }),
-  exportHTML: (html, defaultName, title) =>
-    ipcRenderer.invoke('export:html', { html, defaultName, title }),
-  printHTML: (html) => ipcRenderer.invoke('print:html', { html }),
+  exportPDF: (html, defaultName, typography) =>
+    ipcRenderer.invoke('export:pdf', { html, defaultName, typography }),
+  exportHTML: (html, defaultName, title, typography) =>
+    ipcRenderer.invoke('export:html', { html, defaultName, title, typography }),
+  printHTML: (html, typography) => ipcRenderer.invoke('print:html', { html, typography }),
 
   // fs
   readFile: (path) => ipcRenderer.invoke('fs:readFile', path),
@@ -48,8 +50,8 @@ const api = {
   createFile: (path, content) => ipcRenderer.invoke('fs:createFile', path, content),
   createDir: (path) => ipcRenderer.invoke('fs:createDir', path),
   duplicate: (path) => ipcRenderer.invoke('fs:duplicate', path),
-  readDir: (dir) => ipcRenderer.invoke('fs:readDir', dir),
-  readDirRecursive: (dir) => ipcRenderer.invoke('fs:readDirRecursive', dir),
+  readDir: (dir, options) => ipcRenderer.invoke('fs:readDir', dir, options),
+  readDirRecursive: (dir, options) => ipcRenderer.invoke('fs:readDirRecursive', dir, options),
   listFiles: (root) => ipcRenderer.invoke('fs:listFiles', root),
   openFolderTree: (dir) => ipcRenderer.invoke('fs:openFolderTree', dir),
 
@@ -84,6 +86,8 @@ const api = {
   // { ok, path } with a relative path to insert into Markdown.
   saveImage: (docPath, name, bytes) =>
     ipcRenderer.invoke('image:save', docPath, name, bytes),
+  saveAttachment: (docPath, sourcePath) =>
+    ipcRenderer.invoke('attachment:save', docPath, sourcePath),
   // save an image pasted into an UNSAVED doc to the global paste folder; returns
   // { ok, url } (a file:// URL) so it shows as a real path, not a base64 blob.
   savePaste: (name, bytes) => ipcRenderer.invoke('image:savePaste', name, bytes),
@@ -111,6 +115,10 @@ const api = {
 
   // toggle the built-in spellchecker (settings preference)
   setSpellcheck: (enabled) => ipcRenderer.invoke('spell:set', enabled),
+
+  // Short-lived permission handshake used only immediately before the Settings
+  // font picker calls Chromium's Local Font Access API.
+  allowLocalFonts: () => ipcRenderer.invoke('permissions:allowLocalFonts'),
 
   // "set as default Markdown app": Windows registers + opens the system picker
   // and resolves { ok }; macOS resolves { manual: true } (no supported API) and
@@ -155,7 +163,8 @@ const api = {
     externalShell: true,
     revealInFolder: true,
     splitView: true,
-    defaultOpener: true
+    defaultOpener: true,
+    fileAttachments: true
   }
 }
 
