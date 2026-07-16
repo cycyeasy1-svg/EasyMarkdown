@@ -44,6 +44,7 @@ export default [
     ignores: [
       '**/out/**',
       '**/dist/**',
+      'dist-mobile/**',
       '**/node_modules/**',
       'android/**',
       'ios/**',
