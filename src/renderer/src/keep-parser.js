@@ -716,10 +716,41 @@ function renderList(b, viewLines, baseDir, opts = {}) {
   return html
 }
 
-function renderTable(b, tableIdx, filterState, forExport, baseDir) {
+export function renderTableRows(b, from = 0, to = b.dataRows.length, baseDir) {
+  let html = ''
+  const start = Math.max(0, Number(from) || 0)
+  const end = Math.min(b.dataRows.length, Math.max(start, Number(to) || 0))
+  for (let ri = start; ri < end; ri++) {
+    const r = b.dataRows[ri]
+    html += '<tr data-ri="' + ri + '">'
+    for (let ci = 0; ci < b.headers.length; ci++) {
+      const raw = ci < r.cells.length ? r.cells[ci] : ''
+      html +=
+        '<td data-line="' +
+        r.lineIdx +
+        '" data-ci="' +
+        ci +
+        '" data-raw="' +
+        escapeAttr(raw) +
+        '">' +
+        inline(raw, baseDir) +
+        '</td>'
+    }
+    html += '</tr>'
+  }
+  return html
+}
+
+function renderTable(b, tableIdx, filterState, forExport, baseDir, tableInitialRows) {
   const headers = b.headers
   const colWidths = estimateTableColumnWidths(headers, b.dataRows)
   const tableWidth = Math.ceil(colWidths.reduce((sum, width) => sum + width, 0))
+  const totalRows = b.dataRows.length
+  const requestedRows = Number(tableInitialRows)
+  const initialRows =
+    forExport || !Number.isFinite(requestedRows)
+      ? totalRows
+      : Math.min(totalRows, Math.max(1, Math.floor(requestedRows)))
   let html =
     '<div class="km-table-wrap"><table class="km-table" data-ti="' +
     tableIdx +
@@ -755,24 +786,18 @@ function renderTable(b, tableIdx, filterState, forExport, baseDir) {
       filterBtn +
       '</div></th>'
   })
-  html += '</tr></thead><tbody>'
-  b.dataRows.forEach((r, ri) => {
-    html += '<tr data-ri="' + ri + '">'
-    for (let ci = 0; ci < headers.length; ci++) {
-      const raw = ci < r.cells.length ? r.cells[ci] : ''
-      html +=
-        '<td data-line="' +
-        r.lineIdx +
-        '" data-ci="' +
-        ci +
-        '" data-raw="' +
-        escapeAttr(raw) +
-        '">' +
-        inline(raw, baseDir) +
-        '</td>'
-    }
-    html += '</tr>'
-  })
+  const progressAttrs = forExport
+    ? ''
+    : ' data-km-initial-rows="' +
+      initialRows +
+      '" data-km-rendered-rows="' +
+      initialRows +
+      '" data-km-total-rows="' +
+      totalRows +
+      '"' +
+      (initialRows >= totalRows ? ' data-km-render-complete="true"' : '')
+  html += '</tr></thead><tbody' + progressAttrs + '>'
+  html += renderTableRows(b, 0, initialRows, baseDir)
   html += '</tbody></table></div>'
   return html
 }
@@ -784,6 +809,7 @@ function renderTable(b, tableIdx, filterState, forExport, baseDir) {
 // whole document. Tables are never block-edited, so `tableIdx` only matters when
 // renderDoc drives the full loop; scoped single-block restores are non-table.
 //   opts.srcEditLabel · opts.forExport · opts.filterState · opts.tableIdx
+//   opts.tableInitialRows — interactive large-table first-paint cap; export ignores it
 //   opts.interactiveTasks — render GFM task checkboxes enabled (the caller wires
 //   the click → single-line toggle); default disabled (display-only).
 export function renderBlockInner(b, bi, viewLines, opts = {}) {
@@ -840,7 +866,7 @@ export function renderBlockInner(b, bi, viewLines, opts = {}) {
       blankLineSpacing: !!opts.blankLineSpacing
     })
   } else if (b.type === 'table') {
-    inner = renderTable(b, tableIdx, filterState, forExport, baseDir)
+    inner = renderTable(b, tableIdx, filterState, forExport, baseDir, opts.tableInitialRows)
   } else if (b.type === 'frontmatter') {
     // Metadata card, mirroring the rich editor's frontmatter node view
     // (editor-frontmatter.js buildCard): flat `key: value` lines → a definition

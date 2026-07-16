@@ -4,6 +4,7 @@ import {
   renderDoc,
   renderBlockInner,
   renderBlockRange,
+  renderTableRows,
   parseDoc,
   toViewLines,
   inline,
@@ -150,9 +151,13 @@ function KeepEditor({
     // chunk synchronously (the top is instantly visible + scrollable), the rest
     // appended across idle frames so the user can read/scroll while it streams in.
     const CHUNK_BLOCKS = 150 // blocks per batch; ≤ this many → one synchronous paint
+    const TABLE_INITIAL_ROWS = 80 // enough for an immediately useful first viewport
+    const TABLE_ROW_CHUNK = 80 // cap each idle append so one table cannot own a frame
     let chunkToken = 0 // bumped on every rerender/destroy → in-flight chunk steps bail
     let chunkIdle = 0 // pending idle-callback id for the next chunk
     let pendingFrom = 0 // next not-yet-painted block index (Infinity ⇒ fully painted)
+    let pendingTableRows = [] // large tables whose remaining <tr>s are still streaming
+    let finalizedToken = -1 // table affordances are installed once per render token
     const idle = (fn) =>
       typeof requestIdleCallback === 'function'
         ? requestIdleCallback(fn, { timeout: 200 })
@@ -172,7 +177,8 @@ function KeepEditor({
       collapseLabel: tRef.current('keep.toggleSection'),
       filterState: filterStateRef.current,
       baseDir: dirOf(docPathRef.current),
-      blankLineSpacing: blankLineSpacingRef.current
+      blankLineSpacing: blankLineSpacingRef.current,
+      tableInitialRows: TABLE_INITIAL_ROWS
     })
     // Running table index at the start of each block (tables key filter state by
     // index, so a chunk must continue the count). Rebuilt per render.
@@ -184,6 +190,37 @@ function KeepEditor({
         if (b.type === 'table') ti++
         return cur
       })
+    }
+    const registerPendingTables = (from, to) => {
+      for (let bi = from; bi < to; bi++) {
+        const block = blocksRef.current[bi]
+        if (block?.type !== 'table' || block.dataRows.length <= TABLE_INITIAL_ROWS) continue
+        const tableIdx = tableIdxAt[bi]
+        const tbody = host.querySelector('table[data-ti="' + tableIdx + '"] > tbody')
+        const next = Number(tbody?.dataset.kmRenderedRows)
+        if (!tbody || !Number.isFinite(next) || next >= block.dataRows.length) continue
+        pendingTableRows.push({ block, tableIdx, tbody, next })
+      }
+    }
+    const hasPendingWork = () => pendingFrom !== Infinity || pendingTableRows.length > 0
+    const appendTableRowChunk = (all = false) => {
+      const job = pendingTableRows[0]
+      if (!job) return
+      const from = job.next
+      const to = all
+        ? job.block.dataRows.length
+        : Math.min(from + TABLE_ROW_CHUNK, job.block.dataRows.length)
+      job.tbody.insertAdjacentHTML(
+        'beforeend',
+        renderTableRows(job.block, from, to, dirOf(docPathRef.current))
+      )
+      job.next = to
+      job.tbody.dataset.kmRenderedRows = String(to)
+      applyFilterRows(job.tableIdx, Array.from(job.tbody.children).slice(from, to))
+      if (to >= job.block.dataRows.length) {
+        job.tbody.dataset.kmRenderComplete = 'true'
+        pendingTableRows.shift()
+      }
     }
 
     // Full re-render from rawLines (re-parse → chunked paint). Layout-measuring +
@@ -208,6 +245,7 @@ function KeepEditor({
 
       cancelAfterPaint()
       cancelChunks()
+      pendingTableRows = []
       const myToken = ++chunkToken
       const total = blocks.length
 
@@ -215,47 +253,57 @@ function KeepEditor({
         host.innerHTML = '<div class="km-empty"></div>'
         pushOutline()
         pendingFrom = Infinity
+        finalizedToken = myToken
+        tableScrollRef.current?.destroy()
+        tableScrollRef.current = null
+        onFilterChangeRef.current?.(null)
         return
       }
 
       const opts = renderOpts()
       const first = Math.min(CHUNK_BLOCKS, total)
       host.innerHTML = renderBlockRange(blocks, viewLines, 0, first, 0, opts).html
+      registerPendingTables(0, first)
       pushOutline() // outline comes from the full block map — nav works before full paint
-      pendingFrom = first
-      cancelAfterPaint()
-      afterPaintRaf = requestAnimationFrame(() => finishRenderRange(0, first, first >= total))
-
-      if (first >= total) {
-        pendingFrom = Infinity
-        return
-      }
-      // Stream the remaining chunks in idle time. Each step re-checks the token so a
-      // newer rerender (or destroy) abandons a stale stream instead of appending to
-      // a DOM that's already been replaced.
+      pendingFrom = first >= total ? Infinity : first
+      // Stream remaining document blocks first, then the deferred rows of every
+      // large table. Keeping one scheduler preserves source order and guarantees
+      // that a giant single-table block never monopolizes the initial paint.
       const step = () => {
         chunkIdle = 0
         if (destroyed || myToken !== chunkToken) return
-        const from = pendingFrom
-        const to = Math.min(from + CHUNK_BLOCKS, total)
-        host.insertAdjacentHTML(
-          'beforeend',
-          renderBlockRange(blocks, viewLines, from, to, tableIdxAt[from], opts).html
-        )
-        pendingFrom = to
-        const last = to >= total
-        finishRenderRange(from, to, last)
-        if (last) pendingFrom = Infinity
-        else chunkIdle = idle(step)
+        if (pendingFrom !== Infinity) {
+          const from = pendingFrom
+          const to = Math.min(from + CHUNK_BLOCKS, total)
+          host.insertAdjacentHTML(
+            'beforeend',
+            renderBlockRange(blocks, viewLines, from, to, tableIdxAt[from], opts).html
+          )
+          pendingFrom = to >= total ? Infinity : to
+          registerPendingTables(from, to)
+          finishRenderRange(from, to)
+        } else {
+          appendTableRowChunk()
+        }
+        if (hasPendingWork()) chunkIdle = idle(step)
+        else finishDocumentRender()
       }
-      chunkIdle = idle(step)
+      // Let Chromium present the initial blocks/rows before any idle append starts.
+      cancelAfterPaint()
+      afterPaintRaf = requestAnimationFrame(() => {
+        afterPaintRaf = 0
+        if (destroyed || myToken !== chunkToken) return
+        finishRenderRange(0, first)
+        if (hasPendingWork()) chunkIdle = idle(step)
+        else finishDocumentRender()
+      })
     }
 
     // Synchronously paint every remaining chunk NOW. Called before any operation
     // that needs the WHOLE document in the DOM (outline jump / find / export),
     // which can't wait for the idle stream to finish.
     const flushRemaining = () => {
-      if (destroyed || pendingFrom === Infinity) return
+      if (destroyed || !hasPendingWork()) return
       if (chunkIdle) {
         cancelIdle(chunkIdle)
         chunkIdle = 0
@@ -271,18 +319,21 @@ function KeepEditor({
           'beforeend',
           renderBlockRange(blocks, viewLines, from, to, tableIdxAt[from], opts).html
         )
-        pendingFrom = to
-        finishRenderRange(from, to, to >= total)
+        pendingFrom = to >= total ? Infinity : to
+        registerPendingTables(from, to)
+        finishRenderRange(from, to)
       }
       pendingFrom = Infinity
+      while (pendingTableRows.length) appendTableRowChunk(true)
+      finishDocumentRender()
     }
 
     // Post-paint batch for the blocks in `[from, to)`: layout-dependent + lazy work
     // that needn't block the chunk's paint. Per-chunk work (multiline flags, embed
     // observers, and any active collapse/filter so streamed-in blocks inherit them)
-    // runs every chunk; whole-document affordances (filter row counts, the wide-
-    // table floating header that needs every table present) run only on the last.
-    const finishRenderRange = (from, to, isLast) => {
+    // runs every block chunk; row chunks apply filters only to their newly added
+    // rows. Whole-document affordances are installed by finishDocumentRender().
+    const finishRenderRange = (from, to) => {
       if (destroyed) return
       applyMultilineFlagsRange(from, to)
       observeEmbedsRange(from, to)
@@ -291,7 +342,10 @@ function KeepEditor({
       if (collapsedRef.current.size) applyCollapsed()
       const fkeys = Object.keys(filterStateRef.current)
       if (fkeys.length) fkeys.forEach((ti) => applyFilter(parseInt(ti)))
-      if (!isLast) return
+    }
+    const finishDocumentRender = () => {
+      if (destroyed || finalizedToken === chunkToken) return
+      finalizedToken = chunkToken
       reportFilter()
       // Wide-table affordances: the top synced horizontal scrollbar + the
       // viewport-fixed floating header live outside the normal block flow (the
@@ -328,20 +382,28 @@ function KeepEditor({
     // read it ONCE per chunk (not getComputedStyle per block — that per-block style
     // recalc was a chunk of the startup stall on docs with many short blocks).
     const applyMultilineFlagsRange = (from, to) => {
-      const baseFs = parseFloat(getComputedStyle(host).fontSize) || 16
-      const pending = []
+      const candidates = []
       for (let bi = from; bi < to; bi++) {
         const b = blocksRef.current[bi]
         if (!b || b.type === 'table') continue
         const bl = blockElByBi(bi)
         if (!bl) continue
+        candidates.push([bl, b])
+      }
+      // A giant single-table document has no non-table blocks to measure. Avoid
+      // even the one computed-style read here: after the table DOM was inserted,
+      // that read forces Chromium to synchronously style/layout every cell.
+      if (!candidates.length) return
+      const baseFs = parseFloat(getComputedStyle(host).fontSize) || 16
+      const pending = []
+      candidates.forEach(([bl, b]) => {
         let multi = b.end > b.start
         if (!multi) {
           const content = Array.from(bl.children).find((c) => !c.classList.contains('km-src-edit'))
           if (content) multi = content.offsetHeight > baseFs * 2.2
         }
         pending.push([bl, multi])
-      }
+      })
       pending.forEach(([bl, multi]) => bl.classList.toggle('km-multiline', multi))
     }
     // Single-block variant for scoped restores (one getComputedStyle is fine).
@@ -1084,6 +1146,7 @@ function KeepEditor({
       return t
     }
     const copyTable = (table) => {
+      flushRemaining()
       const rows = [...table.querySelectorAll('tr')]
       const tsv = rows.map((tr) => [...tr.children].map(cellPlain).join('\t')).join('\n')
       writeRich(table.cloneNode(true), tsv)
@@ -1093,6 +1156,7 @@ function KeepEditor({
       writeRich(wrapRows([tr.cloneNode(true)]), tsv)
     }
     const copyColumn = (table, ci) => {
+      flushRemaining()
       const rows = [...table.querySelectorAll('tr')]
       const tsv = rows.map((tr) => cellPlain(tr.children[ci])).join('\n')
       const colRows = rows
@@ -1134,6 +1198,9 @@ function KeepEditor({
       activePopBtnRef.current = null
     }
     const openFilterPop = (btn) => {
+      // Filter value enumeration is a whole-table operation. If the user opens it
+      // while rows are still streaming, finish them first so no values are omitted.
+      flushRemaining()
       closePop()
       const ti = parseInt(btn.getAttribute('data-ti'))
       const ci = parseInt(btn.getAttribute('data-ci'))
@@ -1250,13 +1317,13 @@ function KeepEditor({
       activePopBtnRef.current = btn
       repositionFilterPop()
     }
-    const applyFilter = (ti) => {
-      const table = host.querySelector('table[data-ti="' + ti + '"]')
-      if (!table) return
+    const applyFilterRows = (ti, rows, clearWhenEmpty = false) => {
       const cols = filterStateRef.current[ti] || {}
-      table.querySelectorAll('tbody tr').forEach((tr) => {
+      const keys = Object.keys(cols)
+      if (!keys.length && !clearWhenEmpty) return
+      rows.forEach((tr) => {
         let hide = false
-        Object.keys(cols).forEach((ci) => {
+        keys.forEach((ci) => {
           const td = tr.children[ci]
           let v = (td?.getAttribute('data-raw') || '').trim()
           if (v === '') v = '(空白)'
@@ -1264,6 +1331,11 @@ function KeepEditor({
         })
         tr.classList.toggle('km-filtered', hide)
       })
+    }
+    const applyFilter = (ti) => {
+      const table = host.querySelector('table[data-ti="' + ti + '"]')
+      if (!table) return
+      applyFilterRows(ti, table.querySelectorAll('tbody tr'), true)
     }
     // A table's filters are active only if some column holds a non-empty excluded
     // set (openFilterPop pre-creates an empty per-table object even on cancel).
@@ -1488,7 +1560,7 @@ function KeepEditor({
     // Only worth re-measuring once the doc is fully streamed; mid-stream the next
     // chunk's finishRenderRange will measure the rest anyway (the host is visible again).
     remeasureRef.current = () => {
-      if (pendingFrom === Infinity) applyMultilineFlagsRange(0, blocksRef.current.length)
+      if (!hasPendingWork()) applyMultilineFlagsRange(0, blocksRef.current.length)
     }
     rerenderRef.current = () => rerender()
 

@@ -173,6 +173,9 @@ export function enhanceKeepTables(
     if (!state.widths || typeof state.widths !== 'object') state.widths = {}
     state.hidden = new Set([...state.hidden].filter((ci) => ci >= 0 && ci < liveCols.length))
     if (state.hidden.size >= liveCols.length) state.hidden.delete(0)
+    const hasInitialColumnOverrides =
+      state.hidden.size > 0 ||
+      Object.values(state.widths).some((width) => Number.isFinite(Number(width)) && Number(width) > 0)
 
     const autoWidths = liveCols.map((col) => col.style.width || '')
     let headerNames = []
@@ -629,7 +632,18 @@ export function enhanceKeepTables(
 
     wireHeaderControls(thead)
     wireHeaderControls(cloneThead)
-    applyColumnLayout()
+    if (hasInitialColumnOverrides) {
+      // Restored manual widths/hidden columns must be replayed onto the new DOM.
+      applyColumnLayout()
+    } else {
+      // The parser already wrote the automatic <col> widths. Reapplying an empty
+      // state used to toggle a class on every th/td before reading scrollWidth,
+      // turning a no-op into a full-table style/layout pass on giant tables.
+      refreshLabels()
+      syncTopWidth()
+      syncWidths()
+      updateFloat()
+    }
   })
 
   return {

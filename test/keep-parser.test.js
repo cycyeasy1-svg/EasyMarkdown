@@ -16,6 +16,7 @@ import {
   buildTableRow,
   extractHeadings,
   renderBlockInner,
+  renderTableRows,
   renderDoc,
   estimateTableColumnWidths,
   detectDocLang
@@ -304,6 +305,35 @@ describe('table column width hints', () => {
     expect(html).toContain('style="--km-table-min-width:')
     expect(html).toContain('<colgroup><col style="width:')
     expect(html).toContain('</colgroup><thead>')
+  })
+
+  it('renders only the initial rows of a large interactive table and exposes stable progress metadata', () => {
+    const lines = [
+      '| A | B |',
+      '|---|---|',
+      '| 0 | a |',
+      '| 1 | b |',
+      '| 2 | c |',
+      '| 3 | d |'
+    ]
+    const table = parseDoc(lines)[0]
+    const html = renderBlockInner(table, 0, lines, { tableInitialRows: 2 })
+
+    expect(html.match(/<tr data-ri=/g)).toHaveLength(2)
+    expect(html).toContain('data-km-initial-rows="2"')
+    expect(html).toContain('data-km-rendered-rows="2"')
+    expect(html).toContain('data-km-total-rows="4"')
+    expect(html).not.toContain('data-km-render-complete="true"')
+    expect(renderTableRows(table, 2, 4)).toContain('<tr data-ri="3">')
+  })
+
+  it('always renders every table row for export', () => {
+    const lines = ['| A |', '|---|', '| 0 |', '| 1 |', '| 2 |']
+    const table = parseDoc(lines)[0]
+    const html = renderBlockInner(table, 0, lines, { forExport: true, tableInitialRows: 1 })
+
+    expect(html.match(/<tr data-ri=/g)).toHaveLength(3)
+    expect(html).not.toContain('data-km-rendered-rows')
   })
 })
 

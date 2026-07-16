@@ -25,6 +25,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "electron-vite build && playwright test",
+    "perf:app": "electron-vite build && node scripts/perf-app.mjs",
+    "perf:app:measure": "electron-vite build && node scripts/perf-app.mjs --no-check",
     "dist": "electron-vite build && node scripts/gen-readme.mjs && electron-builder",
     "dist:dir": "electron-vite build && node scripts/gen-readme.mjs && electron-builder --dir",
     "version:check": "node scripts/bump-version.mjs --check",

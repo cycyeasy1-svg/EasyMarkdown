@@ -3045,7 +3045,7 @@ export default function App() {
     }
     // Keep mode paints in chunks after open; flush the rest so find sees the whole
     // document, not just the first painted chunk.
-    if (q) Object.values(editorApis.current).forEach((api) => api?.ensureRendered?.())
+    if (q) editorApis.current[activeIdRef.current]?.ensureRendered?.()
     const root = richRoot()
     const result = q ? findRangesInEl(root, q, options, scope?.range || null) : { ranges: [], error: '' }
     const ranges = result.ranges

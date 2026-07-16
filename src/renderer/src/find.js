@@ -212,22 +212,28 @@ function sourceRangeRects(textarea, start, end) {
   }
 }
 
-function renderSourceFindHighlight(textarea) {
-  const fullRange = textarea?.__hmSourceFindRange
-  if (!textarea?.isConnected || !fullRange) return
-  const doc = textarea.ownerDocument
-  clearSourceFindMarks(doc)
+function measureSourceFindHighlight(textarea, fullRange) {
   const mapRange = textarea.__hmSourceApi?.fullRangeToDisplayRange
   const displayRange = mapRange
     ? mapRange(fullRange.start, fullRange.end, false)
     : fullRange
-  if (!displayRange || displayRange.end <= displayRange.start) return
-  let rects
+  if (!displayRange || displayRange.end <= displayRange.start) return { rects: [] }
   try {
-    rects = sourceRangeRects(textarea, displayRange.start, displayRange.end)
+    return { rects: sourceRangeRects(textarea, displayRange.start, displayRange.end) }
   } catch {
-    return
+    return { rects: [] }
   }
+}
+
+function renderSourceFindHighlight(textarea, remeasure = false) {
+  const fullRange = textarea?.__hmSourceFindRange
+  if (!textarea?.isConnected || !fullRange) return
+  const doc = textarea.ownerDocument
+  clearSourceFindMarks(doc)
+  if (remeasure || !textarea.__hmSourceFindGeometry) {
+    textarea.__hmSourceFindGeometry = measureSourceFindHighlight(textarea, fullRange)
+  }
+  const rects = textarea.__hmSourceFindGeometry.rects
   const textareaRect = textarea.getBoundingClientRect()
   rects.forEach((rect) => {
     const left = textareaRect.left + rect.left - textarea.scrollLeft
@@ -251,14 +257,24 @@ export function paintSourceFindHighlight(textarea, start, end) {
   if (!textarea) return
   const doc = textarea.ownerDocument
   textarea.__hmSourceFindRange = { start, end }
+  delete textarea.__hmSourceFindGeometry
   if (!textarea.__hmSourceFindCleanup) {
     let raf = 0
     let fallbackTimer = 0
-    const schedule = () => {
+    let remeasurePending = false
+    const flush = () => {
+      const remeasure = remeasurePending
+      remeasurePending = false
+      renderSourceFindHighlight(textarea, remeasure)
+    }
+    const schedule = (remeasure = false) => {
+      remeasurePending ||= remeasure
       if (!raf) {
         raf = doc.defaultView.requestAnimationFrame(() => {
           raf = 0
-          renderSourceFindHighlight(textarea)
+          if (fallbackTimer) doc.defaultView.clearTimeout(fallbackTimer)
+          fallbackTimer = 0
+          flush()
         })
       }
       if (!fallbackTimer) {
@@ -266,27 +282,32 @@ export function paintSourceFindHighlight(textarea, start, end) {
           fallbackTimer = 0
           if (raf) doc.defaultView.cancelAnimationFrame(raf)
           raf = 0
-          renderSourceFindHighlight(textarea)
+          flush()
         }, 80)
       }
     }
-    ;['scroll', 'input', 'hm:source-layout'].forEach((event) =>
-      textarea.addEventListener(event, schedule, { passive: true })
+    const schedulePosition = () => schedule(false)
+    const scheduleMeasure = () => schedule(true)
+    textarea.addEventListener('scroll', schedulePosition, { passive: true })
+    ;['input', 'hm:source-layout'].forEach((event) =>
+      textarea.addEventListener(event, scheduleMeasure, { passive: true })
     )
-    doc.defaultView.addEventListener('resize', schedule)
+    doc.defaultView.addEventListener('resize', scheduleMeasure)
     textarea.__hmSourceFindCleanup = () => {
       if (raf) doc.defaultView.cancelAnimationFrame(raf)
       if (fallbackTimer) doc.defaultView.clearTimeout(fallbackTimer)
-      ;['scroll', 'input', 'hm:source-layout'].forEach((event) =>
-        textarea.removeEventListener(event, schedule)
+      textarea.removeEventListener('scroll', schedulePosition)
+      ;['input', 'hm:source-layout'].forEach((event) =>
+        textarea.removeEventListener(event, scheduleMeasure)
       )
-      doc.defaultView.removeEventListener('resize', schedule)
+      doc.defaultView.removeEventListener('resize', scheduleMeasure)
       delete textarea.__hmSourceFindCleanup
       delete textarea.__hmSourceFindRange
+      delete textarea.__hmSourceFindGeometry
       clearSourceFindMarks(doc)
     }
   }
-  renderSourceFindHighlight(textarea)
+  renderSourceFindHighlight(textarea, true)
 }
 
 export function revealSourceFindMatch(textarea, start, end) {
@@ -326,6 +347,7 @@ export function clearSourceFindHighlight(textarea) {
   }
   if (textarea?.ownerDocument) {
     delete textarea.__hmSourceFindRange
+    delete textarea.__hmSourceFindGeometry
     clearSourceFindMarks(textarea.ownerDocument)
   } else if (typeof document !== 'undefined') {
     clearSourceFindMarks(document)
