@@ -50,6 +50,38 @@ function paste(target, text) {
 }
 
 describe('VSCode Keep webview interactions', () => {
+  it('shows candidate counts within the other columns\' filter context', async () => {
+    send({
+      type: 'init',
+      text: [
+        '| fruit | color |',
+        '| --- | --- |',
+        '| apple | red |',
+        '| banana | yellow |',
+        '| cherry | red |',
+        '| grape | purple |'
+      ].join('\n'),
+      lang: 'en',
+      langPref: 'en',
+      theme: 'auto'
+    })
+    await waitForPaint()
+
+    document.querySelector('.km-filter-btn[data-ci="0"]').click()
+    document.querySelector('.km-fp-list input[data-v="banana"]').checked = false
+    document.querySelector('.km-fp-actions .ok').click()
+    document.querySelector('.km-filter-btn[data-ci="1"]').click()
+
+    const labels = [...document.querySelectorAll('.km-fp-list label')]
+    const countFor = (value) =>
+      labels
+        .find((label) => label.querySelector('input')?.dataset.v === value)
+        ?.querySelector('.km-fp-count')?.textContent
+    expect(countFor('red')).toBe('(2)')
+    expect(countFor('purple')).toBe('(1)')
+    expect(countFor('yellow')).toBeUndefined()
+  })
+
   it('supports keyboard table work, TSV paste, draft rebase, and guarded source switching', async () => {
     send({
       type: 'init',

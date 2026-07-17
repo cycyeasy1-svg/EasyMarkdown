@@ -893,6 +893,15 @@ body.km-column-resizing * {
 .km-filter-pop label:hover {
   background: var(--hover);
 }
+.km-filter-pop .km-fp-value {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.km-filter-pop .km-fp-count {
+  flex: none;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
 .km-filter-pop .km-fp-actions {
   display: flex;
   justify-content: flex-end;

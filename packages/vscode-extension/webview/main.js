@@ -1820,13 +1820,17 @@ function openFilterPop(btn) {
   // filters — filtering B after A offers just A's survivors. This column's own
   // filter is ignored so its currently-excluded values stay listed (otherwise
   // they could never be re-checked).
-  const values = new Set()
+  const valueCounts = new Map()
   table.querySelectorAll('tbody tr').forEach((tr) => {
     const hidden = Object.keys(tState).some(
       (c) => parseInt(c) !== ci && tState[c].has(cellVal(tr, c))
     )
-    if (!hidden) values.add(cellVal(tr, ci))
+    if (!hidden) {
+      const value = cellVal(tr, ci)
+      valueCounts.set(value, (valueCounts.get(value) || 0) + 1)
+    }
   })
+  const values = new Set(valueCounts.keys())
 
   const pop = document.createElement('div')
   pop.className = 'km-filter-pop'
@@ -1858,9 +1862,14 @@ function openFilterPop(btn) {
         cb.checked = !excluded.has(v)
         cb.dataset.v = v
         const span = document.createElement('span')
+        span.className = 'km-fp-value'
         span.innerHTML = inline(v)
+        const count = document.createElement('span')
+        count.className = 'km-fp-count'
+        count.textContent = `(${valueCounts.get(v)})`
         lab.appendChild(cb)
         lab.appendChild(span)
+        lab.appendChild(count)
         list.appendChild(lab)
       })
   }
