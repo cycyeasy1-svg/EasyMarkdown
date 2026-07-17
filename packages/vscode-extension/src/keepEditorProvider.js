@@ -105,6 +105,23 @@ class KeepEditorProvider {
     // differences make a text compare unreliable here, so we use a one-shot flag.
     let lastKnownText = document.getText()
     let ownEditPending = false
+    let editQueue = Promise.resolve(true)
+    const editAckWaiters = new Map()
+    const waitForEditAck = (requestId) =>
+      new Promise((resolve) => {
+        const timer = setTimeout(() => {
+          editAckWaiters.delete(requestId)
+          resolve()
+        }, 1000)
+        editAckWaiters.set(requestId, {
+          resolve: () => {
+            clearTimeout(timer)
+            editAckWaiters.delete(requestId)
+            resolve()
+          },
+          timer
+        })
+      })
 
     // ── scroll sync (keep view ⇄ a side-by-side source editor of the same file) ──
     // Timestamp windows (not one-shot flags) suppress echo: a revealRange / a
@@ -136,6 +153,7 @@ class KeepEditorProvider {
         langPref: this.context.globalState.get(LANG_KEY) || 'auto', // for the picker
         theme: this.context.globalState.get(THEME_KEY) || 'auto',
         layout: this.context.globalState.get(LAYOUT_KEY) || null,
+        diagnostics: { count: vscode.languages.getDiagnostics(document.uri).length },
         anchor,
         reveal
       })
@@ -155,18 +173,52 @@ class KeepEditorProvider {
       webview.postMessage({ type: 'update', text })
     })
 
+    const diagnosticSub = vscode.languages.onDidChangeDiagnostics((e) => {
+      if (!e.uris.some((uri) => uri.toString() === docKey)) return
+      webview.postMessage({
+        type: 'diagnostics',
+        count: vscode.languages.getDiagnostics(document.uri).length
+      })
+    })
+
     const msgSub = webview.onDidReceiveMessage((msg) => {
       if (!msg) return
-      if (msg.type === 'ready') {
+      if (msg.type === 'editAppliedAck') {
+        editAckWaiters.get(msg.requestId)?.resolve()
+      } else if (msg.type === 'ready') {
         postInit()
       } else if (msg.type === 'replaceLines') {
-        // Mark the upcoming change as our own so its echo is swallowed. The
-        // webview only sends this when there is a real diff, so applyEdit always
-        // fires exactly one change event to consume the flag.
-        ownEditPending = true
-        vscode.workspace.applyEdit(this.buildLineEdit(document, msg)).then((ok) => {
-          if (!ok) ownEditPending = false
-        })
+        // Serialize line edits. A draft commit can be followed immediately by a
+        // mode switch or Save; queueing guarantees those actions observe the
+        // committed TextDocument instead of racing applyEdit().
+        const apply = async () => {
+          ownEditPending = true
+          try {
+            const ok = await vscode.workspace.applyEdit(this.buildLineEdit(document, msg))
+            if (!ok) {
+              ownEditPending = false
+              await webview.postMessage({
+                type: 'editRejected',
+                requestId: msg.requestId,
+                text: document.getText()
+              })
+            } else {
+              const ack = waitForEditAck(msg.requestId)
+              await webview.postMessage({ type: 'editApplied', requestId: msg.requestId })
+              await ack
+            }
+            return ok
+          } catch {
+            ownEditPending = false
+            await webview.postMessage({
+              type: 'editRejected',
+              requestId: msg.requestId,
+              text: document.getText()
+            })
+            return false
+          }
+        }
+        editQueue = editQueue.then(apply, apply)
       } else if (msg.type === 'openExternal') {
         const allowedUrl = getAllowedExternalUrl(msg.url)
         if (!allowedUrl) return
@@ -178,7 +230,7 @@ class KeepEditorProvider {
       } else if (msg.type === 'saveImage') {
         this.saveImage(document, webview, msg)
       } else if (msg.type === 'openRelative') {
-        this.openRelative(document, webview, msg.href)
+        this.openRelative(document, webview, msg.href, !!msg.openToSide)
       } else if (msg.type === 'visibleLine') {
         // Webview scrolled → align every visible text editor of the same file.
         if (!scrollSyncOn()) return
@@ -202,7 +254,15 @@ class KeepEditorProvider {
         // and remember source as the preferred mode for the next file. Route it
         // through the public extension command so its suppression window also
         // makes this explicit choice win when rememberMode is disabled.
-        vscode.commands.executeCommand('easymarkdown.openWithText', document.uri)
+        editQueue.then((ok) => {
+          if (ok) vscode.commands.executeCommand('easymarkdown.openWithText', document.uri)
+        })
+      } else if (msg.type === 'saveDocument') {
+        editQueue.then((ok) => {
+          if (ok) document.save()
+        })
+      } else if (msg.type === 'openProblems') {
+        vscode.commands.executeCommand('workbench.actions.view.problems')
       }
     })
 
@@ -221,9 +281,15 @@ class KeepEditorProvider {
 
     webviewPanel.onDidDispose(() => {
       changeSub.dispose()
+      diagnosticSub.dispose()
       msgSub.dispose()
       scrollSub.dispose()
       clearTimeout(editorScrollTimer)
+      editAckWaiters.forEach(({ resolve, timer }) => {
+        clearTimeout(timer)
+        resolve()
+      })
+      editAckWaiters.clear()
       if (this.panels.get(docKey) === webviewPanel) {
         this.panels.delete(docKey)
         this.readyPanels.delete(docKey)
@@ -239,7 +305,7 @@ class KeepEditorProvider {
    * editor VSCode associates. A #fragment on the same document just scrolls; on
    * another document it's queued (pendingAnchor) or posted to the live panel.
    */
-  async openRelative(document, webview, href) {
+  async openRelative(document, webview, href, openToSide = false) {
     try {
       const hashAt = String(href).indexOf('#')
       const pathPart = hashAt >= 0 ? String(href).slice(0, hashAt) : String(href)
@@ -269,12 +335,19 @@ class KeepEditorProvider {
       const existing = this.panels.get(targetKey)
       if (existing) {
         // retainContextWhenHidden: the webview is live — reveal + jump directly.
-        existing.reveal()
+        existing.reveal(openToSide ? vscode.ViewColumn.Beside : undefined)
         if (fragment) existing.webview.postMessage({ type: 'scrollToAnchor', slug: fragment })
         return
       }
       if (fragment) this.pendingAnchor.set(targetKey, fragment)
-      await vscode.commands.executeCommand('vscode.open', target)
+      if (openToSide) {
+        await vscode.commands.executeCommand('vscode.open', target, {
+          viewColumn: vscode.ViewColumn.Beside,
+          preserveFocus: false
+        })
+      } else {
+        await vscode.commands.executeCommand('vscode.open', target)
+      }
     } catch {
       /* ignore malformed links */
     }

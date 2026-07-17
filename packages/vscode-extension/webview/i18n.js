@@ -6,6 +6,16 @@ import { translate } from '../../../src/renderer/src/i18n-strings.js'
 
 const EXTRA = {
   en: {
+    'draft.externalConflict': 'The document changed while this Keep edit was unfinished.',
+    'draft.externalConflictDetail':
+      'The original source position can no longer be identified safely. Copy the draft before continuing, or discard it.',
+    'draft.recoveryText': 'Uncommitted Keep draft',
+    'draft.copy': 'Copy draft',
+    'draft.discard': 'Discard draft',
+    'draft.copied': 'Draft copied. The externally updated document is now shown.',
+    'draft.copyFailed': 'Could not access the clipboard. Select and copy the draft manually.',
+    'edit.applyFailed': 'The Keep edit could not be applied. Your draft has been restored.',
+    'problems.open': 'Open VS Code Problems',
     'mermaid.zoom': 'Zoom diagram',
     'math.zoom': 'Zoom formula',
     'mermaid.zoomIn': 'Zoom in',
@@ -28,6 +38,16 @@ const EXTRA = {
     'img.saveFailed': 'Failed to save image:'
   },
   zh: {
+    'draft.externalConflict': '文档在 Keep 编辑尚未确认时发生了变化。',
+    'draft.externalConflictDetail':
+      '已无法安全识别原来的源码位置。请先复制草稿再继续，或者舍弃草稿。',
+    'draft.recoveryText': '尚未确认的 Keep 草稿',
+    'draft.copy': '复制草稿',
+    'draft.discard': '舍弃草稿',
+    'draft.copied': '草稿已复制，当前显示外部更新后的文档。',
+    'draft.copyFailed': '无法访问剪贴板，请手动选择并复制草稿。',
+    'edit.applyFailed': 'Keep 修改未能应用，编辑草稿已恢复。',
+    'problems.open': '打开 VS Code 问题面板',
     'mermaid.zoom': '放大查看',
     'math.zoom': '放大查看公式',
     'mermaid.zoomIn': '放大',
@@ -50,6 +70,16 @@ const EXTRA = {
     'img.saveFailed': '图片保存失败:'
   },
   ja: {
+    'draft.externalConflict': 'Keep の編集を確定する前に文書が変更されました。',
+    'draft.externalConflictDetail':
+      '元のソース位置を安全に特定できません。続行する前に下書きをコピーするか、破棄してください。',
+    'draft.recoveryText': '未確定の Keep 下書き',
+    'draft.copy': '下書きをコピー',
+    'draft.discard': '下書きを破棄',
+    'draft.copied': '下書きをコピーしました。外部更新後の文書を表示しています。',
+    'draft.copyFailed': 'クリップボードにアクセスできません。下書きを選択して手動でコピーしてください。',
+    'edit.applyFailed': 'Keep の変更を適用できませんでした。編集下書きを復元しました。',
+    'problems.open': 'VS Code の問題パネルを開く',
     'mermaid.zoom': '図を拡大',
     'math.zoom': '数式を拡大',
     'mermaid.zoomIn': '拡大',

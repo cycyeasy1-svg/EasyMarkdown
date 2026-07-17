@@ -267,6 +267,13 @@ body.hm-full-width .km-doc {
   color: #fff;
   border-color: var(--accent-strong);
 }
+.km-block-insert {
+  margin-block: 8px;
+  padding-block: 10px 6px;
+  background: var(--hover);
+  outline: 1px dashed var(--accent);
+  outline-offset: -1px;
+}
 
 .km-doc h1,
 .km-doc h2,
@@ -485,6 +492,21 @@ body.dark .km-doc mark.hm-hl-blue { background: #2f4a6b; }
 }
 .km-table-frame .km-table-wrap {
   margin: 0;
+}
+.km-table th.km-cell-selected,
+.km-table td.km-cell-selected {
+  position: relative;
+  z-index: 4;
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 2px var(--accent);
+  outline: none;
+}
+.km-table th.km-cell-selected:focus-visible,
+.km-table td.km-cell-selected:focus-visible {
+  box-shadow:
+    inset 0 0 0 2px var(--accent),
+    0 0 0 2px var(--bg-editor),
+    0 0 0 4px color-mix(in srgb, var(--accent) 45%, transparent);
 }
 .km-table-frame .km-table-scrolltop {
   margin-top: 0;
@@ -986,6 +1008,29 @@ body.km-column-resizing * {
 .hm-rename-actions button.primary:hover {
   background: var(--accent-strong);
 }
+.km-draft-conflict {
+  width: min(520px, 90vw);
+  top: 24%;
+}
+.km-draft-detail {
+  margin: 0 0 12px;
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+.km-draft-recovery {
+  min-height: 88px;
+  max-height: 34vh;
+}
+
+@media (forced-colors: active) {
+  .km-table th.km-cell-selected,
+  .km-table td.km-cell-selected {
+    outline: 2px solid Highlight;
+    outline-offset: -2px;
+  }
+}
 
 @keyframes fadeIn {
   from { opacity: 0; }
@@ -1171,7 +1216,8 @@ body.km-column-resizing * {
   opacity: 0.85;
 }
 .km-layout-btn,
-.km-outline-btn {
+.km-outline-btn,
+.km-problems-btn {
   position: fixed;
   top: 48px;
   z-index: 1150;
@@ -1195,10 +1241,23 @@ body.km-column-resizing * {
 .km-outline-btn {
   right: 52px;
 }
+.km-problems-btn {
+  right: 90px;
+  width: auto;
+  min-width: 30px;
+  gap: 4px;
+  padding-inline: 7px;
+  color: var(--vscode-problemsWarningIcon-foreground, var(--accent));
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+}
 .km-layout-btn:hover,
 .km-layout-btn.active,
 .km-outline-btn:hover,
-.km-outline-btn.active {
+.km-outline-btn.active,
+.km-problems-btn:hover,
+.km-problems-btn:focus-visible {
   opacity: 1;
   color: var(--text);
   background: var(--hover-elevated);

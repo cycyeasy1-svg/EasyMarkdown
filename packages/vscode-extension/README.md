@@ -13,20 +13,29 @@ minimal line-range edit, so VSCode owns dirty state, undo/redo and save.
 
 - **Zero-diff inline editing** — double-click a table cell or block to edit its
   source; only the touched lines are rewritten.
+- **Draft-safe editing** — unfinished cell and block edits survive tab hiding and
+  webview restoration. Switching to source or saving asks before discarding a
+  draft, while external edits are rebased only when the source anchor is safe.
 - **Faithful inline Markdown** — GFM strikethrough, underscore emphasis,
   autolinks, link titles, escaped punctuation and `==highlight==` render in the
   keep view without changing the source.
 - **Tables** — Excel-style per-column filters, add/remove rows & columns,
   drag-to-resize and auto-fit, temporary hide/restore controls, a sticky
-  floating header for wide tables, and rich copy (cell / row / column / table).
+  floating header for wide tables, rich copy (cell / row / column / table),
+  keyboard cell navigation, and rectangular TSV paste from spreadsheets.
 - **Task lists** — `- [ ]` / `- [x]` render as real checkboxes; a click toggles
   exactly that source line.
+- **Block structure editing** — insert a block above/below, duplicate it, or
+  delete it from the existing Keep context menu.
 - **YAML frontmatter** — the `---` block at the top renders as a metadata card,
   editable like any other block.
 - **Image paste & drop** — paste a screenshot (or drop an image file) to save it
   into `./assets/` next to the document and insert a relative link, Typora-style.
 - **Links** — `#anchors` jump within the document; relative `.md`/file links open
-  in VSCode (`file.md#section` opens *and* scrolls).
+  in VSCode (`file.md#section` opens *and* scrolls). Alt/Option+Click opens a
+  relative target to the side.
+- **Native diagnostics bridge** — when VSCode reports Markdown problems, a small
+  count badge appears in Keep and opens the native Problems view.
 - **Heading fold** — collapse/expand a heading's whole section.
 - **Outline** — a heading navigator; jump to any heading (auto-expands folded
   sections).

@@ -18,7 +18,9 @@ import {
   removeColumnInLine,
   buildTableRow,
   extractHeadings,
-  detectDocLang
+  detectDocLang,
+  toggleTaskLine,
+  prepareBlockInsertion
 } from '../../../src/renderer/src/keep-parser.js'
 import { inlineRichStyles } from '../../../src/renderer/src/components/editor-copy.js'
 import { isRelativePath } from '../../../src/renderer/src/components/editor-images.js'
@@ -67,6 +69,12 @@ import {
   PARA_SPACING_MIN,
   PARA_SPACING_MAX
 } from '../../../src/renderer/src/settings.js'
+import {
+  locateLineAnchor,
+  locateBlockAnchor,
+  locateInsertionAnchor,
+  buildTablePastePatch
+} from './keep-ux.js'
 import './keep.css'
 import 'katex/dist/katex.min.css'
 
@@ -101,6 +109,10 @@ let theme = 'auto' // 'auto' (follow VSCode) | 'warm-light' | 'warm-dark'
 let langPref = 'auto' // 'auto' | 'en' | 'zh' | 'ja' — the raw picker choice
 const collapsed = new Set() // collapsed heading-section keys ("level:text"), survives re-render
 let tableScroll = null // wide-table top-scrollbar + floating-header handle (editor-tablescroll)
+let selectedCell = null // logical table coordinate; survives structural re-renders
+let pendingDraftRestore = vscode.getState()?.draft || null
+let editRequestSeq = 0
+const pendingEditDrafts = new Map()
 
 const stripCR = (l) => (l.endsWith('\r') ? l.slice(0, -1) : l)
 const escapeHtmlLocal = (s) =>
@@ -123,6 +135,7 @@ window.addEventListener('message', (e) => {
     ensureSourceButton()
     ensureOutlineButton()
     ensureSettingsButton()
+    updateProblemsButton(msg.diagnostics?.count || 0)
     if (msg.anchor) pendingAnchor = msg.anchor // consumed by finishRender
     if (msg.reveal) pendingSearchReveal = msg.reveal // consumed by finishRender
     setText(msg.text || '')
@@ -133,16 +146,29 @@ window.addEventListener('message', (e) => {
   } else if (msg.type === 'revealSearchMatch') {
     queueSearchReveal(msg.reveal)
   } else if (msg.type === 'update') {
-    // External edit / undo / redo — reset the mirror and re-render. Any open edit
-    // popover is torn down (its anchor may no longer exist).
-    closeFloating()
-    setText(msg.text || '')
+    // External edit / undo / redo. Rebase an unfinished draft only when its
+    // original source anchor is unchanged and unambiguous; otherwise preserve
+    // the text in an explicit recovery dialog instead of guessing a line.
+    handleExternalUpdate(msg.text || '')
   } else if (msg.type === 'imageSaved') {
     onImageSaved(msg)
   } else if (msg.type === 'imageError') {
     const p = imgPending.get(msg.reqId)
     imgPending.delete(msg.reqId)
     if (p) showToast(msg.code === 'untitled' ? t('img.untitled') : t('img.saveFailed') + ' ' + (msg.code || ''))
+  } else if (msg.type === 'editRejected') {
+    const recoveryDraft = pendingEditDrafts.get(msg.requestId) || null
+    pendingEditDrafts.delete(msg.requestId)
+    if (recoveryDraft) recoverRejectedEdit(msg.text || '', recoveryDraft)
+    else handleExternalUpdate(msg.text || '')
+    showToast(t('edit.applyFailed'))
+  } else if (msg.type === 'editApplied') {
+    if (pendingEditDrafts.delete(msg.requestId) && !pendingEditDrafts.size) {
+      if (!draftIsDirty(activeDraftSnapshot())) setStoredDraft(null)
+    }
+    vscode.postMessage({ type: 'editAppliedAck', requestId: msg.requestId })
+  } else if (msg.type === 'diagnostics') {
+    updateProblemsButton(msg.count || 0)
   } else if (msg.type === 'insertAttachment') {
     insertAttachmentMarkdown(msg.markdown)
   }
@@ -156,7 +182,7 @@ function setText(text) {
 
 // Minimal-diff commit: trim the common prefix/suffix between the old and new
 // `lines`, post just the changed range. `endLine < startLine` ⇒ a pure insertion.
-function commit(oldLines) {
+function commit(oldLines, recoveryDraft = null) {
   const a = oldLines
   const b = lines
   let p = 0
@@ -167,14 +193,19 @@ function commit(oldLines) {
   const endLine = a.length - 1 - s
   const slice = b.slice(p, b.length - s)
   if (endLine < startLine && slice.length === 0) return // nothing actually changed
-  vscode.postMessage({ type: 'replaceLines', startLine, endLine, lines: slice })
+  const requestId = ++editRequestSeq
+  if (recoveryDraft) {
+    pendingEditDrafts.set(requestId, recoveryDraft)
+    setStoredDraft(recoveryDraft)
+  }
+  vscode.postMessage({ type: 'replaceLines', requestId, startLine, endLine, lines: slice })
 }
 
 // Run a mutation against `lines`, then post its minimal diff to the host.
-function mutate(fn) {
+function mutate(fn, { recoveryDraft = null } = {}) {
   const old = lines.slice()
   fn()
-  commit(old)
+  commit(old, recoveryDraft)
 }
 
 // ── image src resolution (relative → webview URI) ──
@@ -209,6 +240,8 @@ function rerender() {
     srcEditLabel: t('keep.editSource'),
     collapseLabel: t('keep.toggleSection'),
     interactiveTasks: true, // task checkboxes are clickable; onClick writes the toggle back
+    taskToggleLabel: t('keep.toggleTask'),
+    filterLabel: t('keep.filterColumn'),
     blankLineSpacing: !!layout.blankLineSpacing
   })
   r.blocks.forEach((b, i) => {
@@ -272,6 +305,8 @@ function finishRender() {
       if (real) openCellPop(real, clonedTh)
     }
   })
+  restoreSelectedCell()
+  restorePendingDraft()
   // A re-render replaces the DOM, invalidating any painted find ranges. Refresh
   // the count/highlights against the fresh nodes, but preserve the current
   // result and viewport while the user is editing.
@@ -597,21 +632,248 @@ let activeConfirm = null
 let activePop = null
 let activePopBtn = null
 let activeMenu = null
+let conflictedDraft = null
+let draftPersistTimer = 0
+
+function setStoredDraft(draft) {
+  clearTimeout(draftPersistTimer)
+  draftPersistTimer = 0
+  const state = { ...(vscode.getState() || {}) }
+  if (draft) state.draft = draft
+  else delete state.draft
+  vscode.setState(state)
+}
+
+function activeDraftSnapshot() {
+  if (activeCellPop) {
+    const ta = activeCellPop.pop.querySelector('textarea')
+    return {
+      version: 1,
+      kind: 'cell',
+      lineIdx: activeCellPop.lineIdx,
+      colIdx: activeCellPop.colIdx,
+      baseLine: activeCellPop.baseLine,
+      beforeLine: activeCellPop.beforeLine,
+      afterLine: activeCellPop.afterLine,
+      originalValue: activeCellPop.originalValue,
+      value: ta?.value ?? activeCellPop.originalValue
+    }
+  }
+  if (activeBlockEdit) {
+    const cur = activeBlockEdit
+    return cur.mode === 'insert'
+      ? {
+          version: 1,
+          kind: 'block-insert',
+          at: cur.at,
+          beforeLine: cur.beforeLine,
+          afterLine: cur.afterLine,
+          value: cur.ta.value
+        }
+      : {
+          version: 1,
+          kind: 'block',
+          start: cur.b.start,
+          end: cur.b.end,
+          blockType: cur.b.type,
+          baseLines: cur.baseLines.slice(),
+          beforeLine: cur.beforeLine,
+          afterLine: cur.afterLine,
+          originalValue: cur.originalRaw,
+          value: cur.ta.value
+        }
+  }
+  return null
+}
+
+function draftIsDirty(draft) {
+  if (!draft) return false
+  if (draft.kind === 'cell' || draft.kind === 'block') {
+    return draft.value !== draft.originalValue
+  }
+  return draft.kind === 'block-insert' && draft.value !== ''
+}
+
+function persistActiveDraft(immediate = false) {
+  clearTimeout(draftPersistTimer)
+  const write = () => {
+    draftPersistTimer = 0
+    const draft = activeDraftSnapshot()
+    setStoredDraft(draftIsDirty(draft) ? draft : null)
+  }
+  if (immediate === true) write()
+  else draftPersistTimer = setTimeout(write, 100)
+}
+
+function detachActiveDraft() {
+  closePop()
+  closeMenu()
+  closeConfirm()
+  if (activeCellPop) activeCellPop.pop.remove()
+  activeCellPop = null
+  if (activeBlockEdit?.mode === 'insert') activeBlockEdit.container?.remove()
+  activeBlockEdit = null
+}
+
+function rebaseDraft(draft, nextLines) {
+  if (draft.kind === 'cell') {
+    const lineIdx = locateLineAnchor(
+      nextLines,
+      draft.baseLine,
+      draft.lineIdx,
+      draft.beforeLine,
+      draft.afterLine
+    )
+    return lineIdx < 0 ? null : { ...draft, lineIdx }
+  }
+  if (draft.kind === 'block') {
+    const start = locateBlockAnchor(
+      nextLines,
+      draft.baseLines,
+      draft.start,
+      draft.beforeLine,
+      draft.afterLine
+    )
+    return start < 0
+      ? null
+      : { ...draft, start, end: start + draft.baseLines.length - 1 }
+  }
+  if (draft.kind === 'block-insert') {
+    const at = locateInsertionAnchor(nextLines, draft.beforeLine, draft.afterLine, draft.at)
+    return at < 0 ? null : { ...draft, at }
+  }
+  return null
+}
+
+function handleExternalUpdate(text) {
+  if (conflictedDraft) {
+    // A recovery dialog already owns the orphaned draft. Keep presenting the
+    // newest document behind it without dismissing or overwriting that text.
+    setText(text)
+    return
+  }
+  const nextLines = String(text).split('\n').map(stripCR)
+  const draft = activeDraftSnapshot()
+  if (!draftIsDirty(draft)) {
+    detachActiveDraft()
+    setStoredDraft(null)
+    setText(text)
+    return
+  }
+
+  const rebased = rebaseDraft(draft, nextLines)
+  detachActiveDraft()
+  if (rebased) {
+    pendingDraftRestore = rebased
+    setStoredDraft(rebased)
+    setText(text)
+    return
+  }
+
+  // The source under the draft changed or became ambiguous. Show the fresh
+  // document immediately, but keep the user's text in a blocking recovery
+  // dialog. Applying it automatically could overwrite an unrelated line.
+  pendingDraftRestore = null
+  setStoredDraft(draft)
+  setText(text)
+  showDraftConflict(draft)
+}
+
+function recoverRejectedEdit(text, draft) {
+  const nextLines = String(text).split('\n').map(stripCR)
+  const rebased = rebaseDraft(draft, nextLines)
+  detachActiveDraft()
+  if (rebased) {
+    pendingDraftRestore = rebased
+    setStoredDraft(rebased)
+    setText(text)
+  } else {
+    pendingDraftRestore = null
+    setStoredDraft(draft)
+    setText(text)
+    showDraftConflict(draft)
+  }
+}
+
+function restorePendingDraft() {
+  const draft = pendingDraftRestore
+  if (!draft || activeCellPop || activeBlockEdit || activeConfirm) return
+  pendingDraftRestore = null
+
+  if (draft.kind === 'cell') {
+    const lineIdx = locateLineAnchor(
+      lines,
+      draft.baseLine,
+      draft.lineIdx,
+      draft.beforeLine,
+      draft.afterLine
+    )
+    const cell = lineIdx < 0
+      ? null
+      : host.querySelector(
+          'td[data-line="' + lineIdx + '"][data-ci="' + draft.colIdx + '"],' +
+            'th[data-line="' + lineIdx + '"][data-ci="' + draft.colIdx + '"]'
+        )
+    if (cell) {
+      openCellPop(cell, null, draft.value)
+      return
+    }
+  } else if (draft.kind === 'block') {
+    const start = locateBlockAnchor(
+      lines,
+      draft.baseLines,
+      draft.start,
+      draft.beforeLine,
+      draft.afterLine
+    )
+    const bi = blocks.findIndex(
+      (block) =>
+        block.start === start &&
+        block.end === start + draft.baseLines.length - 1 &&
+        block.type !== 'table'
+    )
+    if (bi >= 0) {
+      startBlockEdit(bi, draft.value)
+      return
+    }
+  } else if (draft.kind === 'block-insert') {
+    const at = locateInsertionAnchor(lines, draft.beforeLine, draft.afterLine, draft.at)
+    let bi = blocks.findIndex((block) => block.start >= at && structuralBlock(block.bi))
+    let where = 'above'
+    if (bi < 0) {
+      for (let index = blocks.length - 1; index >= 0; index--) {
+        if (structuralBlock(index)) {
+          bi = index
+          where = 'below'
+          break
+        }
+      }
+    }
+    if (bi >= 0 && at >= 0) {
+      startBlockInsert(bi, where, draft.value, at)
+      return
+    }
+  }
+
+  showDraftConflict(draft)
+}
 
 function closeFloating() {
   closePop()
   closeMenu()
   closeConfirm()
-  closeCellPop()
   closeSettingsPop()
   closeOutlinePop()
 }
 
 // ── table cell editing ──
-function closeCellPop() {
+function closeCellPop(restoreFocus = false) {
   if (activeCellPop) {
+    const cell = activeCellPop.td
     activeCellPop.pop.remove()
     activeCellPop = null
+    setStoredDraft(null)
+    if (restoreFocus && cell && host.contains(cell)) selectCell(cell)
   }
 }
 function repositionCellPop() {
@@ -645,14 +907,18 @@ function repositionFilterPop() {
 function commitCellPop() {
   const cur = activeCellPop
   if (!cur) return
+  const recoveryDraft = activeDraftSnapshot()
   const ta = cur.pop.querySelector('textarea')
   const val = ta ? ta.value.replace(/\n/g, '<br>') : cur.raw
   const td = cur.td
-  closeCellPop()
+  closeCellPop(true)
   if (val === cur.raw) return
-  mutate(() => {
-    lines[cur.lineIdx] = stripCR(replaceCellInLine(lines[cur.lineIdx], cur.colIdx, val))
-  })
+  mutate(
+    () => {
+      lines[cur.lineIdx] = stripCR(replaceCellInLine(lines[cur.lineIdx], cur.colIdx, val))
+    },
+    { recoveryDraft }
+  )
   if (td && host.contains(td)) {
     td.setAttribute('data-raw', val)
     if (td.tagName === 'TH') {
@@ -675,13 +941,30 @@ function commitCellPop() {
 function closeBlockEdit(commitChange) {
   const cur = activeBlockEdit
   if (!cur) return
+  const recoveryDraft = activeDraftSnapshot()
   activeBlockEdit = null
+  setStoredDraft(null)
+  if (cur.mode === 'insert') {
+    if (commitChange) {
+      const inserted = prepareBlockInsertion(lines, cur.at, cur.ta.value)
+      if (inserted.length) {
+        mutate(() => lines.splice(cur.at, 0, ...inserted), { recoveryDraft })
+        rerender()
+        return
+      }
+    }
+    cur.container?.remove()
+    return
+  }
   if (commitChange) {
     const { ta, b } = cur
     const newLines = ta.value.split('\n').map(stripCR)
-    mutate(() => {
-      lines.splice(b.start, b.end - b.start + 1, ...newLines)
-    })
+    mutate(
+      () => {
+        lines.splice(b.start, b.end - b.start + 1, ...newLines)
+      },
+      { recoveryDraft }
+    )
     rerender()
     return
   }
@@ -752,6 +1035,67 @@ function showConfirm(message, { onSave, onDiscard }) {
   save.focus({ preventScroll: true })
 }
 
+function showDraftConflict(draft) {
+  closeConfirm()
+  conflictedDraft = draft
+  const wrap = document.createElement('div')
+  wrap.dataset.blocking = 'true'
+  const backdrop = document.createElement('div')
+  backdrop.className = 'menu-backdrop'
+  backdrop.style.zIndex = '1400'
+  const box = document.createElement('div')
+  box.className = 'hm-rename-modal km-draft-conflict'
+  box.style.zIndex = '1401'
+  box.setAttribute('role', 'alertdialog')
+  box.setAttribute('aria-modal', 'true')
+  const title = document.createElement('div')
+  title.className = 'hm-rename-title'
+  title.textContent = t('draft.externalConflict')
+  const detail = document.createElement('p')
+  detail.className = 'km-draft-detail'
+  detail.textContent = t('draft.externalConflictDetail')
+  const ta = document.createElement('textarea')
+  ta.className = 'km-src-editor km-draft-recovery'
+  ta.readOnly = true
+  ta.value = String(draft?.value ?? '')
+  ta.setAttribute('aria-label', t('draft.recoveryText'))
+  ta.rows = Math.min(10, Math.max(3, ta.value.split('\n').length + 1))
+  const actions = document.createElement('div')
+  actions.className = 'hm-rename-actions'
+  const discard = document.createElement('button')
+  discard.type = 'button'
+  discard.textContent = t('draft.discard')
+  const copy = document.createElement('button')
+  copy.type = 'button'
+  copy.className = 'primary'
+  copy.textContent = t('draft.copy')
+  actions.append(discard, copy)
+  box.append(title, detail, ta, actions)
+  wrap.append(backdrop, box)
+  document.body.appendChild(wrap)
+  activeConfirm = wrap
+
+  discard.onclick = () => {
+    conflictedDraft = null
+    setStoredDraft(null)
+    closeConfirm()
+  }
+  copy.onclick = async () => {
+    try {
+      await navigator.clipboard.writeText(ta.value)
+      conflictedDraft = null
+      setStoredDraft(null)
+      closeConfirm()
+      showToast(t('draft.copied'))
+    } catch {
+      ta.focus()
+      ta.select()
+      showToast(t('draft.copyFailed'))
+    }
+  }
+  copy.focus({ preventScroll: true })
+}
+
 // Enforce "one edit bar": close whatever is open (prompting if dirty), then build.
 function openAfterClose(build) {
   const cell = activeCellPop
@@ -792,7 +1136,7 @@ function openAfterClose(build) {
   })
 }
 
-function openCellPop(td, anchorEl) {
+function openCellPop(td, anchorEl, initialValue) {
   openAfterClose(() => {
     if (!host.contains(td)) {
       const lineAttr = td.getAttribute('data-line')
@@ -810,7 +1154,8 @@ function openCellPop(td, anchorEl) {
     pop.className = 'km-cell-pop'
     const ta = document.createElement('textarea')
     ta.className = 'km-cp-input'
-    ta.value = raw.replace(/<br\s*\/?>/gi, '\n')
+    const originalValue = raw.replace(/<br\s*\/?>/gi, '\n')
+    ta.value = initialValue == null ? originalValue : String(initialValue)
     const act = document.createElement('div')
     act.className = 'km-cp-actions'
     const ok = document.createElement('button')
@@ -825,25 +1170,40 @@ function openCellPop(td, anchorEl) {
     pop.appendChild(ta)
     pop.appendChild(act)
     document.body.appendChild(pop)
-    activeCellPop = { pop, td, anchor: anchorEl && document.body.contains(anchorEl) ? anchorEl : td, raw, lineIdx, colIdx }
+    activeCellPop = {
+      pop,
+      td,
+      anchor: anchorEl && document.body.contains(anchorEl) ? anchorEl : td,
+      raw,
+      lineIdx,
+      colIdx,
+      baseLine: lines[lineIdx],
+      beforeLine: lineIdx > 0 ? lines[lineIdx - 1] : null,
+      afterLine: lineIdx + 1 < lines.length ? lines[lineIdx + 1] : null,
+      originalValue
+    }
     repositionCellPop()
     ta.focus()
     ta.select()
+    ta.addEventListener('input', persistActiveDraft)
+    persistActiveDraft()
     ta.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') {
         e.preventDefault()
-        closeCellPop()
+        e.stopPropagation()
+        closeCellPop(true)
       } else if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
         e.preventDefault()
+        e.stopPropagation()
         commitCellPop()
       }
     })
-    cancel.onclick = () => closeCellPop()
+    cancel.onclick = () => closeCellPop(true)
     ok.onclick = () => commitCellPop()
   })
 }
 
-function startBlockEdit(bi) {
+function startBlockEdit(bi, initialValue) {
   openAfterClose(() => {
     const b = blocks[bi]
     if (!b) return
@@ -852,7 +1212,7 @@ function startBlockEdit(bi) {
     const raw = lines.slice(b.start, b.end + 1).join('\n')
     const ta = document.createElement('textarea')
     ta.className = 'km-src-editor'
-    ta.value = raw
+    ta.value = initialValue == null ? raw : String(initialValue)
     ta.rows = Math.min(20, raw.split('\n').length + 1)
     const act = document.createElement('div')
     act.className = 'km-src-actions'
@@ -869,13 +1229,25 @@ function startBlockEdit(bi) {
     blockDiv.appendChild(ta)
     blockDiv.appendChild(act)
     ta.focus()
-    activeBlockEdit = { ta, b, originalRaw: raw }
+    activeBlockEdit = {
+      mode: 'edit',
+      ta,
+      b,
+      originalRaw: raw,
+      baseLines: lines.slice(b.start, b.end + 1),
+      beforeLine: b.start > 0 ? lines[b.start - 1] : null,
+      afterLine: b.end + 1 < lines.length ? lines[b.end + 1] : null
+    }
+    ta.addEventListener('input', persistActiveDraft)
+    persistActiveDraft()
     ta.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') {
         e.preventDefault()
+        e.stopPropagation()
         closeBlockEdit(false)
       } else if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
         e.preventDefault()
+        e.stopPropagation()
         closeBlockEdit(true)
       }
     })
@@ -884,53 +1256,369 @@ function startBlockEdit(bi) {
   })
 }
 
+function startBlockInsert(bi, where, initialValue = '', atOverride) {
+  openAfterClose(() => {
+    const b = blocks[bi]
+    if (!b || b.type === 'table' || b.type === 'frontmatter') return
+    const blockDiv = host.querySelector('.km-block[data-bi="' + bi + '"]')
+    if (!blockDiv) return
+    const container = document.createElement('div')
+    container.className = 'km-block km-block-insert'
+    const ta = document.createElement('textarea')
+    ta.className = 'km-src-editor'
+    ta.rows = 4
+    ta.placeholder = t('keep.insertBlockPlaceholder')
+    ta.setAttribute('aria-label', t('keep.insertBlockLabel'))
+    ta.value = String(initialValue)
+    const act = document.createElement('div')
+    act.className = 'km-src-actions'
+    const ok = document.createElement('button')
+    ok.type = 'button'
+    ok.className = 'ok'
+    ok.textContent = t('keep.editConfirmKey')
+    const cancel = document.createElement('button')
+    cancel.type = 'button'
+    cancel.textContent = t('edit.cancel')
+    act.append(ok, cancel)
+    container.append(ta, act)
+    const at = Number.isInteger(atOverride) ? atOverride : where === 'above' ? b.start : b.end + 1
+    if (where === 'above') blockDiv.before(container)
+    else blockDiv.after(container)
+    activeBlockEdit = {
+      mode: 'insert',
+      ta,
+      b,
+      at,
+      container,
+      beforeLine: at > 0 ? lines[at - 1] : null,
+      afterLine: at < lines.length ? lines[at] : null,
+      originalRaw: ''
+    }
+    ta.addEventListener('input', persistActiveDraft)
+    persistActiveDraft()
+    ta.focus()
+    ta.setSelectionRange(ta.value.length, ta.value.length)
+    ta.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        e.stopPropagation()
+        closeBlockEdit(false)
+      } else if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault()
+        e.stopPropagation()
+        closeBlockEdit(true)
+      }
+    })
+    cancel.onclick = () => closeBlockEdit(false)
+    ok.onclick = () => closeBlockEdit(true)
+  })
+}
+
+function structuralBlock(bi) {
+  const b = blocks[bi]
+  return b && b.type !== 'table' && b.type !== 'frontmatter' ? b : null
+}
+
+function duplicateBlock(bi) {
+  const b = structuralBlock(bi)
+  if (!b) return false
+  const inserted = prepareBlockInsertion(lines, b.end + 1, lines.slice(b.start, b.end + 1))
+  if (!inserted.length) return false
+  mutate(() => lines.splice(b.end + 1, 0, ...inserted))
+  rerender()
+  return true
+}
+
+function deleteBlock(bi) {
+  const b = structuralBlock(bi)
+  if (!b) return false
+  mutate(() => lines.splice(b.start, b.end - b.start + 1))
+  rerender()
+  return true
+}
+
+function performBlockCommand(command, requestedBi) {
+  const bi = Number.isInteger(requestedBi) ? requestedBi : lastInteractedBi
+  if (!structuralBlock(bi)) return false
+  if (command === 'insertAbove' || command === 'insertBelow') {
+    startBlockInsert(bi, command === 'insertAbove' ? 'above' : 'below')
+    return true
+  }
+  if (command === 'duplicate') {
+    openAfterClose(() => duplicateBlock(bi))
+    return true
+  }
+  if (command === 'delete') {
+    openAfterClose(() => deleteBlock(bi))
+    return true
+  }
+  return false
+}
+
 // ── structural table edits ──
 const getTable = (ti) => blocks.filter((b) => b.type === 'table')[ti]
 
-function doInsertRow(ti, ri, where) {
-  const b = getTable(ti)
-  if (!b) return
-  let at
-  if (where === 'first') at = b.sepLine + 1
-  else if (where === 'above') at = b.dataRows[ri]?.lineIdx
-  else at = (b.dataRows[ri]?.lineIdx ?? b.sepLine) + 1
-  if (at == null) return
-  const row = stripCR(buildTableRow(b.headers.length, lines[b.headerLine] || ''))
-  mutate(() => lines.splice(at, 0, row))
+function selectionForCell(cell) {
+  const table = cell?.closest?.('table.km-table')
+  if (!table || !host.contains(table)) return null
+  const isHeader = cell.tagName === 'TH'
+  return {
+    ti: parseInt(table.getAttribute('data-ti')),
+    ri: isHeader ? -1 : parseInt(cell.closest('tr')?.getAttribute('data-ri')),
+    ci: parseInt(cell.getAttribute('data-ci')),
+    isHeader,
+    line: parseInt(cell.getAttribute('data-line'))
+  }
+}
+
+function resolveSelection(selection = selectedCell) {
+  if (!selection || !Number.isFinite(selection.ti) || !Number.isFinite(selection.ci)) return null
+  const rowSelector = selection.isHeader
+    ? 'thead tr'
+    : 'tbody tr[data-ri="' + selection.ri + '"]'
+  return host.querySelector(
+    'table.km-table[data-ti="' + selection.ti + '"] ' +
+      rowSelector +
+      ' > ' +
+      (selection.isHeader ? 'th' : 'td') +
+      '[data-ci="' +
+      selection.ci +
+      '"]'
+  )
+}
+
+function clearTableSelection({ focusTable = false } = {}) {
+  const cell = resolveSelection()
+  const table = cell?.closest('table.km-table')
+  if (cell) {
+    cell.classList.remove('km-cell-selected')
+    cell.removeAttribute('aria-selected')
+    cell.removeAttribute('aria-label')
+    cell.tabIndex = -1
+  }
+  selectedCell = null
+  if (table) {
+    table.tabIndex = 0
+    if (focusTable) table.focus({ preventScroll: true })
+  }
+}
+
+function selectCell(cell, { focus = true, scroll = false } = {}) {
+  const next = selectionForCell(cell)
+  if (!next) return false
+  const previous = resolveSelection()
+  if (previous && previous !== cell) {
+    previous.classList.remove('km-cell-selected')
+    previous.removeAttribute('aria-selected')
+    previous.removeAttribute('aria-label')
+    previous.tabIndex = -1
+  }
+  selectedCell = next
+  const table = cell.closest('table.km-table')
+  table.tabIndex = -1
+  table.setAttribute('aria-label', t('keep.tableAria', { n: next.ti + 1 }))
+  cell.classList.add('km-cell-selected')
+  cell.setAttribute('aria-selected', 'true')
+  cell.setAttribute(
+    'aria-label',
+    t('keep.cellAria', {
+      row: next.isHeader ? 1 : next.ri + 2,
+      column: next.ci + 1,
+      value: cell.getAttribute('data-raw') || ''
+    })
+  )
+  cell.tabIndex = 0
+  if (focus) cell.focus({ preventScroll: true })
+  if (scroll) cell.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+  return true
+}
+
+function restoreSelectedCell() {
+  if (!selectedCell) return false
+  const cell = resolveSelection()
+  if (!cell) {
+    clearTableSelection()
+    return false
+  }
+  if (cell.classList.contains('km-cell-selected')) return true
+  return selectCell(cell, { focus: false })
+}
+
+function visibleCellInRow(row, startCi, delta) {
+  if (!row) return null
+  for (let ci = startCi; ci >= 0 && ci < row.children.length; ci += delta) {
+    const cell = row.children[ci]
+    if (!cell.classList.contains('km-col-hidden')) return cell
+  }
+  return null
+}
+
+function adjacentVisibleRow(table, row, delta) {
+  let next = delta > 0 ? row.nextElementSibling : row.previousElementSibling
+  if (!next) {
+    if (delta > 0 && row.parentElement?.tagName === 'THEAD') {
+      next = table.tBodies[0]?.firstElementChild || null
+    } else if (delta < 0 && row.parentElement?.tagName === 'TBODY') {
+      next = table.tHead?.rows?.[0] || null
+    }
+  }
+  while (next?.classList.contains('km-filtered')) {
+    next = delta > 0 ? next.nextElementSibling : next.previousElementSibling
+  }
+  return next
+}
+
+function moveSelectedCell(direction) {
+  const cell = resolveSelection()
+  if (!cell) return false
+  const table = cell.closest('table.km-table')
+  const row = cell.closest('tr')
+  const ci = parseInt(cell.getAttribute('data-ci'))
+  let target = null
+  if (direction === 'left') target = visibleCellInRow(row, ci - 1, -1)
+  else if (direction === 'right') target = visibleCellInRow(row, ci + 1, 1)
+  else {
+    const delta = direction === 'up' || direction === 'previous' ? -1 : 1
+    if (direction === 'previous') {
+      target = visibleCellInRow(row, ci - 1, -1)
+      if (!target) {
+        const nextRow = adjacentVisibleRow(table, row, delta)
+        target = visibleCellInRow(nextRow, nextRow?.children.length - 1, -1)
+      }
+    } else if (direction === 'next') {
+      target = visibleCellInRow(row, ci + 1, 1)
+      if (!target) {
+        const nextRow = adjacentVisibleRow(table, row, delta)
+        target = visibleCellInRow(nextRow, 0, 1)
+      }
+    } else {
+      const nextRow = adjacentVisibleRow(table, row, delta)
+      target = nextRow?.children[ci] || null
+      if (target?.classList.contains('km-col-hidden')) target = null
+    }
+  }
+  return target ? selectCell(target, { scroll: true }) : false
+}
+
+function tableItemsForCell(cell) {
+  const table = cell?.closest('table.km-table')
+  const selection = selectionForCell(cell)
+  if (!table || !selection) return []
+  const tr = cell.closest('tr')
+  const items = [
+    { label: t('keep.copyCell'), fn: () => copyElement(cell) },
+    { label: t('keep.copyRow'), fn: () => copyRow(tr) },
+    { label: t('keep.copyCol'), fn: () => copyColumn(table, selection.ci) },
+    { label: t('keep.copyTable'), fn: () => copyTable(table) },
+    'sep'
+  ]
+  buildTableItems(items, selection.ti, selection.ri, selection.ci, selection.isHeader)
+  return items
+}
+
+function performTableCommand(command) {
+  const cell = resolveSelection()
+  const selection = selectionForCell(cell)
+  if (!cell || !selection) return false
+  const table = cell.closest('table.km-table')
+  const headerFilter = table.querySelector('.km-filter-btn[data-ci="' + selection.ci + '"]')
+  if (command === 'edit') openCellPop(cell)
+  else if (command === 'filter') {
+    if (!headerFilter) return false
+    openFilterPop(headerFilter)
+  } else if (command === 'menu') {
+    const rect = cell.getBoundingClientRect()
+    openMenu(rect.left + 8, rect.bottom + 4, tableItemsForCell(cell))
+  } else return false
+  return true
+}
+
+function pasteIntoSelectedCells(event) {
+  if (activeCellPop || activeBlockEdit) return false
+  const cell = resolveSelection()
+  const selection = selectionForCell(cell)
+  if (!cell || !selection) return false
+  const text = event.clipboardData?.getData('text/plain')
+  if (text == null || text === '') return false
+  const table = getTable(selection.ti)
+  const result = buildTablePastePatch(
+    lines,
+    table,
+    selection.isHeader ? 0 : selection.ri + 1,
+    selection.ci,
+    text
+  )
+  if (!result.replacements.length) return false
+  const start = result.replacements[0].lineIdx
+  const end = result.replacements.at(-1).lineIdx
+  const replacementLines = lines.slice(start, end + 1)
+  result.replacements.forEach(({ lineIdx, line }) => {
+    replacementLines[lineIdx - start] = line
+  })
+  event.preventDefault()
+  mutate(() => lines.splice(start, end - start + 1, ...replacementLines))
   rerender()
+  showToast(
+    t(result.clipped ? 'keep.changePasteClipped' : 'keep.changePaste', {
+      rows: result.appliedRows,
+      columns: result.appliedColumns
+    })
+  )
+  return true
+}
+
+function doInsertRow(ti, ri, where) {
+  openAfterClose(() => {
+    const b = getTable(ti)
+    if (!b) return
+    let at
+    if (where === 'first') at = b.sepLine + 1
+    else if (where === 'above') at = b.dataRows[ri]?.lineIdx
+    else at = (b.dataRows[ri]?.lineIdx ?? b.sepLine) + 1
+    if (at == null) return
+    const row = stripCR(buildTableRow(b.headers.length, lines[b.headerLine] || ''))
+    mutate(() => lines.splice(at, 0, row))
+    rerender()
+  })
 }
 function doDeleteRow(ti, ri) {
-  const b = getTable(ti)
-  if (!b) return
-  const dr = b.dataRows[ri]
-  if (!dr) return
-  mutate(() => lines.splice(dr.lineIdx, 1))
-  rerender()
+  openAfterClose(() => {
+    const b = getTable(ti)
+    if (!b) return
+    const dr = b.dataRows[ri]
+    if (!dr) return
+    mutate(() => lines.splice(dr.lineIdx, 1))
+    rerender()
+  })
 }
 function doInsertColumn(ti, colIdx) {
-  const b = getTable(ti)
-  if (!b) return
-  mutate(() => {
-    for (let ln = b.start; ln <= b.end; ln++) {
-      const content = ln === b.sepLine ? '---' : ''
-      lines[ln] = stripCR(insertColumnInLine(lines[ln], colIdx, content))
-    }
+  openAfterClose(() => {
+    const b = getTable(ti)
+    if (!b) return
+    mutate(() => {
+      for (let ln = b.start; ln <= b.end; ln++) {
+        const content = ln === b.sepLine ? '---' : ''
+        lines[ln] = stripCR(insertColumnInLine(lines[ln], colIdx, content))
+      }
+    })
+    delete filterState[ti]
+    delete columnState[ti]
+    rerender()
   })
-  delete filterState[ti]
-  delete columnState[ti]
-  rerender()
 }
 function doDeleteColumn(ti, colIdx) {
-  const b = getTable(ti)
-  if (!b || b.headers.length <= 1) return
-  mutate(() => {
-    for (let ln = b.start; ln <= b.end; ln++) {
-      lines[ln] = stripCR(removeColumnInLine(lines[ln], colIdx))
-    }
+  openAfterClose(() => {
+    const b = getTable(ti)
+    if (!b || b.headers.length <= 1) return
+    mutate(() => {
+      for (let ln = b.start; ln <= b.end; ln++) {
+        lines[ln] = stripCR(removeColumnInLine(lines[ln], colIdx))
+      }
+    })
+    delete filterState[ti]
+    delete columnState[ti]
+    rerender()
   })
-  delete filterState[ti]
-  delete columnState[ti]
-  rerender()
 }
 
 // ── context menu ──
@@ -1279,6 +1967,8 @@ function clearAllFilters() {
 let settingsPop = null
 let settingsBtn = null
 let sourceBtn = null
+let problemsBtn = null
+let diagnosticCount = 0
 let outlinePop = null
 let outlineBtn = null
 
@@ -1349,6 +2039,7 @@ function applyLangChrome() {
     settingsBtn.title = t('settings.title')
     settingsBtn.setAttribute('aria-label', t('settings.title'))
   }
+  if (problemsBtn) updateProblemsButton(diagnosticCount)
   if (findInput) findInput.placeholder = t('find.placeholder')
   if (replaceInput) replaceInput.placeholder = t('find.replacePlaceholder')
 }
@@ -1631,9 +2322,37 @@ function ensureSourceButton() {
     '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg><span>' +
     escapeHtmlLocal(t('mode.source')) +
     '</span>'
-  btn.onclick = () => vscode.postMessage({ type: 'switchToSource' })
+  btn.onclick = () => openAfterClose(() => vscode.postMessage({ type: 'switchToSource' }))
   document.body.appendChild(btn)
   sourceBtn = btn
+}
+
+// Keep defers validation and workspace analysis to VS Code's Markdown language
+// service. Surface only a compact badge when diagnostics exist; clicking it
+// opens the native Problems view instead of rebuilding a second diagnostics UI.
+function updateProblemsButton(count) {
+  const total = Math.max(0, Number(count) || 0)
+  diagnosticCount = total
+  if (!total) {
+    problemsBtn?.remove()
+    problemsBtn = null
+    return
+  }
+  if (!problemsBtn) {
+    const btn = document.createElement('button')
+    btn.type = 'button'
+    btn.className = 'km-problems-btn'
+    btn.onclick = () => vscode.postMessage({ type: 'openProblems' })
+    document.body.appendChild(btn)
+    problemsBtn = btn
+  }
+  const label = t('problems.open') + ' (' + total + ')'
+  problemsBtn.title = label
+  problemsBtn.setAttribute('aria-label', label)
+  problemsBtn.innerHTML =
+    '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 2.9 1.8 17a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 2.9a2 2 0 0 0-3.4 0Z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg><span>' +
+    escapeHtmlLocal(total > 99 ? '99+' : String(total)) +
+    '</span>'
 }
 
 // ── outline (heading navigator) ──
@@ -2057,7 +2776,7 @@ function safeDecode(s) {
     return s
   }
 }
-function activateLink(href) {
+function activateLink(href, { openToSide = false } = {}) {
   if (href.startsWith('#')) {
     scrollToAnchor(href.slice(1))
     return
@@ -2071,7 +2790,7 @@ function activateLink(href) {
   }
   // Relative file link (optionally with #fragment) — the host resolves it
   // against the document folder and opens it in VSCode.
-  vscode.postMessage({ type: 'openRelative', href })
+  vscode.postMessage({ type: 'openRelative', href, openToSide })
 }
 
 // ── anchors (#heading) ──
@@ -2349,6 +3068,7 @@ function onDblClick(e) {
   if (e.target.closest('input.km-task-cb')) return // fast double-click on a checkbox ≠ block edit
   const cell = e.target.closest('td, th')
   if (cell && host.contains(cell) && !e.target.closest('.km-filter-btn')) {
+    selectCell(cell)
     openCellPop(cell)
     return
   }
@@ -2359,6 +3079,11 @@ function onDblClick(e) {
 }
 function onClick(e) {
   trackInteraction(e)
+  const clickedCell = e.target.closest('td, th')
+  if (clickedCell && host.contains(clickedCell)) selectCell(clickedCell)
+  else if (!e.target.closest('.km-collapse-toggle, .km-mermaid-zoom, .km-src-edit')) {
+    clearTableSelection()
+  }
   // GFM task checkbox: the browser already flipped `checked`; write the toggle
   // back to exactly one source line. No re-render needed — the DOM is the new
   // state, and the minimal diff is that single line.
@@ -2367,8 +3092,13 @@ function onClick(e) {
     const n = parseInt(cb.getAttribute('data-line'))
     if (!Number.isNaN(n) && lines[n] != null) {
       const on = cb.checked
-      mutate(() => {
-        lines[n] = lines[n].replace(/^(\s*(?:[-*+]|\d+[.)])\s+)\[[ xX]\]/, '$1[' + (on ? 'x' : ' ') + ']')
+      if (activeCellPop || activeBlockEdit) cb.checked = !on
+      openAfterClose(() => {
+        const next = toggleTaskLine(lines[n], on)
+        if (next === lines[n]) return
+        mutate(() => {
+          lines[n] = next
+        })
       })
     }
     return
@@ -2395,7 +3125,8 @@ function onClick(e) {
     if (href && href !== '#') {
       e.preventDefault()
       clearTimeout(linkTimer)
-      linkTimer = setTimeout(() => activateLink(href), 230)
+      const openToSide = e.altKey
+      linkTimer = setTimeout(() => activateLink(href, { openToSide }), 230)
       return
     }
   }
@@ -2419,25 +3150,37 @@ function onContextMenu(e) {
   if (hasSel) {
     items.push({ label: t('keep.copySel'), fn: () => copySelection(sel) })
   } else {
+    const link = e.target.closest('a[href]')
+    const linkHref = link?.getAttribute('href') || ''
+    if (
+      link &&
+      host.contains(link) &&
+      linkHref &&
+      !linkHref.startsWith('#') &&
+      !/^[a-z][a-z\d+.-]*:/i.test(linkHref)
+    ) {
+      items.push({
+        label: t('links.openRight'),
+        fn: () => activateLink(linkHref, { openToSide: true })
+      })
+      items.push('sep')
+    }
     const cell = e.target.closest('td, th')
     if (cell && host.contains(cell)) {
-      const table = cell.closest('table.km-table')
-      if (!table) return
-      const ti = parseInt(table.getAttribute('data-ti'))
-      const ci = parseInt(cell.getAttribute('data-ci'))
-      const isHeader = cell.tagName === 'TH'
-      const tr = cell.closest('tr')
-      const ri = isHeader ? -1 : parseInt(tr.getAttribute('data-ri'))
-      items.push({ label: t('keep.copyCell'), fn: () => copyElement(cell) })
-      items.push({ label: t('keep.copyRow'), fn: () => copyRow(tr) })
-      items.push({ label: t('keep.copyCol'), fn: () => copyColumn(table, ci) })
-      items.push({ label: t('keep.copyTable'), fn: () => copyTable(table) })
-      items.push('sep')
-      buildTableItems(items, ti, ri, ci, isHeader)
+      selectCell(cell)
+      items.push(...tableItemsForCell(cell))
     } else {
       const block = e.target.closest('.km-block')
       if (!block || !host.contains(block)) return
+      const bi = parseInt(block.getAttribute('data-bi'))
       items.push({ label: t('keep.copy'), fn: () => copyElement(block) })
+      if (structuralBlock(bi)) {
+        items.push('sep')
+        items.push({ label: t('keep.blockInsertAbove'), fn: () => performBlockCommand('insertAbove', bi) })
+        items.push({ label: t('keep.blockInsertBelow'), fn: () => performBlockCommand('insertBelow', bi) })
+        items.push({ label: t('keep.blockDuplicate'), fn: () => performBlockCommand('duplicate', bi) })
+        items.push({ label: t('keep.blockDelete'), fn: () => performBlockCommand('delete', bi) })
+      }
     }
   }
   if (!items.length) return
@@ -2468,8 +3211,61 @@ function onDocDown(e) {
 }
 function onEsc(e) {
   if (e.key !== 'Escape') return
+  if (activeConfirm?.dataset.blocking === 'true') return
   if (activeConfirm) closeConfirm()
   else if (activeMenu) closeMenu()
+  else if (activePop) closePop()
+  else if (selectedCell) clearTableSelection({ focusTable: true })
+}
+function onMouseOver(e) {
+  const link = e.target.closest?.('a[href]')
+  if (!link || !host.contains(link) || link.dataset.keepSideHint === 'true') return
+  const href = link.getAttribute('href') || ''
+  if (!href || href.startsWith('#') || /^[a-z][a-z\d+.-]*:/i.test(href)) return
+  const authoredTitle = link.getAttribute('title')
+  link.title = (authoredTitle ? authoredTitle + '\n' : '') + t('links.openRightHint')
+  link.dataset.keepSideHint = 'true'
+}
+
+function onFocusIn(e) {
+  const cell = e.target.closest?.('td, th')
+  if (cell && host.contains(cell)) {
+    if (!cell.classList.contains('km-cell-selected')) selectCell(cell, { focus: false })
+    return
+  }
+  const table = e.target.closest?.('table.km-table')
+  if (table && host.contains(table)) {
+    const first = visibleCellInRow(table.tHead?.rows?.[0], 0, 1)
+    if (first) selectCell(first)
+  }
+}
+
+function onTableKeyDown(e) {
+  if (!e.target.closest?.('table.km-table')) return
+  if (!resolveSelection()) return
+  let handled = false
+  if (e.key === 'Enter' || e.key === 'F2') handled = performTableCommand('edit')
+  else if (e.altKey && e.key === 'ArrowDown') handled = performTableCommand('filter')
+  else if ((e.shiftKey && e.key === 'F10') || e.key === 'ContextMenu') {
+    handled = performTableCommand('menu')
+  } else if (e.key === 'ArrowLeft') handled = moveSelectedCell('left')
+  else if (e.key === 'ArrowRight') handled = moveSelectedCell('right')
+  else if (e.key === 'ArrowUp') handled = moveSelectedCell('up')
+  else if (e.key === 'ArrowDown') handled = moveSelectedCell('down')
+  else if (e.key === 'Tab') handled = moveSelectedCell(e.shiftKey ? 'previous' : 'next')
+  else if (e.key === 'Escape') {
+    const dismissedOverlay = Boolean(activeMenu || activePop)
+    if (activeMenu) closeMenu()
+    else if (activePop) closePop()
+    else clearTableSelection({ focusTable: true })
+    if (dismissedOverlay) {
+      queueMicrotask(() => resolveSelection()?.focus({ preventScroll: true }))
+    }
+    handled = true
+  }
+  if (!handled) return
+  e.preventDefault()
+  e.stopPropagation()
 }
 function onScroll(e) {
   closeMenu()
@@ -2490,8 +3286,12 @@ function onResize() {
 
 host.addEventListener('dblclick', onDblClick)
 host.addEventListener('click', onClick)
+host.addEventListener('mouseover', onMouseOver)
 host.addEventListener('contextmenu', onContextMenu)
 host.addEventListener('copy', onCopy)
+host.addEventListener('paste', pasteIntoSelectedCells)
+host.addEventListener('focusin', onFocusIn)
+host.addEventListener('keydown', onTableKeyDown)
 document.addEventListener('paste', onPaste)
 document.addEventListener('dragover', onDragOver)
 document.addEventListener('drop', onDrop)
@@ -2504,10 +3304,17 @@ document.addEventListener('keydown', (e) => {
   if ((e.ctrlKey || e.metaKey) && !e.altKey && (e.key === 'f' || e.key === 'F')) {
     e.preventDefault()
     openFind()
+  } else if ((e.ctrlKey || e.metaKey) && !e.altKey && (e.key === 's' || e.key === 'S')) {
+    if (activeConfirm?.dataset.blocking === 'true') return
+    e.preventDefault()
+    openAfterClose(() => vscode.postMessage({ type: 'saveDocument' }))
   }
 })
 window.addEventListener('scroll', onScroll, true)
 window.addEventListener('resize', onResize)
+window.addEventListener('beforeunload', () => {
+  if (!pendingEditDrafts.size) persistActiveDraft(true)
+})
 
 // Tell the host we're ready to receive the initial document.
 if (!ready) {
