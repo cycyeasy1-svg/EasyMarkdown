@@ -50,6 +50,24 @@ function paste(target, text) {
 }
 
 describe('VSCode Keep webview interactions', () => {
+  it('uses rendered link labels for automatic table column widths', async () => {
+    send({
+      type: 'init',
+      text: [
+        '| A | B |',
+        '| --- | --- |',
+        '| 短 | [短](https://example.com/a(b)some-very-long-suffix-that-is-only-in-target) |'
+      ].join('\n'),
+      lang: 'en',
+      langPref: 'en',
+      theme: 'auto'
+    })
+    await waitForPaint()
+
+    const widths = [...document.querySelectorAll('table.km-table col')].map((col) => col.style.width)
+    expect(widths).toEqual(['6em', '6em'])
+  })
+
   it('shows candidate counts within the other columns\' filter context', async () => {
     send({
       type: 'init',

@@ -272,6 +272,36 @@ test('Keep change review supports semantic undo, partial restore and locating a 
   }
 })
 
+test('keep table columns use rendered link labels instead of hidden destinations', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'em-table-link-width-'))
+  const file = join(dir, 'table-link-width.md')
+  writeFileSync(
+    file,
+    [
+      '| A | B |',
+      '| --- | --- |',
+      '| 短 | [短](https://example.com/a(b)some-very-long-suffix-that-is-only-in-target) |'
+    ].join('\n'),
+    'utf8'
+  )
+
+  const { page, cleanup } = await launchApp([file])
+  try {
+    await page.locator('.tab', { hasText: 'table-link-width.md' }).click()
+    const headers = page.locator('.km-doc table.km-table th')
+    await expect(headers).toHaveCount(2)
+    const widths = await headers.evaluateAll((cells) => cells.map((cell) => cell.offsetWidth))
+    expect(Math.abs(widths[0] - widths[1])).toBeLessThanOrEqual(2)
+  } finally {
+    await cleanup()
+    try {
+      rmSync(dir, { recursive: true, force: true })
+    } catch {
+      /* best effort */
+    }
+  }
+})
+
 test('keep table columns resize, auto-fit, hide and restore without dirtying the document', async () => {
   const { page, cleanup } = await openWelcome()
   try {

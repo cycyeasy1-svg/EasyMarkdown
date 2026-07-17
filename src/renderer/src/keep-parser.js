@@ -181,19 +181,22 @@ function clamp(n, min, max) {
   return Math.max(min, Math.min(max, n))
 }
 
-function stripWidthMarkup(text) {
-  return String(text)
-    .replace(/!\[([^\]]*)\]\([^)]+\)/g, '$1')
-    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
-    .replace(/`([^`]+)`/g, '$1')
-    .replace(/&(?:#x?[0-9a-f]+|[a-z][a-z0-9]*);/gi, 'x')
-    .replace(/[*_~]/g, '')
-    .trim()
+function visibleInlineText(text) {
+  const source = String(text)
+  // Plain cells are by far the common case in large tables. Avoid paying for a
+  // markdown-it parse when the source and rendered text are necessarily equal.
+  if (!/[\\`*_~[\]<>=&!]/.test(source)) return source.trim()
+
+  // Width hints must follow the same inline grammar as the rendered cell. A
+  // regex cannot reliably remove link destinations with nested parentheses or
+  // escaped brackets, and would count hidden URL text as visible column content.
+  const tokens = md.parseInline(source, {})[0]?.children || []
+  return md.renderer.renderInlineAsText(tokens, md.options, {}).trim()
 }
 
 function measureTextEm(text) {
   let units = 0
-  for (const ch of Array.from(stripWidthMarkup(text))) {
+  for (const ch of Array.from(visibleInlineText(text))) {
     if (/\s/.test(ch)) units += 0.35
     else if (WIDE_CHAR_RE.test(ch)) units += 1
     else units += 0.58

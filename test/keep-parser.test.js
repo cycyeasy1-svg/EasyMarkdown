@@ -280,6 +280,22 @@ describe('table cell/column edits (raw-line, byte-preserving)', () => {
 })
 
 describe('table column width hints', () => {
+  it('sizes links from their rendered labels instead of hidden Markdown destinations', () => {
+    const plain = estimateTableColumnWidths(['Column'], [{ cells: ['短'] }])[0]
+    const nestedDestination = estimateTableColumnWidths(
+      ['Column'],
+      [{ cells: ['[短](https://example.com/a(b)some-very-long-suffix-that-is-only-in-target)'] }]
+    )[0]
+    const escapedLabel = estimateTableColumnWidths(
+      ['Column'],
+      [{ cells: ['[a \\] b](https://example.com/' + 'z'.repeat(120) + ')'] }]
+    )[0]
+    const renderedEscapedLabel = estimateTableColumnWidths(['Column'], [{ cells: ['a ] b'] }])[0]
+
+    expect(nestedDestination).toBe(plain)
+    expect(escapedLabel).toBe(renderedEscapedLabel)
+  })
+
   it('gives long multi-line cells more width than empty sibling columns', () => {
     const widths = estimateTableColumnWidths(
       ['State', 'Action', 'Placeholder'],
