@@ -7,9 +7,13 @@ import { test, expect } from '@playwright/test'
 import { mkdtempSync, writeFileSync, readFileSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { launchApp } from './helpers.js'
+import { launchApp, selectStatusViewMode } from './helpers.js'
 
 const FOLD_DOC = ['# Alpha', 'alpha body 1', 'alpha body 2', '# Beta', 'beta body'].join('\n')
+const selectMode = async (page, mode) => {
+  const viewMode = mode === 'source' ? 'source' : 'rich'
+  await selectStatusViewMode(page, viewMode)
+}
 
 test('fold hides the section, an edit while folded survives unfold and save', async () => {
   // Saving writes to disk, so operate on a throwaway copy.
@@ -23,7 +27,7 @@ test('fold hides the section, an edit while folded survives unfold and save', as
     await expect(page.locator('.km-doc')).toBeVisible()
 
     // Enter global source mode via the status-bar toggle.
-    await page.locator('button[title*="切换源码模式"]').click()
+    await selectMode(page, 'source')
     const ta = page.locator('textarea.source-editor')
     await expect(ta).toBeVisible()
     await expect(ta).toHaveValue(FOLD_DOC)
@@ -72,7 +76,7 @@ test('line jump into a collapsed section auto-expands it', async () => {
   try {
     await page.locator('.tab', { hasText: 'jump-test.md' }).click()
     await expect(page.locator('.km-doc')).toBeVisible()
-    await page.locator('button[title*="切换源码模式"]').click()
+    await selectMode(page, 'source')
     const ta = page.locator('textarea.source-editor')
     await expect(ta).toBeVisible()
 

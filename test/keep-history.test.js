@@ -23,9 +23,21 @@ describe('keep history', () => {
 
   it('creates a direct patch without comparing the rest of a large document', () => {
     const lines = ['before', 'target', 'after']
-    const entry = createKeepHistoryPatch(lines, 1, 1, ['changed'])
+    const entry = createKeepHistoryPatch(lines, 1, 1, ['changed'], {
+      kind: 'cell',
+      target: { line: 2, table: 1, row: 1, column: 2 },
+      summaryKey: 'keep.changeCell',
+      createdAt: 123
+    })
 
     expect(entry).toMatchObject({ start: 1, before: ['target'], after: ['changed'] })
+    expect(entry.meta).toEqual({
+      kind: 'cell',
+      target: { line: 2, table: 1, row: 1, column: 2 },
+      summaryKey: 'keep.changeCell',
+      summaryVars: null,
+      createdAt: 123
+    })
     expect(applyKeepHistoryEntry(lines, entry)).toEqual(['before', 'changed', 'after'])
   })
 

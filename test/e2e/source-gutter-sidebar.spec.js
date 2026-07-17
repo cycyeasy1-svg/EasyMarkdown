@@ -2,9 +2,12 @@ import { test, expect } from '@playwright/test'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { launchApp } from './helpers.js'
+import { launchApp, selectStatusViewMode } from './helpers.js'
 
-const sourceToggle = (page) => page.locator('button[title^="切换源码模式"]')
+const selectMode = async (page, mode) => {
+  const viewMode = mode === 'source' ? 'source' : 'rich'
+  await selectStatusViewMode(page, viewMode)
+}
 
 async function removeFixture(cleanup, dir) {
   await cleanup()
@@ -23,7 +26,7 @@ test('source gutter masks horizontally scrolled text behind fixed line numbers',
   const { page, cleanup } = await launchApp([file])
   try {
     await page.locator('.tab', { hasText: 'wide.md' }).click()
-    await sourceToggle(page).click()
+    await selectMode(page, 'source')
     const source = page.locator('textarea.source-editor')
     const mask = page.locator('.source-gutter-mask')
     await expect(source).toBeVisible()

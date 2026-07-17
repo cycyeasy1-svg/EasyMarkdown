@@ -2,9 +2,12 @@ import { test, expect } from '@playwright/test'
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { launchApp } from './helpers.js'
+import { launchApp, selectStatusViewMode } from './helpers.js'
 
-const sourceToggle = (page) => page.locator('button[title^="切换源码模式"]')
+const selectMode = async (page, mode) => {
+  const viewMode = mode === 'source' ? 'source' : 'rich'
+  await selectStatusViewMode(page, viewMode)
+}
 
 async function removeFixture(cleanup, dir) {
   await cleanup()
@@ -29,7 +32,7 @@ test('source mode is remembered per tab and keeps the Keep editor mounted', asyn
     await expect(keep).toBeVisible()
     await keep.evaluate((node) => { node.dataset.sourceModeToken = 'kept' })
 
-    await sourceToggle(page).click()
+    await selectMode(page, 'source')
     const source = page.locator('textarea.source-editor')
     await expect(source).toBeVisible()
     await expect(keep).toBeAttached()
@@ -42,7 +45,7 @@ test('source mode is remembered per tab and keeps the Keep editor mounted', asyn
 
     const updated = '# First source tab\n\nUpdated through full source\n'
     await source.fill(updated)
-    await sourceToggle(page).click()
+    await selectMode(page, 'keep')
     await expect(keep).toBeVisible()
     await expect(keep).toHaveAttribute('data-source-mode-token', 'kept')
     await expect(keep).toContainText('Updated through full source')
@@ -64,7 +67,7 @@ test('source outline and find work without taking focus from the find input', as
   const { page, cleanup } = await launchApp([file])
   try {
     await page.locator('.tab', { hasText: 'navigation.md' }).click()
-    await sourceToggle(page).click()
+    await selectMode(page, 'source')
     const source = page.locator('textarea.source-editor')
     await expect(source).toBeVisible()
 
@@ -106,12 +109,18 @@ test('Milkdown survives source round-trips and maps the caret structurally', asy
     await page.locator('.mode-switch-wrap > button').click()
     const rich = page.locator('.ProseMirror', { hasText: 'Rich map' })
     await expect(rich).toBeVisible()
+    await expect(page.locator('.hm-engine-mode')).toContainText('Milkdown')
+    await expect(page.locator('.hm-view-mode-control .hm-view-mode-btn')).toHaveCount(1)
+    await expect(page.locator('.hm-view-mode-btn')).toHaveAttribute(
+      'title',
+      '切换显示方式（富文本 ⇄ 源码）'
+    )
     await rich.evaluate((node) => { node.dataset.sourceModeToken = 'rich-kept' })
 
     const target = rich.locator('p', { hasText: 'Target formatted paragraph.' })
     await target.click()
     await page.keyboard.press('End')
-    await sourceToggle(page).click()
+    await selectMode(page, 'source')
     const source = page.locator('textarea.source-editor')
     await expect(source).toBeVisible()
     await expect(rich).toBeAttached()
@@ -123,7 +132,7 @@ test('Milkdown survives source round-trips and maps the caret structurally', asy
 
     const updated = original.replace('Target **formatted** paragraph.', 'Target **updated** paragraph.')
     await source.fill(updated)
-    await sourceToggle(page).click()
+    await selectMode(page, 'milkdown')
     await expect(rich).toBeVisible()
     await expect(rich).toHaveAttribute('data-source-mode-token', 'rich-kept')
     await expect(rich).toContainText('Target updated paragraph.')
@@ -147,7 +156,7 @@ test('Keep maps the visible body row of a tall table to source and back', async 
     const targetRow = page.locator('.km-table tbody tr').nth(targetIndex)
     await targetRow.evaluate((row) => row.scrollIntoView({ block: 'start' }))
 
-    await sourceToggle(page).click()
+    await selectMode(page, 'source')
     const source = page.locator('textarea.source-editor')
     await expect(source).toBeVisible()
     await expect.poll(() => source.evaluate((el) => {
@@ -162,7 +171,7 @@ test('Keep maps the visible body row of a tall table to source and back', async 
     await source.evaluate((el, offset) => {
       el.__hmSourceApi?.scrollToOffset?.(offset, { align: 'top', userNavigation: true })
     }, returnOffset)
-    await sourceToggle(page).click()
+    await selectMode(page, 'keep')
     const returnRow = page.locator('.km-table tbody tr').nth(returnIndex)
     await expect.poll(() => returnRow.evaluate((row) => {
       const scroller = row.closest('.editor-scroll')

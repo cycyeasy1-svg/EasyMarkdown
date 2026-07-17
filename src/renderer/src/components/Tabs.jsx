@@ -25,7 +25,8 @@ function Tabs({
   onDelete,
   onExportPdf,
   onReorder,
-  onTogglePin
+  onTogglePin,
+  onPromotePreview
 }) {
   const { t } = useI18n()
   const activeRef = useRef(null)
@@ -135,7 +136,8 @@ function Tabs({
               ref={tab.id === focusedId ? activeRef : null}
               className={
                 `tab${isActive ? ' active' : ''}${isActive && !focused ? ' split-peer' : ''}` +
-                `${tab.pinned ? ' pinned' : ''}${dragOverId === tab.id ? ' drag-over' : ''}`
+                `${tab.pinned ? ' pinned' : ''}${tab.preview ? ' preview' : ''}` +
+                `${dragOverId === tab.id ? ' drag-over' : ''}`
               }
               draggable={!isMobile && !!onReorder}
               onDragStart={(e) => {
@@ -165,6 +167,7 @@ function Tabs({
                 if (from && from !== tab.id) onReorder?.(from, tab.id)
               }}
               onClick={() => onActivate(tab.id)}
+              onDoubleClick={() => onPromotePreview?.(tab.id)}
               onContextMenu={(e) => {
                 e.preventDefault()
                 setMenu({ x: e.clientX, y: e.clientY, tab })
@@ -175,7 +178,12 @@ function Tabs({
                   onClose(tab.id)
                 }
               }}
-              title={tab.path || tab.title}
+              title={
+                tab.preview
+                  ? `${tab.path || tab.title}\n${t('tab.previewHint')}`
+                  : tab.path || tab.title
+              }
+              aria-label={tab.preview ? `${tab.title}, ${t('tab.preview')}` : tab.title}
             >
               {tab.pinned && <Icon name="pin" size={11} className="tab-pin" />}
               <span className="tab-title">{tab.title}</span>
@@ -234,6 +242,14 @@ function Tabs({
               const run = (fn) => () => { fn(); setMenu(null) }
               return (
                 <>
+                  {tab.preview && onPromotePreview && (
+                    <>
+                      <button className="tab-menu-item" onClick={run(() => onPromotePreview(tab.id))}>
+                        {t('tab.keepOpen')}
+                      </button>
+                      <div className="tab-menu-sep" />
+                    </>
+                  )}
                   {onTogglePin && (
                     <>
                       <button className="tab-menu-item" onClick={run(() => onTogglePin(tab.id))}>

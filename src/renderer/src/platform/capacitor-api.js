@@ -294,6 +294,7 @@ const capabilities = {
   externalShell: true,
   revealInFolder: false, // no Finder/Explorer on mobile
   splitView: false, // not enough width on a phone
+  localHistory: false, // desktop userData snapshots; mobile backup policy is separate
   canShare: true // system share sheet (export a file out)
 }
 

@@ -2,85 +2,252 @@ import { memo, useDeferredValue, useEffect, useMemo, useRef, useState } from 're
 import { Icon } from './icons.jsx'
 import { useI18n } from '../i18n.jsx'
 
+const EMPTY_ITEMS = []
+const PALETTE_MRU_KEY = 'easymarkdown.palette.mru.v1'
+const PREFIXES = new Set(['>', '@', '#', ':', '?'])
+const MODE_BY_PREFIX = {
+  '>': 'commands',
+  '@': 'headings',
+  '#': 'workspaceHeadings',
+  ':': 'line',
+  '?': 'help'
+}
+
+export function paletteQueryMode(query) {
+  const prefix = PREFIXES.has(String(query || '')[0]) ? query[0] : ''
+  return {
+    prefix,
+    mode: MODE_BY_PREFIX[prefix] || 'files',
+    term: prefix ? String(query).slice(1).trim() : String(query || '').trim()
+  }
+}
+
 function score(query, text) {
   if (!query) return 1
   const q = query.toLowerCase()
-  const t = text.toLowerCase()
+  const t = String(text || '').toLowerCase()
   const idx = t.indexOf(q)
   if (idx === 0) return 3
   if (idx > 0) return 2
-  // subsequence
   let qi = 0
   for (let i = 0; i < t.length && qi < q.length; i++) if (t[i] === q[qi]) qi++
   return qi === q.length ? 1 : 0
 }
 
-const EMPTY_ITEMS = []
+function rank(items, query, recentOrder = new Map()) {
+  return items
+    .map((item, index) => {
+      const textScore = Math.max(
+        score(query, item.title),
+        score(query, item.hint || '') * 0.6
+      )
+      const recent = recentOrder.has(item.id) ? Math.max(0, 100 - recentOrder.get(item.id)) : 0
+      return { item, index, textScore, recent }
+    })
+    .filter((entry) => entry.textScore > 0)
+    .sort((a, b) =>
+      b.textScore - a.textScore ||
+      b.recent - a.recent ||
+      a.index - b.index
+    )
+    .slice(0, 50)
+    .map((entry) => entry.item)
+}
 
-function CommandPalette({ open, onClose, commands, files, headings = EMPTY_ITEMS, onOpenFile, onOpenHeading }) {
+function readMru() {
+  try {
+    const value = JSON.parse(localStorage.getItem(PALETTE_MRU_KEY) || '[]')
+    return Array.isArray(value) ? value.filter((item) => typeof item === 'string').slice(0, 30) : []
+  } catch {
+    return []
+  }
+}
+
+function writeMru(ids) {
+  try {
+    localStorage.setItem(PALETTE_MRU_KEY, JSON.stringify(ids.slice(0, 30)))
+  } catch {
+    /* storage is best effort */
+  }
+}
+
+function CommandPalette({
+  open,
+  onClose,
+  commands,
+  files,
+  headings = EMPTY_ITEMS,
+  recentFiles = EMPTY_ITEMS,
+  loadWorkspaceHeadings,
+  onOpenFile,
+  onOpenHeading,
+  onOpenWorkspaceHeading,
+  onOpenLine,
+  lineCount = 1
+}) {
   const { t } = useI18n()
   const [query, setQuery] = useState('')
-  // The input stays bound to `query` (instant), but the expensive scoring/sort
-  // over the whole file list runs against the deferred value, so fast typing in a
-  // large project doesn't block the field.
   const deferredQuery = useDeferredValue(query)
   const [sel, setSel] = useState(0)
+  const [mru, setMru] = useState(EMPTY_ITEMS)
+  const [workspaceIndex, setWorkspaceIndex] = useState(null)
+  const [workspaceLoading, setWorkspaceLoading] = useState(false)
+  const [workspaceError, setWorkspaceError] = useState(false)
+  const workspaceRequestRef = useRef(0)
   const inputRef = useRef(null)
+  const parsed = paletteQueryMode(deferredQuery)
 
   useEffect(() => {
-    if (open) {
-      setQuery('')
-      setSel(0)
-      // Desktop: focus the field so you can type right away. Mobile: don't —
-      // auto-focusing pops the on-screen keyboard before you've picked anything.
-      // Tapping the field still focuses it (and shows the keyboard) on demand.
-      const isMobile = window.api?.platform === 'ios' || window.api?.platform === 'android'
-      if (!isMobile) setTimeout(() => inputRef.current?.focus(), 0)
-    }
+    if (!open) return
+    setQuery('')
+    setSel(0)
+    setMru(readMru())
+    setWorkspaceIndex(null)
+    setWorkspaceLoading(false)
+    setWorkspaceError(false)
+    workspaceRequestRef.current += 1
+    const isMobile = window.api?.platform === 'ios' || window.api?.platform === 'android'
+    if (!isMobile) setTimeout(() => inputRef.current?.focus(), 0)
   }, [open])
 
+  useEffect(() => {
+    if (
+      !open ||
+      parsed.mode !== 'workspaceHeadings' ||
+      workspaceIndex ||
+      workspaceLoading ||
+      workspaceError
+    ) return
+    const request = ++workspaceRequestRef.current
+    setWorkspaceLoading(true)
+    setWorkspaceError(false)
+    Promise.resolve(loadWorkspaceHeadings?.())
+      .then((result) => {
+        if (request !== workspaceRequestRef.current) return
+        setWorkspaceIndex(result || { items: [], filesScanned: 0, truncated: false })
+      })
+      .catch(() => {
+        if (request === workspaceRequestRef.current) setWorkspaceError(true)
+      })
+      .finally(() => {
+        if (request === workspaceRequestRef.current) setWorkspaceLoading(false)
+      })
+  }, [
+    loadWorkspaceHeadings,
+    open,
+    parsed.mode,
+    workspaceError,
+    workspaceIndex,
+    workspaceLoading
+  ])
+
+  const recentOrder = useMemo(() => {
+    const order = new Map()
+    mru.forEach((id, index) => order.set(id, index))
+    recentFiles.forEach((file, index) => {
+      const id = `file:${file.path}`
+      if (!order.has(id)) order.set(id, mru.length + index)
+    })
+    return order
+  }, [mru, recentFiles])
+
   const items = useMemo(() => {
-    // Hooks run even while the palette is closed (the early return below comes
-    // after them) — skip the whole-file-index mapping until it's actually open.
     if (!open) return EMPTY_ITEMS
-    if (deferredQuery.startsWith('@')) {
-      const headingQuery = deferredQuery.slice(1).trim()
-      const headingItems = headings.map((heading, index) => ({
-        kind: 'heading',
-        id: `heading:${index}:${heading.line ?? heading.charOffset ?? ''}`,
-        title: heading.text,
-        hint: `H${heading.level} · ${Number(heading.line ?? 0) + 1}`,
-        icon: 'outline',
-        run: () => onOpenHeading?.(index, heading)
-      }))
-      if (!headingQuery) return headingItems.slice(0, 50)
-      return headingItems
-        .map((it) => ({
-          it,
-          s: Math.max(score(headingQuery, it.title), score(headingQuery, it.hint) * 0.6)
-        }))
-        .filter((item) => item.s > 0)
-        .sort((a, b) => b.s - a.s)
-        .slice(0, 50)
-        .map((item) => item.it)
+    const term = parsed.term
+    if (parsed.mode === 'commands') {
+      return rank(
+        commands.map((command) => ({ kind: 'cmd', ...command })),
+        term,
+        recentOrder
+      )
     }
-    const cmdItems = commands.map((c) => ({ kind: 'cmd', ...c }))
-    const fileItems = files.map((f) => ({
-      kind: 'file',
-      id: 'file:' + f.path,
-      title: f.name,
-      hint: f.rel,
-      run: () => onOpenFile(f.path)
-    }))
-    const all = [...cmdItems, ...fileItems]
-    if (!deferredQuery) return all.slice(0, 50)
-    return all
-      .map((it) => ({ it, s: Math.max(score(deferredQuery, it.title), score(deferredQuery, it.hint || '') * 0.6) }))
-      .filter((x) => x.s > 0)
-      .sort((a, b) => b.s - a.s)
-      .slice(0, 50)
-      .map((x) => x.it)
-  }, [open, deferredQuery, commands, files, headings, onOpenFile, onOpenHeading])
+    if (parsed.mode === 'headings') {
+      return rank(
+        headings.map((heading, index) => ({
+          kind: 'heading',
+          id: `heading:${index}:${heading.line ?? heading.charOffset ?? ''}`,
+          title: heading.text,
+          hint: `H${heading.level} · ${Number(heading.line ?? 0) + 1}`,
+          icon: 'outline',
+          run: () => onOpenHeading?.(index, heading)
+        })),
+        term
+      )
+    }
+    if (parsed.mode === 'workspaceHeadings') {
+      return rank(
+        (workspaceIndex?.items || []).map((heading) => ({
+          kind: 'workspace-heading',
+          id: `workspace-heading:${heading.path}:${heading.line}:${heading.text}`,
+          title: heading.text,
+          hint: `${heading.rel} · H${heading.level} · ${heading.line}`,
+          icon: 'hash',
+          run: () => onOpenWorkspaceHeading?.(heading)
+        })),
+        term
+      )
+    }
+    if (parsed.mode === 'line') {
+      const requested = Number.parseInt(term, 10)
+      if (!Number.isFinite(requested) || requested < 1 || requested > lineCount) return EMPTY_ITEMS
+      return [{
+        kind: 'line',
+        id: `line:${requested}`,
+        title: t('palette.goLine', { n: requested }),
+        hint: t('palette.lineRange', { n: lineCount }),
+        icon: 'hash',
+        run: () => onOpenLine?.(requested)
+      }]
+    }
+    if (parsed.mode === 'help') {
+      return [
+        ['files', '', 'palette.modeFiles', 'palette.modeFilesHint'],
+        ['commands', '>', 'palette.modeCommands', 'palette.modeCommandsHint'],
+        ['headings', '@', 'palette.modeHeadings', 'palette.modeHeadingsHint'],
+        ['workspaceHeadings', '#', 'palette.modeWorkspaceHeadings', 'palette.modeWorkspaceHeadingsHint'],
+        ['line', ':', 'palette.modeLine', 'palette.modeLineHint']
+      ].map(([mode, prefix, titleKey, hintKey]) => ({
+        kind: 'help',
+        id: `help:${mode}`,
+        title: `${prefix || '·'}  ${t(titleKey)}`,
+        hint: t(hintKey),
+        icon: mode === 'files' ? 'file' : mode.includes('Heading') || mode === 'headings' ? 'outline' : 'command',
+        fill: prefix
+      }))
+    }
+    const candidates = new Map()
+    for (const file of [...recentFiles, ...files]) {
+      if (!file?.path || candidates.has(file.path)) continue
+      candidates.set(file.path, {
+        kind: 'file',
+        id: `file:${file.path}`,
+        title: file.name || file.path.split(/[\\/]/).at(-1),
+        hint: file.rel || file.dir || file.path,
+        run: () => onOpenFile(file.path)
+      })
+    }
+    return rank(
+      [...candidates.values()],
+      term,
+      recentOrder
+    )
+  }, [
+    commands,
+    files,
+    headings,
+    lineCount,
+    onOpenFile,
+    onOpenHeading,
+    onOpenLine,
+    onOpenWorkspaceHeading,
+    open,
+    parsed.mode,
+    parsed.term,
+    recentFiles,
+    recentOrder,
+    t,
+    workspaceIndex
+  ])
 
   useEffect(() => {
     if (sel >= items.length) setSel(Math.max(0, items.length - 1))
@@ -88,61 +255,98 @@ function CommandPalette({ open, onClose, commands, files, headings = EMPTY_ITEMS
 
   if (!open) return null
 
-  const choose = (it) => {
+  const choose = (item) => {
+    if (!item) return
+    if (Object.hasOwn(item, 'fill')) {
+      setQuery(item.fill)
+      setSel(0)
+      requestAnimationFrame(() => inputRef.current?.focus())
+      return
+    }
+    const nextMru = [item.id, ...mru.filter((id) => id !== item.id)].slice(0, 30)
+    setMru(nextMru)
+    writeMru(nextMru)
     onClose()
-    it?.run?.()
+    item.run?.()
   }
+
+  const emptyMessage =
+    parsed.mode === 'workspaceHeadings' && workspaceLoading
+      ? t('palette.indexing')
+      : parsed.mode === 'workspaceHeadings' && workspaceError
+        ? t('palette.indexFailed')
+        : t('palette.emptyMode')
 
   return (
     <div className="palette-overlay" onMouseDown={onClose}>
-      <div className="palette" onMouseDown={(e) => e.stopPropagation()}>
+      <div className="palette" onMouseDown={(event) => event.stopPropagation()}>
         <div className="palette-input">
-          <Icon name="search" size={16} />
+          <span className="palette-mode-badge">{t(`palette.mode.${parsed.mode}`)}</span>
           <input
             ref={inputRef}
             value={query}
-            placeholder={t('palette.placeholder')}
-            onChange={(e) => {
-              setQuery(e.target.value)
+            placeholder={t('palette.placeholderModes')}
+            onChange={(event) => {
+              setQuery(event.target.value)
               setSel(0)
             }}
-            onKeyDown={(e) => {
-              if (e.key === 'ArrowDown') {
-                e.preventDefault()
-                setSel((s) => Math.min(items.length - 1, s + 1))
-              } else if (e.key === 'ArrowUp') {
-                e.preventDefault()
-                setSel((s) => Math.max(0, s - 1))
-              } else if (e.key === 'Enter') {
-                e.preventDefault()
+            onKeyDown={(event) => {
+              if (event.key === 'ArrowDown') {
+                event.preventDefault()
+                setSel((value) => Math.min(items.length - 1, value + 1))
+              } else if (event.key === 'ArrowUp') {
+                event.preventDefault()
+                setSel((value) => Math.max(0, value - 1))
+              } else if (event.key === 'Enter') {
+                event.preventDefault()
                 choose(items[sel])
-              } else if (e.key === 'Escape') {
+              } else if (event.key === 'Escape') {
                 onClose()
               }
             }}
           />
         </div>
         <div className="palette-list">
-          {items.length === 0 && <div className="palette-empty">{t('palette.empty')}</div>}
-          {items.map((it, i) => (
+          {items.length === 0 && (
+            <div className="palette-empty">
+              <span>{emptyMessage}</span>
+              {!workspaceLoading && (
+                <button type="button" onClick={() => setQuery('?')}>
+                  {t('palette.showModes')}
+                </button>
+              )}
+            </div>
+          )}
+          {items.map((item, index) => (
             <div
-              key={it.id}
-              data-kind={it.kind}
-              className={`palette-item${i === sel ? ' sel' : ''}`}
-              onMouseEnter={() => setSel(i)}
-              onClick={() => choose(it)}
+              key={item.id}
+              data-kind={item.kind}
+              className={`palette-item${index === sel ? ' sel' : ''}`}
+              onMouseEnter={() => setSel(index)}
+              onClick={() => choose(item)}
             >
-              <Icon name={it.kind === 'file' ? 'file' : it.icon || 'command'} size={15} />
-              <span className="pi-title">{it.title}</span>
-              {it.hint && <span className="pi-hint">{it.hint}</span>}
+              <Icon
+                name={
+                  item.kind === 'file'
+                    ? 'file'
+                    : item.kind === 'workspace-heading'
+                      ? 'hash'
+                      : item.icon || 'command'
+                }
+                size={15}
+              />
+              <span className="pi-title">{item.title}</span>
+              {item.hint && <span className="pi-hint">{item.hint}</span>}
+              {item.shortcut && <kbd className="pi-shortcut">{item.shortcut}</kbd>}
             </div>
           ))}
+          {parsed.mode === 'workspaceHeadings' && workspaceIndex?.truncated && (
+            <div className="palette-note">{t('palette.indexTruncated')}</div>
+          )}
         </div>
       </div>
     </div>
   )
 }
 
-// Memoized: with App passing stable onClose/onOpenFile, a closed palette does
-// zero work while the rest of the app re-renders on every keystroke.
 export default memo(CommandPalette)

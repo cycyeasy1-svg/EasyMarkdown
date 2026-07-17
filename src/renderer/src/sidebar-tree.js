@@ -56,3 +56,42 @@ export function selectMarkdownBranches(treeMap, rootPaths) {
     markdownDirectoryCount: markdownDirs.size
   }
 }
+
+// Flatten only the currently-visible part of the lazy tree. This is the source
+// of truth for roving focus and ArrowUp/ArrowDown keyboard navigation.
+export function flattenVisibleTree(workspaces, childrenMap, expanded) {
+  const rows = []
+  const open = expanded instanceof Set ? expanded : new Set(expanded || [])
+  const children = childrenMap || {}
+
+  const appendChildren = (parentPath, depth) => {
+    for (const node of children[parentPath] || []) {
+      rows.push({
+        path: node.path,
+        name: node.name,
+        type: node.type,
+        isRoot: false,
+        parentPath,
+        depth
+      })
+      if (node.type === 'dir' && open.has(node.path)) {
+        appendChildren(node.path, depth + 1)
+      }
+    }
+  }
+
+  for (const workspace of workspaces || []) {
+    if (!workspace?.rootPath) continue
+    rows.push({
+      path: workspace.rootPath,
+      name: workspace.rootName || workspace.rootPath,
+      type: 'dir',
+      isRoot: true,
+      parentPath: null,
+      depth: 0
+    })
+    if (open.has(workspace.rootPath)) appendChildren(workspace.rootPath, 1)
+  }
+
+  return rows
+}

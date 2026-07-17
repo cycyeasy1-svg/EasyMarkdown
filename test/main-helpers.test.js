@@ -14,10 +14,190 @@ import {
   shouldSkipWorkspaceEntry,
   getAllowedExternalUrl,
   searchContentLines,
+  extractMarkdownHeadings,
+  extractMarkdownLinks,
+  slugifyMarkdownAnchor,
   docLangAttr,
   WIN_MD_PROGID,
   winDefaultOpenerRegOps
 } from '../src/main/helpers.js'
+import {
+  collectMarkdownAnchors,
+  createFileRenamePlan,
+  createHeadingRenamePlan,
+  diagnoseMarkdownContent,
+  findMarkdownReferences,
+  relativeMarkdownPath,
+  resolveMarkdownTarget,
+  splitMarkdownTarget
+} from '../src/main/markdown-links.js'
+
+describe('Markdown link intelligence', () => {
+  const winFiles = [
+    {
+      path: 'C:\\notes\\guide.md',
+      content: '# Guide\n\n## Install Here\n\n[Self](#install-here)\n'
+    },
+    {
+      path: 'C:\\notes\\index.md',
+      content: '[Guide](guide.md#install-here)\n![Logo](assets/logo.png)\n'
+    }
+  ]
+
+  it('extracts exact inline/image/definition targets while skipping code and fences', () => {
+    const source = [
+      '[Doc](<folder/a b.md#top>) and ![x](img.png)',
+      '`[skip](no.md)`',
+      '[ref]: target.md',
+      '```md',
+      '[skip](also-no.md)',
+      '```'
+    ].join('\n')
+    expect(extractMarkdownLinks(source).map(({ target, isImage, kind, line }) => ({
+      target, isImage, kind, line
+    }))).toEqual([
+      { target: 'folder/a b.md#top', isImage: false, kind: 'inline', line: 1 },
+      { target: 'img.png', isImage: true, kind: 'inline', line: 1 },
+      { target: 'target.md', isImage: false, kind: 'definition', line: 3 }
+    ])
+  })
+
+  it('normalizes anchors and resolves encoded relative paths on Windows and POSIX', () => {
+    expect(slugifyMarkdownAnchor(' Hello, 世界! ')).toBe('hello-世界')
+    expect(splitMarkdownTarget('guide%20one.md?q=1#Hello%20World')).toMatchObject({
+      path: 'guide%20one.md',
+      query: '?q=1',
+      anchor: 'Hello World'
+    })
+    expect(resolveMarkdownTarget('C:\\notes\\index.md', 'sub/a%20b.md#top')).toMatchObject({
+      kind: 'local',
+      path: 'C:\\notes\\sub\\a b.md',
+      anchor: 'top'
+    })
+    expect(resolveMarkdownTarget('/notes/index.md', '../guide.md')).toMatchObject({
+      kind: 'local',
+      path: '/guide.md'
+    })
+    expect(resolveMarkdownTarget('/notes/index.md', 'javascript:alert(1)').kind).toBe('invalid-url')
+  })
+
+  it('collects duplicate and explicit heading anchors', () => {
+    const anchors = collectMarkdownAnchors('# One\n## One\n### Stable {#fixed}\n<div id="raw"></div>')
+    expect([...anchors.entries()]).toEqual([
+      ['one', 1],
+      ['one-1', 2],
+      ['fixed', 3],
+      ['raw', 4]
+    ])
+  })
+
+  it('diagnoses missing docs, images, anchors and disallowed URLs', async () => {
+    const existing = new Map([
+      ['C:\\notes\\guide.md', '# Guide\n'],
+      ['C:\\notes\\assets\\ok.png', 'binary']
+    ])
+    const content = [
+      '[ok](guide.md#guide)',
+      '[bad anchor](guide.md#missing)',
+      '[missing](none.md)',
+      '![missing image](assets/no.png)',
+      '[bad](javascript:alert(1))'
+    ].join('\n')
+    const problems = await diagnoseMarkdownContent({
+      docPath: 'C:\\notes\\index.md',
+      content,
+      exists: async (path) => existing.has(path),
+      readFile: async (path) => existing.get(path)
+    })
+    expect(problems.map((problem) => problem.kind)).toEqual([
+      'missing-anchor',
+      'missing-document',
+      'missing-image',
+      'invalid-url'
+    ])
+  })
+
+  it('finds file and heading references with search-compatible result items', () => {
+    const groups = findMarkdownReferences(winFiles, 'C:\\notes\\guide.md', 'install-here')
+    expect(groups.map((group) => [group.path, group.items[0].line])).toEqual([
+      ['C:\\notes\\guide.md', 5],
+      ['C:\\notes\\index.md', 1]
+    ])
+  })
+
+  it('creates a minimal heading rename plan and keeps explicit ids stable', () => {
+    const plan = createHeadingRenamePlan(winFiles, 'C:\\notes\\guide.md', 3, 'Install Now')
+    expect(plan).toMatchObject({
+      oldAnchor: 'install-here',
+      newAnchor: 'install-now',
+      totalChanges: 3
+    })
+    expect(plan.files.find((file) => file.path.endsWith('guide.md')).updated).toContain('## Install Now')
+    expect(plan.files.find((file) => file.path.endsWith('index.md')).updated).toContain(
+      'guide.md#install-now'
+    )
+  })
+
+  it('creates encoded relative paths and a file rename plan without touching unrelated text', () => {
+    expect(relativeMarkdownPath(
+      'C:\\notes\\index.md',
+      'C:\\notes\\Guide New.md',
+      './guide.md'
+    )).toBe('./Guide%20New.md')
+    const plan = createFileRenamePlan(winFiles, 'C:\\notes\\guide.md', 'C:\\notes\\Guide New.md')
+    expect(plan.files.map((file) => file.path)).toEqual(['C:\\notes\\index.md'])
+    expect(plan.files[0].updated).toBe(
+      '[Guide](Guide%20New.md#install-here)\n![Logo](assets/logo.png)\n'
+    )
+  })
+
+  it('keeps outbound relative links valid when a Markdown file moves folders', () => {
+    const files = [
+      {
+        path: '/notes/guide.md',
+        content: '[Index](index.md#home)\n[Self](guide.md#guide)\n'
+      },
+      {
+        path: '/notes/index.md',
+        content: '[Guide](guide.md#guide)\n'
+      }
+    ]
+    const plan = createFileRenamePlan(files, '/notes/guide.md', '/notes/archive/guide.md')
+    expect(plan.files.find((file) => file.path === '/notes/guide.md').updated).toBe(
+      '[Index](../index.md#home)\n[Self](guide.md#guide)\n'
+    )
+    expect(plan.files.find((file) => file.path === '/notes/index.md').updated).toBe(
+      '[Guide](archive/guide.md#guide)\n'
+    )
+  })
+})
+
+describe('extractMarkdownHeadings', () => {
+  it('indexes ATX headings with 1-based lines and skips front matter and fences', () => {
+    const content = [
+      '---',
+      '# front matter value',
+      '---',
+      '# Real title',
+      '',
+      '```md',
+      '## code example',
+      '```',
+      '### Detail ###'
+    ].join('\n')
+    expect(extractMarkdownHeadings(content)).toEqual([
+      { text: 'Real title', level: 1, line: 4 },
+      { text: 'Detail', level: 3, line: 9 }
+    ])
+  })
+
+  it('caps results and ignores hashes without heading whitespace', () => {
+    expect(extractMarkdownHeadings('# one\n#two\n## three\n### four', 2)).toEqual([
+      { text: 'one', level: 1, line: 1 },
+      { text: 'three', level: 2, line: 3 }
+    ])
+  })
+})
 
 describe('getAllowedExternalUrl', () => {
   it('accepts and normalizes browser and mail links', () => {

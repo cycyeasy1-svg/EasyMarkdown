@@ -169,6 +169,8 @@ export const loadSession = () => {
 //   • openPaths   — every saved tab's path (reopened from disk on restart).
 //   • pinnedPaths — the pinned subset, so pins survive a restart (order comes
 //     from openPaths; this is just the membership set).
+//   • previewPaths — file-tree preview tabs, so the temporary slot remains a
+//     preview after restart instead of silently becoming a normal tab.
 //   • untitled    — unsaved scratch/new tabs (no path) kept ONLY when they're
 //     DIRTY and non-blank, carrying just {title, content}. So a restart restores
 //     real unsaved work but never resurrects the untouched welcome doc or an
@@ -177,6 +179,7 @@ export const loadSession = () => {
 export const buildSessionTabs = (tabs) => ({
   openPaths: (tabs || []).map((t) => t.path).filter(Boolean),
   pinnedPaths: (tabs || []).filter((t) => t.pinned && t.path).map((t) => t.path),
+  previewPaths: (tabs || []).filter((t) => t.preview && !t.pinned && t.path).map((t) => t.path),
   untitled: (tabs || [])
     .filter((t) => !t.path && t.content !== t.savedContent && (t.content || '').trim())
     .map((t) => ({ title: t.title, content: t.content }))
@@ -196,9 +199,37 @@ export function reorderTabsList(tabs, fromId, toId) {
   return [...list.filter((t) => t.pinned), ...list.filter((t) => !t.pinned)]
 }
 
+// File-tree single-click previews reuse one temporary slot. Replacing the whole
+// tab object prevents editor/history state from the previous file leaking into
+// the next preview.
+export function openPreviewTabInList(tabs, tab) {
+  const list = [...(tabs || [])]
+  const nextTab = { ...tab, preview: true, pinned: false }
+  const previewIndex = list.findIndex((item) => item.preview && !item.pinned)
+  if (previewIndex === -1) {
+    list.push(nextTab)
+    return { tabs: list, replacedId: null }
+  }
+  const replacedId = list[previewIndex].id
+  list.splice(previewIndex, 1, nextTab)
+  return { tabs: list, replacedId }
+}
+
+export function promotePreviewTabInList(tabs, id) {
+  let changed = false
+  const list = (tabs || []).map((tab) => {
+    if (tab.id !== id || !tab.preview) return tab
+    changed = true
+    return { ...tab, preview: false }
+  })
+  return changed ? list : tabs
+}
+
 // Toggle a tab's pinned flag and regroup pinned-first.
 export function toggleTabPinnedInList(tabs, id) {
-  const list = (tabs || []).map((t) => (t.id === id ? { ...t, pinned: !t.pinned } : t))
+  const list = (tabs || []).map((t) =>
+    t.id === id ? { ...t, pinned: !t.pinned, preview: false } : t
+  )
   return [...list.filter((t) => t.pinned), ...list.filter((t) => !t.pinned)]
 }
 
@@ -221,6 +252,7 @@ export const sessionSnapshotEqual = (a, b) => {
     a.sidebarOpen !== b.sidebarOpen ||
     a.sidebarMode !== b.sidebarMode ||
     a.sidebarWidth !== b.sidebarWidth ||
+    a.closedTabs !== b.closedTabs ||
     a.activePath !== b.activePath
   ) {
     return false
@@ -233,6 +265,10 @@ export const sessionSnapshotEqual = (a, b) => {
   const bpp = b.pinnedPaths || []
   if (app.length !== bpp.length) return false
   for (let i = 0; i < app.length; i++) if (app[i] !== bpp[i]) return false
+  const avp = a.previewPaths || []
+  const bvp = b.previewPaths || []
+  if (avp.length !== bvp.length) return false
+  for (let i = 0; i < avp.length; i++) if (avp[i] !== bvp[i]) return false
   const au = a.untitled || []
   const bu = b.untitled || []
   if (au.length !== bu.length) return false

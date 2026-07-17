@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   pruneNavigationHistory,
   recordNavigationLocation,
+  sanitizeNavigationContext,
   sameNavigationLocation,
   stepNavigationHistory
 } from '../src/renderer/src/navigation-history.js'
@@ -21,6 +22,37 @@ describe('navigation history', () => {
     state = recordNavigationLocation(state, loc('a', 10))
 
     expect(state).toEqual({ back: [loc('a', 10)], forward: [] })
+  })
+
+  it('refreshes bounded context without duplicating the same location', () => {
+    let state = recordNavigationLocation(
+      { back: [], forward: [] },
+      { ...loc('a', 10), context: { table: { ti: 1, scrollLeft: 20 } } }
+    )
+    state = recordNavigationLocation(state, {
+      ...loc('a', 10),
+      context: { table: { ti: 1, scrollLeft: 80 } }
+    })
+    expect(state.back).toHaveLength(1)
+    expect(state.back[0].context.table.scrollLeft).toBe(80)
+  })
+
+  it('caps navigation context state and normalizes source selections', () => {
+    const context = sanitizeNavigationContext({
+      sourceSelection: { start: 9, end: 2 },
+      collapsed: Array.from({ length: 80 }, (_, i) => `2:heading-${i}`),
+      table: {
+        ti: 2,
+        scrollLeft: 123,
+        filters: [{
+          column: 1,
+          excluded: Array.from({ length: 300 }, (_, i) => `value-${i}`)
+        }]
+      }
+    })
+    expect(context.sourceSelection).toEqual({ start: 2, end: 9 })
+    expect(context.collapsed).toHaveLength(50)
+    expect(context.table.filters[0].excluded).toHaveLength(200)
   })
 
   it('steps backward and forward while preserving the location being left', () => {

@@ -39,6 +39,7 @@ import { createSlashPlugin, disableCrepeSlash } from './editor-slash-menu.js'
 import { markdownOffsetToPmPos, pmPosToMarkdownOffset } from './editor-source-map.js'
 import ZoomLightbox from './ZoomLightbox.jsx'
 import { ensureEmbedZoomButtons, zoomItemFromButton } from './editor-zoom.js'
+import { internalLinkTarget, parseInternalDocLink } from '../link-navigation.js'
 import './editor-codeblock-eager.js' // side effect: stable code-block heights (scroll-jump fix)
 import remarkFrontmatter from 'remark-frontmatter'
 import { frontmatterSchema, renderFrontmatterNodeView, remarkFrontmatterAnywhere } from './editor-frontmatter.js'
@@ -152,11 +153,16 @@ function Editor({
   docPath,
   onChange,
   onReady,
-  onActiveBlock
+  onActiveBlock,
+  onOpenDocLink
 }) {
   const { t } = useI18n()
   const tRef = useRef(t)
   tRef.current = t
+  const onOpenDocLinkRef = useRef(onOpenDocLink)
+  onOpenDocLinkRef.current = onOpenDocLink
+  const docPathRef = useRef(docPath)
+  docPathRef.current = docPath
   const hostRef = useRef(null)
   const viewRef = useRef(null)
   const apiRef = useRef(null)
@@ -671,18 +677,36 @@ function Editor({
         document.addEventListener('selectionchange', onSelChange)
         cleanups.push(() => document.removeEventListener('selectionchange', onSelChange))
 
-        // --- Ctrl/Cmd+Click a link → open in the system browser ---
+        // --- Link navigation: Ctrl/Cmd opens web links; Alt opens docs at right ---
         if (view) {
         const onLinkClick = (e) => {
-          if (!(e.ctrlKey || e.metaKey)) return
           const a = e.target.closest?.('a')
           const href = a?.getAttribute('href')
           if (!href) return
-          if (/^(https?:|mailto:)/i.test(href)) {
+          if ((e.ctrlKey || e.metaKey) && /^(https?:|mailto:)/i.test(href)) {
             e.preventDefault()
             e.stopPropagation()
             window.api.openExternal(href)
+            return
           }
+          if (!e.altKey) return
+          const target = parseInternalDocLink(href)
+          if (!target) return
+          e.preventDefault()
+          e.stopPropagation()
+          onOpenDocLinkRef.current?.(
+            target.path,
+            target.anchor,
+            docPathRef.current,
+            { openRight: true }
+          )
+        }
+        const onLinkHover = (e) => {
+          const a = e.target.closest?.('a[href]')
+          if (!a || !view.dom.contains(a)) return
+          const target = internalLinkTarget(a.getAttribute('href'), docPathRef.current)
+          if (!target?.label) return
+          a.title = `${tRef.current('links.hoverTarget', { target: target.label })}\n${tRef.current('links.openRightHint')}`
         }
 
         // --- Rich-text copy: inject inline styles into the HTML clipboard ---
@@ -848,6 +872,7 @@ function Editor({
         scanEmbeds()
 
         view.dom.addEventListener('click', onLinkClick, true)
+        view.dom.addEventListener('mouseover', onLinkHover)
         view.dom.addEventListener('click', onImgClick, true)
         view.dom.addEventListener('click', onEmbedZoom, true)
         view.dom.addEventListener('click', onCaptionBtn)
@@ -856,6 +881,7 @@ function Editor({
         view.dom.addEventListener('paste', onPasteImage, true)
         view.dom.addEventListener('drop', onDropImage, true)
         cleanups.push(() => view.dom.removeEventListener('click', onLinkClick, true))
+        cleanups.push(() => view.dom.removeEventListener('mouseover', onLinkHover))
         cleanups.push(() => view.dom.removeEventListener('click', onImgClick, true))
         cleanups.push(() => view.dom.removeEventListener('click', onEmbedZoom, true))
         cleanups.push(() => view.dom.removeEventListener('click', onCaptionBtn))
@@ -1180,12 +1206,18 @@ function Editor({
           if (!v || !scroller || !crepeRef.current) return null
           try {
             const rect = scroller.getBoundingClientRect()
-            const point = v.dom.ownerDocument.caretPositionFromPoint?.(
-              rect.left + Math.min(rect.width / 2, 320),
-              rect.top + 12
-            )
-            if (!point || !v.dom.contains(point.offsetNode)) return null
-            const pos = v.posAtDOM(point.offsetNode, point.offset)
+            const editorRect = v.dom.getBoundingClientRect()
+            const coords = {
+              left: editorRect.left + Math.min(editorRect.width / 2, 320),
+              top: Math.max(rect.top + 12, editorRect.top + 1)
+            }
+            const mapped = v.posAtCoords(coords)
+            let pos = mapped?.pos
+            if (!Number.isFinite(pos)) {
+              const point = v.dom.ownerDocument.caretPositionFromPoint?.(coords.left, coords.top)
+              if (!point || !v.dom.contains(point.offsetNode)) return null
+              pos = v.posAtDOM(point.offsetNode, point.offset)
+            }
             const remark = crepe.editor.ctx.get(remarkCtx)
             return pmPosToMarkdownOffset(
               mappingMarkdownRef.current || getMarkdown(),

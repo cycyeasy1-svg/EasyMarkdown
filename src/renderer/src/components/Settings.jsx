@@ -80,6 +80,7 @@ export default function Settings({
   onRefreshThemes,
   onOpenThemesFolder,
   onGetMoreThemes,
+  onClearLocalHistory,
   typographyProps
 }) {
   const { lang, t, setLang } = useI18n()
@@ -131,6 +132,15 @@ export default function Settings({
     const res = await window.api.setDefaultOpener?.()
     if (res?.ok) fireToast(t('settings.defaultOpenerHint'), { duration: 7000 })
     else if (!res?.manual) fireToast(t('settings.defaultOpenerFail'), { kind: 'error', duration: 7000 })
+  }
+
+  const clearLocalHistory = async () => {
+    if (!window.confirm(t('settings.localHistoryClearConfirm'))) return
+    const result = await onClearLocalHistory?.()
+    fireToast(
+      t(result?.ok ? 'settings.localHistoryCleared' : 'settings.localHistoryClearFailed'),
+      result?.ok ? { kind: 'success' } : { kind: 'error', sticky: true }
+    )
   }
 
   // Esc closes; re-scan the themes folder on open so new CSS files show up.
@@ -190,6 +200,25 @@ export default function Settings({
               checked={settings.autosave}
               onChange={(v) => updateSettings({ autosave: v })}
             />
+            {caps.localHistory && (
+              <>
+                <SwitchRow
+                  label={t('settings.localHistory')}
+                  desc={t('settings.localHistoryDesc')}
+                  checked={settings.localHistory}
+                  onChange={(localHistory) => updateSettings({ localHistory })}
+                />
+                <div className="hm-set-row">
+                  <div className="hm-set-text">
+                    <div className="hm-set-label">{t('settings.localHistoryRetention')}</div>
+                    <div className="hm-set-desc">{t('settings.localHistoryRetentionDesc')}</div>
+                  </div>
+                  <button type="button" className="hm-set-btn" onClick={clearLocalHistory}>
+                    {t('settings.localHistoryClear')}
+                  </button>
+                </div>
+              </>
+            )}
             {caps.spellcheck && (
               <SwitchRow
                 label={t('settings.spellcheck')}

@@ -53,6 +53,8 @@ const api = {
   readDir: (dir, options) => ipcRenderer.invoke('fs:readDir', dir, options),
   readDirRecursive: (dir, options) => ipcRenderer.invoke('fs:readDirRecursive', dir, options),
   listFiles: (root) => ipcRenderer.invoke('fs:listFiles', root),
+  listWorkspaceHeadings: (roots, options) =>
+    ipcRenderer.invoke('workspace-headings:index', roots, options),
   openFolderTree: (dir) => ipcRenderer.invoke('fs:openFolderTree', dir),
 
   // workspace full-text search (streaming: batches + done arrive as events)
@@ -60,6 +62,18 @@ const api = {
   searchCancel: () => ipcRenderer.invoke('search:cancel'),
   onSearchBatch: on('search:batch'),
   onSearchDone: on('search:done'),
+  diagnoseMarkdownLinks: (payload) => ipcRenderer.invoke('markdown-links:diagnose', payload),
+  findMarkdownReferences: (payload) => ipcRenderer.invoke('markdown-links:references', payload),
+  planHeadingRename: (payload) => ipcRenderer.invoke('markdown-links:plan-heading-rename', payload),
+  planFileRename: (payload) => ipcRenderer.invoke('markdown-links:plan-file-rename', payload),
+  applyMarkdownLinkPlan: (plan) => ipcRenderer.invoke('markdown-links:apply-plan', plan),
+  renameFileWithLinks: (payload) => ipcRenderer.invoke('markdown-links:rename-file', payload),
+  localHistoryAdd: (payload) => ipcRenderer.invoke('history:add', payload),
+  localHistoryList: (path) => ipcRenderer.invoke('history:list', path),
+  localHistoryRead: (path, snapshotId) => ipcRenderer.invoke('history:read', path, snapshotId),
+  localHistoryDelete: (path, snapshotId) =>
+    ipcRenderer.invoke('history:delete', path, snapshotId),
+  localHistoryClear: () => ipcRenderer.invoke('history:clear'),
 
   // watch
   watchStart: (dir) => ipcRenderer.invoke('watch:start', dir),
@@ -164,7 +178,8 @@ const api = {
     revealInFolder: true,
     splitView: true,
     defaultOpener: true,
-    fileAttachments: true
+    fileAttachments: true,
+    localHistory: true
   }
 }
 

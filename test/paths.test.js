@@ -24,6 +24,8 @@ import {
   clearUnpinnedRecents,
   toggleRecentPinned,
   reorderTabsList,
+  openPreviewTabInList,
+  promotePreviewTabInList,
   toggleTabPinnedInList
 } from '../src/renderer/src/paths.js'
 
@@ -207,8 +209,18 @@ describe('buildSessionTabs (what survives a restart)', () => {
     expect(untitled).toEqual([])
   })
   it('tolerates missing/empty input', () => {
-    expect(buildSessionTabs(undefined)).toEqual({ openPaths: [], pinnedPaths: [], untitled: [] })
-    expect(buildSessionTabs([])).toEqual({ openPaths: [], pinnedPaths: [], untitled: [] })
+    expect(buildSessionTabs(undefined)).toEqual({
+      openPaths: [],
+      pinnedPaths: [],
+      previewPaths: [],
+      untitled: []
+    })
+    expect(buildSessionTabs([])).toEqual({
+      openPaths: [],
+      pinnedPaths: [],
+      previewPaths: [],
+      untitled: []
+    })
   })
   it('records pinned tab paths (pathless pins are dropped)', () => {
     const tabs = [
@@ -218,9 +230,17 @@ describe('buildSessionTabs (what survives a restart)', () => {
     ]
     expect(buildSessionTabs(tabs).pinnedPaths).toEqual(['/a.md'])
   })
+  it('records the temporary preview slot separately from normal and pinned tabs', () => {
+    const tabs = [
+      { path: '/a.md', preview: true, content: '', savedContent: '' },
+      { path: '/b.md', content: '', savedContent: '' },
+      { path: '/c.md', preview: true, pinned: true, content: '', savedContent: '' }
+    ]
+    expect(buildSessionTabs(tabs).previewPaths).toEqual(['/a.md'])
+  })
 })
 
-describe('reorderTabsList / toggleTabPinnedInList', () => {
+describe('tab ordering, previews, and pins', () => {
   const tab = (id, pinned = false) => ({ id, pinned })
 
   it('moves a tab to the drop target position', () => {
@@ -240,16 +260,36 @@ describe('reorderTabsList / toggleTabPinnedInList', () => {
     expect(reorderTabsList(list, 'a', 'zzz')).toBe(list)
   })
   it('pinning moves the tab into the front group; unpinning leaves it at the group boundary', () => {
-    const pinned = toggleTabPinnedInList([tab('a'), tab('b')], 'b')
+    const pinned = toggleTabPinnedInList([tab('a'), { ...tab('b'), preview: true }], 'b')
     expect(pinned.map((t) => [t.id, !!t.pinned])).toEqual([['b', true], ['a', false]])
+    expect(pinned[0].preview).toBe(false)
     const unpinned = toggleTabPinnedInList(pinned, 'b')
     expect(unpinned.map((t) => [t.id, !!t.pinned])).toEqual([['b', false], ['a', false]])
+  })
+  it('reuses the current preview slot without replacing normal tabs', () => {
+    const result = openPreviewTabInList(
+      [{ id: 'a' }, { id: 'old', preview: true }, { id: 'b' }],
+      { id: 'next', path: '/next.md' }
+    )
+    expect(result.replacedId).toBe('old')
+    expect(result.tabs.map((item) => item.id)).toEqual(['a', 'next', 'b'])
+    expect(result.tabs[1]).toMatchObject({ preview: true, pinned: false })
+  })
+  it('appends the first preview and can promote it without changing other identities', () => {
+    const normal = { id: 'a' }
+    const opened = openPreviewTabInList([normal], { id: 'preview' }).tabs
+    expect(opened.map((item) => item.id)).toEqual(['a', 'preview'])
+    const promoted = promotePreviewTabInList(opened, 'preview')
+    expect(promoted[0]).toBe(normal)
+    expect(promoted[1].preview).toBe(false)
+    expect(promotePreviewTabInList(promoted, 'missing')).toBe(promoted)
   })
 })
 
 describe('sessionSnapshotEqual', () => {
   const ws = ['C:/w']
   const recents = [{ path: 'C:/w/a.md' }]
+  const closedTabs = [{ closedId: 'x', path: 'C:/w/x.md' }]
   const base = () => ({
     workspaces: ws,
     workspace: ws[0],
@@ -260,7 +300,9 @@ describe('sessionSnapshotEqual', () => {
     sidebarOpen: true,
     sidebarMode: 'files',
     sidebarWidth: 240,
+    closedTabs,
     openPaths: ['C:/w/a.md', 'C:/w/b.md'],
+    previewPaths: ['C:/w/b.md'],
     untitled: [{ title: 'Untitled', content: 'draft' }],
     activePath: 'C:/w/a.md'
   })
@@ -287,13 +329,16 @@ describe('sessionSnapshotEqual', () => {
       expect(sessionSnapshotEqual(base(), b), k).toBe(false)
     }
   })
-  it('compares workspaces/recents by reference (state identity)', () => {
+  it('compares workspaces/recents/closed-tabs by reference (state identity)', () => {
     const b = base()
     b.workspaces = ['C:/w'] // same value, new identity → treated as changed
     expect(sessionSnapshotEqual(base(), b)).toBe(false)
     const c = base()
     c.recents = [{ path: 'C:/w/a.md' }]
     expect(sessionSnapshotEqual(base(), c)).toBe(false)
+    const d = base()
+    d.closedTabs = [{ closedId: 'x', path: 'C:/w/x.md' }]
+    expect(sessionSnapshotEqual(base(), d)).toBe(false)
   })
   it('detects open-tab list changes', () => {
     const b = base()
@@ -302,6 +347,11 @@ describe('sessionSnapshotEqual', () => {
     const c = base()
     c.openPaths = ['C:/w/a.md', 'C:/w/c.md']
     expect(sessionSnapshotEqual(base(), c)).toBe(false)
+  })
+  it('detects preview-tab changes', () => {
+    const b = base()
+    b.previewPaths = []
+    expect(sessionSnapshotEqual(base(), b)).toBe(false)
   })
   it('detects untitled draft edits and count changes', () => {
     const b = base()

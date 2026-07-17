@@ -147,6 +147,11 @@ test('dirty Keep mode asks to save before Milkdown and both directions use the a
     await expect(dialog).toContainText('保持模式中有未保存的修改')
     await expect(dialog.getByRole('button', { name: '保存并切换' })).toBeVisible()
     await expect(dialog.getByRole('button', { name: '不保存，直接切换' })).toBeVisible()
+    await dialog.getByRole('button', { name: '查看差异' }).click()
+    await expect(page.locator('.hm-review')).toBeVisible()
+    await expect(page.locator('.hm-review-item')).toHaveCount(1)
+    await page.locator('.hm-review-close').click()
+    await expect(dialog).toBeVisible()
 
     await dialog.getByRole('button', { name: '保存并切换' }).click()
     const pm = page.locator('.ProseMirror:visible')
@@ -174,12 +179,113 @@ test('dirty Keep mode asks to save before Milkdown and both directions use the a
   }
 })
 
+test('external edit conflict can be reviewed against the latest disk text', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'em-conflict-review-'))
+  const file = join(dir, 'conflict-review.md')
+  writeFileSync(file, '# Original Heading\n\nbody text\n', 'utf8')
+
+  const { page, cleanup } = await launchApp([file])
+  try {
+    await page.locator('.tab', { hasText: 'conflict-review.md' }).click()
+    await expect(page.locator('.km-doc')).toBeVisible()
+    await page.locator('.km-block[data-bi="0"] .km-src-edit').click()
+    await page.locator('.km-src-editor').fill('# Local Heading')
+    await page.locator('.km-src-actions .ok').click()
+
+    // Give the renderer time to establish the per-file watcher, then simulate a
+    // different program saving a new disk version while local changes are dirty.
+    await page.waitForTimeout(150)
+    writeFileSync(file, '# External Heading\n\nbody text\n', 'utf8')
+
+    const conflict = page.locator('.hm-conflict')
+    await expect(conflict).toBeVisible()
+    await conflict.getByRole('button', { name: '查看差异' }).click()
+    const review = page.locator('.hm-review')
+    await expect(review).toContainText('本地修改与磁盘版本对比')
+    await expect(review.locator('.hm-review-preview.before')).toContainText('# External Heading')
+    await expect(review.locator('.hm-review-preview.after')).toContainText('# Local Heading')
+    await expect(review.getByRole('button', { name: '仅恢复此处' })).toHaveCount(0)
+  } finally {
+    await cleanup()
+    try {
+      rmSync(dir, { recursive: true, force: true })
+    } catch {
+      /* best effort */
+    }
+  }
+})
+
+test('Keep change review supports semantic undo, partial restore and locating a hunk', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'em-change-review-'))
+  const file = join(dir, 'change-review.md')
+  writeFileSync(file, '# Original Heading\n\nfirst paragraph\n\nsecond paragraph\n', 'utf8')
+
+  const { page, cleanup } = await launchApp([file])
+  try {
+    await page.locator('.tab', { hasText: 'change-review.md' }).click()
+    await expect(page.locator('.km-doc')).toBeVisible()
+
+    const editBlock = async (text, next) => {
+      const block = page.locator('.km-block', { hasText: text }).first()
+      await block.locator('.km-src-edit').click()
+      await page.locator('.km-src-editor').fill(next)
+      await page.locator('.km-src-actions .ok').click()
+    }
+
+    // A committed operation reports what changed and exposes the same Keep
+    // history API as an inline Undo action.
+    await editBlock('Original Heading', '# Changed Heading')
+    const toast = page.locator('.hm-toast')
+    await expect(toast).toContainText('内容块已修改')
+    await toast.getByRole('button', { name: '撤销' }).click()
+    await expect(page.getByRole('heading', { name: 'Original Heading' })).toBeVisible()
+
+    // Create two distant hunks so each can be reviewed and restored separately.
+    await editBlock('Original Heading', '# Changed Heading')
+    await editBlock('second paragraph', 'second paragraph changed')
+    await page.locator('button[title="查看本次修改"]').click()
+
+    const review = page.locator('.hm-review')
+    await expect(review).toBeVisible()
+    await expect(review.locator('.hm-review-item')).toHaveCount(2)
+
+    // Restoring one range leaves the other change intact and creates a new,
+    // undoable history entry.
+    await review.locator('.hm-review-item').first().getByRole('button', { name: '仅恢复此处' }).click()
+    await expect(page.getByRole('heading', { name: 'Original Heading' })).toBeVisible()
+    await expect(review.locator('.hm-review-item')).toHaveCount(1)
+    await page.locator('.hm-toast').getByRole('button', { name: '撤销' }).click()
+    await expect(page.getByRole('heading', { name: 'Changed Heading' })).toBeVisible()
+    await expect(review.locator('.hm-review-item')).toHaveCount(2)
+
+    // Locating closes the review and highlights the corresponding rendered block.
+    await review.locator('.hm-review-item').last().getByRole('button', { name: '定位' }).click()
+    await expect(review).toHaveCount(0)
+    await expect(page.locator('.km-block.hm-line-flash')).toBeVisible()
+  } finally {
+    await cleanup()
+    try {
+      rmSync(dir, { recursive: true, force: true })
+    } catch {
+      /* best effort */
+    }
+  }
+})
+
 test('keep table columns resize, auto-fit, hide and restore without dirtying the document', async () => {
   const { page, cleanup } = await openWelcome()
   try {
     const table = page.locator('.km-doc table.km-table').first()
     const firstHeader = table.locator('th[data-ci="0"]')
     await expect(firstHeader).toBeVisible()
+    const tableTools = page.locator('.km-table-frame .km-table-tools').first()
+    await expect(tableTools).toBeVisible()
+    await expect.poll(() =>
+      tableTools.evaluate((element) => ({
+        position: getComputedStyle(element).position,
+        parent: element.parentElement?.className || ''
+      }))
+    ).toEqual({ position: 'static', parent: 'km-table-frame' })
 
     const widthOf = () => firstHeader.evaluate((el) => el.offsetWidth)
     const initialWidth = await widthOf()

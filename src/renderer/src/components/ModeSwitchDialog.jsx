@@ -10,6 +10,7 @@ export default function ModeSwitchDialog({
   busy = false,
   onSaveAndSwitch,
   onSwitch,
+  onReview,
   onCancel
 }) {
   const toMilkdown = direction === 'toMilkdown'
@@ -59,6 +60,9 @@ export default function ModeSwitchDialog({
         <div className="hm-mode-switch-actions">
           <button type="button" disabled={busy} onClick={onCancel}>
             {t('edit.cancel')}
+          </button>
+          <button type="button" disabled={busy} onClick={onReview}>
+            {t('review.open')}
           </button>
           {toMilkdown && (
             <button type="button" disabled={busy} onClick={onSwitch}>

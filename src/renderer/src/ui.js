@@ -8,10 +8,20 @@ export const HM_TOAST_EVENT = 'hm:toast'
 // opts.duration → ms before it auto-hides (omit/0 for the default short toast;
 // a sticky toast with no duration stays until the ✕ is tapped).
 // opts.kind → optional leading icon: 'progress' (spinner) | 'success' | 'error'.
+// opts.actionLabel / opts.onAction → optional inline action (for example Undo).
 export const fireToast = (msg, opts) =>
   window.dispatchEvent(
     new CustomEvent(HM_TOAST_EVENT, {
-      detail: opts ? { msg, sticky: !!opts.sticky, duration: opts.duration, kind: opts.kind } : msg
+      detail: opts
+        ? {
+            msg,
+            sticky: !!opts.sticky,
+            duration: opts.duration,
+            kind: opts.kind,
+            actionLabel: opts.actionLabel,
+            onAction: opts.onAction
+          }
+        : msg
     })
   )
 

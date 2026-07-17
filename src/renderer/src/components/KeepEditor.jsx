@@ -13,6 +13,8 @@ import {
   removeColumnInLine,
   buildTableRow,
   replaceBlockLines,
+  toggleTaskLine,
+  prepareBlockInsertion,
   detectDocLang
 } from '../keep-parser.js'
 import { inlineRichStyles } from './editor-copy.js'
@@ -28,6 +30,7 @@ import {
 } from '../keep-history.js'
 import ZoomLightbox from './ZoomLightbox.jsx'
 import { ensureEmbedZoomButtons, zoomItemFromButton } from './editor-zoom.js'
+import { internalLinkTarget, parseInternalDocLink } from '../link-navigation.js'
 
 // Wrapper style for rich-text copy (mirrors the Crepe editor's onCopy payload) so
 // pasted output keeps a sensible default font in apps that ignore external CSS.
@@ -67,8 +70,13 @@ function KeepEditor({
   onFilterChange,
   onDraftChange,
   onHistoryChange,
+  onCommit,
   onOpenSource,
-  onOpenDocLink
+  onOpenDocLink,
+  onFindReferences,
+  onRenameHeading,
+  sourceSplitMode = false,
+  onLocateSource
 }) {
   const { t, lang } = useI18n()
   const tRef = useRef(t)
@@ -79,6 +87,14 @@ function KeepEditor({
   onOpenSourceRef.current = onOpenSource
   const onOpenDocLinkRef = useRef(onOpenDocLink)
   onOpenDocLinkRef.current = onOpenDocLink
+  const onFindReferencesRef = useRef(onFindReferences)
+  onFindReferencesRef.current = onFindReferences
+  const onRenameHeadingRef = useRef(onRenameHeading)
+  onRenameHeadingRef.current = onRenameHeading
+  const sourceSplitModeRef = useRef(sourceSplitMode)
+  sourceSplitModeRef.current = sourceSplitMode
+  const onLocateSourceRef = useRef(onLocateSource)
+  onLocateSourceRef.current = onLocateSource
   const docPathRef = useRef(docPath)
   docPathRef.current = docPath
 
@@ -101,6 +117,8 @@ function KeepEditor({
   onDraftChangeRef.current = onDraftChange
   const onHistoryChangeRef = useRef(onHistoryChange)
   onHistoryChangeRef.current = onHistoryChange
+  const onCommitRef = useRef(onCommit)
+  onCommitRef.current = onCommit
   const historyRef = useRef({ undo: [], redo: [] })
 
   // Live edit handles so blur/outside-click can commit/close the right one.
@@ -110,6 +128,7 @@ function KeepEditor({
   const activePopRef = useRef(null) // the open filter dropdown element
   const activePopBtnRef = useRef(null) // the ▼ button that opened it (for toggle)
   const activeMenuRef = useRef(null) // the open table context menu element
+  const selectedCellRef = useRef(null) // { ti, ri, ci, isHeader, line } for keyboard table work
   const tableScrollRef = useRef(null) // wide-table top-scrollbar + floating-header handle
   // Tear down every body-appended popover (cell pop / filter pop / table menu /
   // confirm modal). Set inside the mount effect; called when the pane leaves view
@@ -143,7 +162,9 @@ function KeepEditor({
       if (destroyed) return
       onHistoryChangeRef.current?.({
         canUndo: historyRef.current.undo.length > 0,
-        canRedo: historyRef.current.redo.length > 0
+        canRedo: historyRef.current.redo.length > 0,
+        undoEntry: historyRef.current.undo.at(-1)?.meta || null,
+        redoEntry: historyRef.current.redo.at(-1)?.meta || null
       })
     }
     reportHistory()
@@ -153,9 +174,9 @@ function KeepEditor({
       onChangeRef.current?.(rawLinesRef.current.join('\n'), false)
     }
 
-    const applyRawLines = (nextLines, { record = true, emit = true } = {}) => {
+    const applyRawLines = (nextLines, { record = true, emit = true, meta = null } = {}) => {
       const next = Array.isArray(nextLines) ? nextLines : []
-      const entry = createKeepHistoryEntry(rawLinesRef.current, next)
+      const entry = createKeepHistoryEntry(rawLinesRef.current, next, meta)
       if (!entry) return false
       if (record) {
         historyRef.current.undo = pushKeepHistory(historyRef.current.undo, entry)
@@ -165,11 +186,23 @@ function KeepEditor({
       rawLinesRef.current = next
       viewLinesRef.current = toViewLines(next)
       if (emit) emitChange()
+      if (record) onCommitRef.current?.(entry)
       return true
     }
 
-    const applyRawPatch = (start, deleteCount, insertedLines, { emit = true } = {}) => {
-      const entry = createKeepHistoryPatch(rawLinesRef.current, start, deleteCount, insertedLines)
+    const applyRawPatch = (
+      start,
+      deleteCount,
+      insertedLines,
+      { emit = true, meta = null } = {}
+    ) => {
+      const entry = createKeepHistoryPatch(
+        rawLinesRef.current,
+        start,
+        deleteCount,
+        insertedLines,
+        meta
+      )
       if (!entry) return false
       historyRef.current.undo = pushKeepHistory(historyRef.current.undo, entry)
       historyRef.current.redo = []
@@ -177,6 +210,7 @@ function KeepEditor({
       rawLinesRef.current.splice(entry.start, entry.before.length, ...entry.after)
       viewLinesRef.current.splice(entry.start, entry.before.length, ...toViewLines(entry.after))
       if (emit) emitChange()
+      onCommitRef.current?.(entry)
       return true
     }
 
@@ -233,7 +267,10 @@ function KeepEditor({
       filterState: filterStateRef.current,
       baseDir: dirOf(docPathRef.current),
       blankLineSpacing: blankLineSpacingRef.current,
-      tableInitialRows: TABLE_INITIAL_ROWS
+      tableInitialRows: TABLE_INITIAL_ROWS,
+      filterLabel: tRef.current('keep.filterColumn'),
+      interactiveTasks: true,
+      taskToggleLabel: tRef.current('keep.toggleTask')
     })
     // Running table index at the start of each block (tables key filter state by
     // index, so a chunk must continue the count). Rebuilt per render.
@@ -305,6 +342,7 @@ function KeepEditor({
       const total = blocks.length
 
       if (!total) {
+        clearTableSelection()
         host.innerHTML = '<div class="km-empty"></div>'
         pushOutline()
         pendingFrom = Infinity
@@ -392,6 +430,7 @@ function KeepEditor({
       if (destroyed) return
       applyMultilineFlagsRange(from, to)
       observeEmbedsRange(from, to)
+      if (selectedCellRef.current) restoreSelectedCell()
       // On a fresh open both sets are empty (→ skipped); they matter when a large
       // doc with folded sections / active filters is fully re-rendered after an edit.
       if (collapsedRef.current.size) applyCollapsed()
@@ -669,11 +708,18 @@ function KeepEditor({
     // position:fixed but re-anchored to the cell on scroll/resize so it tracks the
     // cell (instead of drifting over other content) — a roomy textarea for long
     // cells, replacing the cramped single-line input that lived inside the <td>.
-    const closeCellPop = () => {
+    const closeCellPop = (restoreFocus = false) => {
       if (activeCellPopRef.current) {
         activeCellPopRef.current.pop.remove()
         activeCellPopRef.current = null
         setDraftActive(false)
+      }
+      if (restoreFocus && !destroyed) {
+        queueMicrotask(() => {
+          const selected = resolveSelection()
+          if (!selected || destroyed) return
+          selected.focus({ preventScroll: true })
+        })
       }
     }
     // Re-place the open editor under its cell; hide it while the cell is scrolled
@@ -715,16 +761,30 @@ function KeepEditor({
         pop.style.visibility = r.bottom < sr.top || r.top > sr.bottom ? 'hidden' : 'visible'
       }
     }
-    const commitCellPop = () => {
+    const commitCellPop = (restoreFocus = true) => {
       const cur = activeCellPopRef.current
       if (!cur) return
       const ta = cur.pop.querySelector('textarea')
       const val = ta ? ta.value.replace(/\n/g, '<br>') : cur.raw
       const td = cur.td
-      closeCellPop()
+      closeCellPop(restoreFocus)
       if (val === cur.raw) return
       const nextLine = replaceCellInLine(rawLinesRef.current[cur.lineIdx], cur.colIdx, val)
-      applyRawPatch(cur.lineIdx, 1, [nextLine])
+      const tableIdx = Number.parseInt(td?.closest('table')?.getAttribute('data-ti'))
+      const rowIdx = Number.parseInt(td?.closest('tr')?.getAttribute('data-ri'))
+      applyRawPatch(cur.lineIdx, 1, [nextLine], {
+        meta: {
+          kind: 'cell',
+          target: {
+            line: cur.lineIdx + 1,
+            table: Number.isFinite(tableIdx) ? tableIdx + 1 : null,
+            row: Number.isFinite(rowIdx) ? rowIdx + 1 : null,
+            column: cur.colIdx + 1,
+            header: td?.tagName === 'TH'
+          },
+          summaryKey: 'keep.changeCell'
+        }
+      })
       // Scoped DOM update: a cell edit changes exactly one cell and shifts no line or
       // block index, so repaint just this <td>/<th> instead of rebuilding the whole
       // document. (A full rerender of a 2000-row table for one cell was seconds of
@@ -753,12 +813,38 @@ function KeepEditor({
       if (!cur) return
       activeBlockEditRef.current = null
       setDraftActive(false)
+      if (cur.mode === 'insert') {
+        if (commit) {
+          const inserted = prepareBlockInsertion(rawLinesRef.current, cur.at, cur.ta.value)
+          const changed =
+            inserted.length > 0 &&
+            applyRawPatch(cur.at, 0, inserted, {
+              meta: {
+                kind: 'block-insert',
+                target: { line: cur.at + 1, blockType: 'paragraph' },
+                summaryKey: 'keep.changeBlockInsert'
+              }
+            })
+          if (changed) {
+            rerender()
+            return
+          }
+        }
+        cur.container?.remove()
+        return
+      }
       if (commit) {
         const { ta, b } = cur
         // Inherit this block's original EOL style (\r presence) so untouched
         // bytes never shift; every replacement line follows the same convention.
         // (Pure helper — see replaceBlockLines in keep-parser.js, unit-tested.)
-        applyRawLines(replaceBlockLines(rawLinesRef.current, b.start, b.end, ta.value))
+        applyRawLines(replaceBlockLines(rawLinesRef.current, b.start, b.end, ta.value), {
+          meta: {
+            kind: 'block',
+            target: { line: b.start + 1, blockType: b.type },
+            summaryKey: 'keep.changeBlock'
+          }
+        })
         rerender() // line count may change → indices shift → rebuild the document
         return
       }
@@ -770,12 +856,7 @@ function KeepEditor({
       const bi = b.bi != null ? b.bi : blocksRef.current.indexOf(b)
       const blockDiv = bi >= 0 ? host.querySelector('.km-block[data-bi="' + bi + '"]') : null
       if (blockDiv) {
-        blockDiv.innerHTML = renderBlockInner(b, bi, viewLinesRef.current, {
-          srcEditLabel: tRef.current('keep.editSource'),
-          collapseLabel: tRef.current('keep.toggleSection'),
-          filterState: filterStateRef.current,
-          baseDir: dirOf(docPathRef.current)
-        })
+        blockDiv.innerHTML = renderBlockInner(b, bi, viewLinesRef.current, renderOpts())
         applyMultilineForBlock(blockDiv, b)
         observeEmbeds(blockDiv) // a restored ```mermaid / $$ block re-arms its embed
       } else {
@@ -856,16 +937,16 @@ function KeepEditor({
         const ta = cell.pop.querySelector('textarea')
         const val = ta ? ta.value.replace(/\n/g, '<br>') : cell.raw
         if (val === cell.raw) {
-          closeCellPop() // clean: no re-render, captured td still valid
+          closeCellPop(false) // clean: no re-render, captured td still valid
           return build()
         }
         return showConfirm(msg, {
           onSave: () => {
-            commitCellPop()
+            commitCellPop(false)
             build()
           },
           onDiscard: () => {
-            closeCellPop()
+            closeCellPop(false)
             build()
           }
         })
@@ -937,13 +1018,14 @@ function KeepEditor({
         ta.addEventListener('keydown', (e) => {
           if (e.key === 'Escape') {
             e.preventDefault()
-            closeCellPop()
+            e.stopPropagation()
+            closeCellPop(true)
           } else if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
             e.preventDefault()
             commitCellPop()
           }
         })
-        cancel.onclick = () => closeCellPop()
+        cancel.onclick = () => closeCellPop(true)
         ok.onclick = () => commitCellPop()
       })
 
@@ -984,6 +1066,7 @@ function KeepEditor({
         ta.addEventListener('keydown', (e) => {
           if (e.key === 'Escape') {
             e.preventDefault()
+            e.stopPropagation()
             closeBlockEdit(false)
           } else if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
             e.preventDefault()
@@ -993,6 +1076,126 @@ function KeepEditor({
         cancel.onclick = () => closeBlockEdit(false)
         ok.onclick = () => closeBlockEdit(true)
       })
+
+    const startBlockInsert = (bi, where) =>
+      openAfterClose(() => {
+        if (destroyed) return
+        const b = blocksRef.current[bi]
+        if (!b || b.type === 'table' || b.type === 'frontmatter') return
+        const blockDiv = host.querySelector('.km-block[data-bi="' + bi + '"]')
+        if (!blockDiv) return
+        const container = document.createElement('div')
+        container.className = 'km-block km-block-insert'
+        const ta = document.createElement('textarea')
+        ta.className = 'km-src-editor'
+        ta.rows = 4
+        ta.placeholder = tRef.current('keep.insertBlockPlaceholder')
+        ta.setAttribute('aria-label', tRef.current('keep.insertBlockLabel'))
+        const actions = document.createElement('div')
+        actions.className = 'km-src-actions'
+        const ok = document.createElement('button')
+        ok.type = 'button'
+        ok.className = 'ok'
+        ok.textContent = tRef.current('keep.editConfirmKey')
+        const cancel = document.createElement('button')
+        cancel.type = 'button'
+        cancel.textContent = tRef.current('edit.cancel')
+        actions.append(ok, cancel)
+        container.append(ta, actions)
+        const at = where === 'above' ? b.start : b.end + 1
+        if (where === 'above') blockDiv.before(container)
+        else blockDiv.after(container)
+        activeBlockEditRef.current = {
+          mode: 'insert',
+          ta,
+          b,
+          at,
+          container,
+          originalRaw: ''
+        }
+        setDraftActive(true)
+        ta.focus()
+        ta.addEventListener('keydown', (e) => {
+          if (e.key === 'Escape') {
+            e.preventDefault()
+            e.stopPropagation()
+            closeBlockEdit(false)
+          } else if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+            e.preventDefault()
+            closeBlockEdit(true)
+          }
+        })
+        cancel.onclick = () => closeBlockEdit(false)
+        ok.onclick = () => closeBlockEdit(true)
+      })
+
+    const structuralBlock = (bi) => {
+      const b = blocksRef.current[bi]
+      return b && b.type !== 'table' && b.type !== 'frontmatter' ? b : null
+    }
+    const duplicateBlock = (bi) => {
+      const b = structuralBlock(bi)
+      if (!b) return false
+      const inserted = prepareBlockInsertion(
+        rawLinesRef.current,
+        b.end + 1,
+        rawLinesRef.current.slice(b.start, b.end + 1)
+      )
+      const changed = applyRawPatch(b.end + 1, 0, inserted, {
+        meta: {
+          kind: 'block-duplicate',
+          target: { line: b.start + 1, blockType: b.type },
+          summaryKey: 'keep.changeBlockDuplicate'
+        }
+      })
+      if (changed) rerender()
+      return changed
+    }
+    const deleteBlock = (bi) => {
+      const b = structuralBlock(bi)
+      if (!b) return false
+      const changed = applyRawPatch(b.start, b.end - b.start + 1, [], {
+        meta: {
+          kind: 'block-delete',
+          target: { line: b.start + 1, blockType: b.type },
+          summaryKey: 'keep.changeBlockDelete'
+        }
+      })
+      if (changed) rerender()
+      return changed
+    }
+    const performBlockCommand = (command, requestedBi) => {
+      const bi = Number.isInteger(requestedBi) ? requestedBi : lastInteractedBi
+      if (!structuralBlock(bi)) return false
+      if (command === 'insertAbove' || command === 'insertBelow') {
+        startBlockInsert(bi, command === 'insertAbove' ? 'above' : 'below')
+        return true
+      }
+      if (command === 'duplicate') {
+        openAfterClose(() => duplicateBlock(bi))
+        return true
+      }
+      if (command === 'delete') {
+        openAfterClose(() => deleteBlock(bi))
+        return true
+      }
+      return false
+    }
+
+    const toggleTaskAt = (lineIdx, checked) => {
+      const current = rawLinesRef.current[lineIdx]
+      const next = toggleTaskLine(current, checked)
+      if (next === current) return false
+      const changed = applyRawPatch(lineIdx, 1, [next], {
+        meta: {
+          kind: 'task',
+          target: { line: lineIdx + 1, blockType: 'task' },
+          summaryKey: checked ? 'keep.changeTaskDone' : 'keep.changeTaskOpen'
+        }
+      })
+      if (changed) rerender()
+      return changed
+    }
 
     // ── structural table edits: add / remove rows & columns ──
     // Each rewrites only lines within the table's range, then re-parses. The
@@ -1009,7 +1212,14 @@ function KeepEditor({
       else at = (b.dataRows[ri]?.lineIdx ?? b.sepLine) + 1
       if (at == null) return
       const row = buildTableRow(b.headers.length, rawLinesRef.current[b.headerLine] || '')
-      applyRawPatch(at, 0, [row])
+      applyRawPatch(at, 0, [row], {
+        meta: {
+          kind: 'row-insert',
+          target: { line: at + 1, table: ti + 1, row: ri + 1 },
+          summaryKey: 'keep.changeRowInsert',
+          summaryVars: { n: 1 }
+        }
+      })
       rerender()
     }
     const doDeleteRow = (ti, ri) => {
@@ -1017,7 +1227,14 @@ function KeepEditor({
       if (!b) return
       const dr = b.dataRows[ri]
       if (!dr) return
-      applyRawPatch(dr.lineIdx, 1, [])
+      applyRawPatch(dr.lineIdx, 1, [], {
+        meta: {
+          kind: 'row-delete',
+          target: { line: dr.lineIdx + 1, table: ti + 1, row: ri + 1 },
+          summaryKey: 'keep.changeRowDelete',
+          summaryVars: { n: 1 }
+        }
+      })
       rerender()
     }
     const doInsertColumn = (ti, colIdx) => {
@@ -1033,7 +1250,14 @@ function KeepEditor({
       }
       delete filterStateRef.current[ti] // column indices shifted — drop stale filters
       delete columnStateRef.current[ti] // manual widths / hidden indices shifted too
-      applyRawPatch(b.start, b.end - b.start + 1, nextLines)
+      applyRawPatch(b.start, b.end - b.start + 1, nextLines, {
+        meta: {
+          kind: 'column-insert',
+          target: { line: b.start + 1, table: ti + 1, column: colIdx + 1 },
+          summaryKey: 'keep.changeColumnInsert',
+          summaryVars: { n: 1 }
+        }
+      })
       rerender()
     }
     const doDeleteColumn = (ti, colIdx) => {
@@ -1045,7 +1269,14 @@ function KeepEditor({
       }
       delete filterStateRef.current[ti] // column indices shifted — drop stale filters
       delete columnStateRef.current[ti] // manual widths / hidden indices shifted too
-      applyRawPatch(b.start, b.end - b.start + 1, nextLines)
+      applyRawPatch(b.start, b.end - b.start + 1, nextLines, {
+        meta: {
+          kind: 'column-delete',
+          target: { line: b.start + 1, table: ti + 1, column: colIdx + 1 },
+          summaryKey: 'keep.changeColumnDelete',
+          summaryVars: { n: 1 }
+        }
+      })
       rerender()
     }
 
@@ -1128,6 +1359,268 @@ function KeepEditor({
       })
     }
 
+    // ── table cell selection + keyboard command model ──
+    // Keep a small logical coordinate instead of a DOM node so a structural edit
+    // can rebuild the table without retaining a detached cell.
+    const selectionForCell = (cell) => {
+      const table = cell?.closest?.('table.km-table')
+      if (!table || !host.contains(table)) return null
+      const isHeader = cell.tagName === 'TH'
+      const row = cell.closest('tr')
+      return {
+        ti: parseInt(table.getAttribute('data-ti')),
+        ri: isHeader ? -1 : parseInt(row?.getAttribute('data-ri')),
+        ci: parseInt(cell.getAttribute('data-ci')),
+        isHeader,
+        line: parseInt(cell.getAttribute('data-line'))
+      }
+    }
+    const resolveSelection = (selection = selectedCellRef.current) => {
+      if (!selection || !Number.isFinite(selection.ti) || !Number.isFinite(selection.ci)) {
+        return null
+      }
+      const rowSelector = selection.isHeader
+        ? 'thead tr'
+        : `tbody tr[data-ri="${selection.ri}"]`
+      return host.querySelector(
+        `table.km-table[data-ti="${selection.ti}"] ${rowSelector} > ` +
+          `${selection.isHeader ? 'th' : 'td'}[data-ci="${selection.ci}"]`
+      )
+    }
+    const clearTableSelection = ({ focusTable = false } = {}) => {
+      const cell = resolveSelection()
+      const table = cell?.closest('table.km-table')
+      if (cell) {
+        cell.classList.remove('km-cell-selected')
+        cell.removeAttribute('aria-selected')
+        cell.removeAttribute('aria-label')
+        cell.tabIndex = -1
+      }
+      selectedCellRef.current = null
+      if (table) {
+        table.tabIndex = 0
+        if (focusTable) table.focus({ preventScroll: true })
+      }
+    }
+    const tableItemsForCell = (cell) => {
+      const table = cell?.closest('table.km-table')
+      if (!table) return []
+      const selection = selectionForCell(cell)
+      if (!selection) return []
+      const tr = cell.closest('tr')
+      const T = tRef.current
+      const items = [
+        { label: T('keep.copyCell'), fn: () => copyElement(cell) },
+        { label: T('keep.copyRow'), fn: () => copyRow(tr) },
+        { label: T('keep.copyCol'), fn: () => copyColumn(table, selection.ci) },
+        { label: T('keep.copyTable'), fn: () => copyTable(table) }
+      ]
+      if (Number.isFinite(selection.line)) {
+        items.push({ label: T('keep.openSource'), fn: () => openSourceAt(selection.line) })
+      }
+      items.push('sep')
+      buildTableItems(
+        items,
+        selection.ti,
+        selection.ri,
+        selection.ci,
+        selection.isHeader
+      )
+      return items
+    }
+    function performTableCommand(command) {
+      const cell = resolveSelection()
+      const selection = selectionForCell(cell)
+      if (!cell || !selection) return false
+      const table = cell.closest('table.km-table')
+      const headerFilter = table.querySelector(
+        `.km-filter-btn[data-ci="${selection.ci}"]`
+      )
+      if (command === 'edit') openCellPop(cell)
+      else if (command === 'filter') {
+        if (!headerFilter) return false
+        openFilterPop(headerFilter)
+      } else if (command === 'menu') {
+        const rect = cell.getBoundingClientRect()
+        openMenu(rect.left + 8, rect.bottom + 4, tableItemsForCell(cell))
+      } else if (command === 'rowAbove') {
+        doInsertRow(selection.ti, selection.ri, selection.isHeader ? 'first' : 'above')
+      } else if (command === 'rowBelow') {
+        doInsertRow(selection.ti, selection.ri, selection.isHeader ? 'first' : 'below')
+      } else if (command === 'rowDelete') {
+        if (selection.isHeader) return false
+        doDeleteRow(selection.ti, selection.ri)
+      } else if (command === 'colLeft') doInsertColumn(selection.ti, selection.ci)
+      else if (command === 'colRight') doInsertColumn(selection.ti, selection.ci + 1)
+      else if (command === 'colDelete') doDeleteColumn(selection.ti, selection.ci)
+      else return false
+      return true
+    }
+    const selectCell = (cell, { focus = true, scroll = false } = {}) => {
+      const next = selectionForCell(cell)
+      if (!next) return false
+      const previous = resolveSelection()
+      if (previous && previous !== cell) {
+        previous.classList.remove('km-cell-selected')
+        previous.removeAttribute('aria-selected')
+        previous.removeAttribute('aria-label')
+        previous.tabIndex = -1
+      }
+      selectedCellRef.current = next
+      const table = cell.closest('table.km-table')
+      table.tabIndex = -1
+      table.setAttribute(
+        'aria-label',
+        tRef.current('keep.tableAria', { n: next.ti + 1 })
+      )
+      cell.classList.add('km-cell-selected')
+      cell.setAttribute('aria-selected', 'true')
+      cell.setAttribute(
+        'aria-label',
+        tRef.current('keep.cellAria', {
+          row: next.isHeader ? 1 : next.ri + 2,
+          column: next.ci + 1,
+          value: cell.getAttribute('data-raw') || ''
+        })
+      )
+      cell.tabIndex = 0
+      if (focus) cell.focus({ preventScroll: true })
+      if (scroll) cell.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+      return true
+    }
+    const restoreSelectedCell = () => {
+      const cell = resolveSelection()
+      if (!cell) {
+        clearTableSelection()
+        return false
+      }
+      if (cell.classList.contains('km-cell-selected')) return true
+      return selectCell(cell, { focus: false })
+    }
+    const visibleCellInRow = (row, startCi, delta) => {
+      if (!row) return null
+      for (let ci = startCi; ci >= 0 && ci < row.children.length; ci += delta) {
+        const cell = row.children[ci]
+        if (!cell.classList.contains('km-col-hidden')) return cell
+      }
+      return null
+    }
+    const adjacentVisibleRow = (table, row, delta) => {
+      let next = delta > 0 ? row.nextElementSibling : row.previousElementSibling
+      if (!next) {
+        if (delta > 0 && row.parentElement?.tagName === 'THEAD') {
+          next = table.tBodies[0]?.firstElementChild || null
+        } else if (delta < 0 && row.parentElement?.tagName === 'TBODY') {
+          next = table.tHead?.rows?.[0] || null
+        }
+      }
+      while (next?.classList.contains('km-filtered')) {
+        next = delta > 0 ? next.nextElementSibling : next.previousElementSibling
+      }
+      return next
+    }
+    const moveSelectedCell = (direction) => {
+      const cell = resolveSelection()
+      if (!cell) return false
+      const table = cell.closest('table.km-table')
+      const row = cell.closest('tr')
+      const ci = parseInt(cell.getAttribute('data-ci'))
+      let target = null
+      if (direction === 'left') target = visibleCellInRow(row, ci - 1, -1)
+      else if (direction === 'right') target = visibleCellInRow(row, ci + 1, 1)
+      else {
+        const delta = direction === 'up' || direction === 'previous' ? -1 : 1
+        if (direction === 'previous') {
+          target = visibleCellInRow(row, ci - 1, -1)
+          if (!target) {
+            const nextRow = adjacentVisibleRow(table, row, delta)
+            target = visibleCellInRow(nextRow, nextRow?.children.length - 1, -1)
+          }
+        } else if (direction === 'next') {
+          target = visibleCellInRow(row, ci + 1, 1)
+          if (!target) {
+            const nextRow = adjacentVisibleRow(table, row, delta)
+            target = visibleCellInRow(nextRow, 0, 1)
+          }
+        } else {
+          const nextRow = adjacentVisibleRow(table, row, delta)
+          target = nextRow?.children[ci] || null
+          if (target?.classList.contains('km-col-hidden')) target = null
+        }
+      }
+      return target ? selectCell(target, { scroll: true }) : false
+    }
+    const pasteIntoSelectedCells = (event) => {
+      if (activeCellPopRef.current || activeBlockEditRef.current) return false
+      const cell = resolveSelection()
+      const selection = selectionForCell(cell)
+      if (!cell || !selection) return false
+      const text = event.clipboardData?.getData('text/plain')
+      if (text == null || text === '') return false
+      const rows = text.replace(/\r\n?/g, '\n').split('\n')
+      if (rows.length > 1 && rows.at(-1) === '') rows.pop()
+      const matrix = rows.map((row) => row.split('\t'))
+      const table = getTable(selection.ti)
+      if (!table || !matrix.length) return false
+      const startGridRow = selection.isHeader ? 0 : selection.ri + 1
+      const maxGridRows = table.dataRows.length + 1
+      const maxColumns = table.headers.length
+      const changed = new Map()
+      let appliedRows = 0
+      let appliedColumns = 0
+      let clipped = false
+
+      matrix.forEach((values, rowOffset) => {
+        const gridRow = startGridRow + rowOffset
+        if (gridRow >= maxGridRows) {
+          clipped = true
+          return
+        }
+        const lineIdx = gridRow === 0 ? table.headerLine : table.dataRows[gridRow - 1]?.lineIdx
+        if (!Number.isFinite(lineIdx)) return
+        let line = changed.get(lineIdx) ?? rawLinesRef.current[lineIdx]
+        let rowApplied = false
+        values.forEach((value, colOffset) => {
+          const colIdx = selection.ci + colOffset
+          if (colIdx >= maxColumns) {
+            clipped = true
+            return
+          }
+          line = replaceCellInLine(line, colIdx, value.replace(/\n/g, '<br>'))
+          appliedColumns = Math.max(appliedColumns, colOffset + 1)
+          rowApplied = true
+        })
+        if (rowApplied) {
+          changed.set(lineIdx, line)
+          appliedRows = Math.max(appliedRows, rowOffset + 1)
+        }
+      })
+      if (!changed.size) return false
+      const lineNumbers = [...changed.keys()].sort((a, b) => a - b)
+      const start = lineNumbers[0]
+      const end = lineNumbers.at(-1)
+      const nextLines = rawLinesRef.current.slice(start, end + 1)
+      lineNumbers.forEach((lineIdx) => {
+        nextLines[lineIdx - start] = changed.get(lineIdx)
+      })
+      event.preventDefault()
+      applyRawPatch(start, end - start + 1, nextLines, {
+        meta: {
+          kind: 'paste',
+          target: {
+            line: selection.line + 1,
+            table: selection.ti + 1,
+            row: startGridRow + 1,
+            column: selection.ci + 1
+          },
+          summaryKey: clipped ? 'keep.changePasteClipped' : 'keep.changePaste',
+          summaryVars: { rows: appliedRows, columns: appliedColumns }
+        }
+      })
+      rerender()
+      return true
+    }
+
     // ── rich-text copy & "open source here" (general right-click / Ctrl+C) ──
     // The single source of truth is rawLines; "open source here" hands the parent
     // a 0-based source line so it can flip global source mode and place the caret.
@@ -1140,6 +1633,24 @@ function KeepEditor({
     const blockOfNode = (node) => {
       const el = node && (node.nodeType === 1 ? node : node.parentElement)
       return el && host.contains(el) ? el.closest('.km-block') : null
+    }
+    const currentSelectionRange = () => {
+      const selection = window.getSelection()
+      if (!selection?.rangeCount) return null
+      const range = selection.getRangeAt(0)
+      if (!host.contains(range.startContainer) || !host.contains(range.endContainer)) return null
+      return range
+    }
+    const selectionLineRange = () => {
+      const range = currentSelectionRange()
+      if (!range) return null
+      const startBlock = blockOfNode(range.startContainer)
+      const endBlock = blockOfNode(range.endContainer)
+      const startBi = Number(startBlock?.getAttribute('data-bi'))
+      const endBi = Number(endBlock?.getAttribute('data-bi'))
+      const start = blocksRef.current[startBi]?.start
+      const end = blocksRef.current[endBi]?.end
+      return Number.isInteger(start) && Number.isInteger(end) ? { start, end } : null
     }
     const openSourceAt = (lineIdx) => {
       closeMenu()
@@ -1433,19 +1944,21 @@ function KeepEditor({
     // in-app doc link or pure #anchor → hand the (path, anchor, fromPath) to the
     // parent so it opens the markdown tab and jumps. Unknown schemes are blocked
     // here and again by the main-process permission boundary.
-    const activateLink = (href) => {
+    const activateLink = (href, { openRight = false } = {}) => {
       if (/^(https?:|mailto:)/i.test(href)) {
         window.api?.openExternal?.(href)
         return
       }
-      const hashIdx = href.indexOf('#')
-      const rawPath = hashIdx >= 0 ? href.slice(0, hashIdx) : href
-      const anchor = hashIdx >= 0 ? safeDecode(href.slice(hashIdx + 1)) : ''
-      const path = safeDecode(rawPath)
-      if (/^[a-z][a-z\d+.-]*:/i.test(path)) {
-        return
-      }
-      onOpenDocLinkRef.current?.(path, anchor, docPathRef.current)
+      const target = parseInternalDocLink(href)
+      if (!target) return
+      onOpenDocLinkRef.current?.(target.path, target.anchor, docPathRef.current, { openRight })
+    }
+    const decorateInternalLink = (link) => {
+      if (!link || !host.contains(link)) return
+      const target = internalLinkTarget(link.getAttribute('href'), docPathRef.current)
+      if (!target?.label) return
+      const translate = tRef.current
+      link.title = `${translate('links.hoverTarget', { target: target.label })}\n${translate('links.openRightHint')}`
     }
 
     // ── event delegation on the host container ──
@@ -1459,10 +1972,24 @@ function KeepEditor({
       trackInteraction(e.target)
       clearTimeout(linkTimerRef) // a double-click is an edit, not a link navigation
       if (e.target.closest('.km-collapse-toggle')) return // a fold toggle, not an edit
+      if (sourceSplitModeRef.current) {
+        const cell = e.target.closest('td, th')
+        const block = e.target.closest('.km-block[data-bi]')
+        const cellLine = Number(cell?.getAttribute('data-line'))
+        const bi = Number(block?.getAttribute('data-bi'))
+        const blockLine = Number.isFinite(bi) ? blocksRef.current[bi]?.start : null
+        const line = Number.isFinite(cellLine) ? cellLine : blockLine
+        if (Number.isFinite(line)) {
+          e.preventDefault()
+          onLocateSourceRef.current?.(line)
+          return
+        }
+      }
       // Edit any table cell — body (<td>) or header (<th>). The filter ▼ lives in
       // the header; a double-click on it is a filter toggle, not a cell edit.
       const cell = e.target.closest('td, th')
       if (cell && host.contains(cell) && !e.target.closest('.km-filter-btn')) {
+        selectCell(cell)
         openCellPop(cell)
         return
       }
@@ -1475,8 +2002,25 @@ function KeepEditor({
         startBlockEdit(parseInt(block.getAttribute('data-bi')))
       }
     }
+    const onTaskChange = (e) => {
+      const checkbox = e.target.closest?.('.km-task-cb[data-line]')
+      if (!checkbox || !host.contains(checkbox)) return
+      const lineIdx = Number(checkbox.getAttribute('data-line'))
+      if (!Number.isInteger(lineIdx)) return
+      const checked = checkbox.checked
+      // A pending editor owns the document until it is confirmed/discarded.
+      // Restore the old visual state while the shared draft prompt is open; the
+      // requested task state is applied only after that decision.
+      if (activeCellPopRef.current || activeBlockEditRef.current) checkbox.checked = !checked
+      openAfterClose(() => toggleTaskAt(lineIdx, checked))
+    }
     const onClick = (e) => {
       trackInteraction(e.target)
+      const clickedCell = e.target.closest('td, th')
+      if (clickedCell && host.contains(clickedCell)) selectCell(clickedCell)
+      else if (!e.target.closest('.km-collapse-toggle, .hm-embed-zoom, .km-src-edit')) {
+        clearTableSelection()
+      }
       const zoomButton = e.target.closest('.hm-embed-zoom')
       if (zoomButton && host.contains(zoomButton)) {
         const item = zoomItemFromButton(zoomButton)
@@ -1506,7 +2050,8 @@ function KeepEditor({
         if (href && href !== '#') {
           e.preventDefault()
           clearTimeout(linkTimerRef)
-          linkTimerRef = setTimeout(() => activateLink(href), 230)
+          const openRight = e.altKey
+          linkTimerRef = setTimeout(() => activateLink(href, { openRight }), 230)
           return
         }
       }
@@ -1538,30 +2083,78 @@ function KeepEditor({
         items.push({ label: T('keep.copySel'), fn: () => copySelection(sel) })
         items.push({ label: T('keep.openSource'), fn: () => openSourceAt(line) })
       } else {
+        const link = e.target.closest('a')
+        if (link && host.contains(link)) {
+          const block = link.closest('.km-block')
+          const href = link.getAttribute('href') || ''
+          if (parseInternalDocLink(href)) {
+            items.push({
+              label: T('links.openRight'),
+              fn: () => activateLink(href, { openRight: true })
+            })
+          }
+          items.push({
+            label: T('links.findReferences'),
+            fn: () => onFindReferencesRef.current?.({
+              type: 'link',
+              href,
+              line: lineForBlock(block) + 1
+            })
+          })
+          items.push('sep')
+        }
         const cell = e.target.closest('td, th')
         if (cell && host.contains(cell)) {
           const table = cell.closest('table.km-table')
           if (!table) return
-          const ti = parseInt(table.getAttribute('data-ti'))
-          const ci = parseInt(cell.getAttribute('data-ci'))
-          const isHeader = cell.tagName === 'TH'
-          const tr = cell.closest('tr')
-          const ri = isHeader ? -1 : parseInt(tr.getAttribute('data-ri'))
-          const line = parseInt(cell.getAttribute('data-line'))
-          items.push({ label: T('keep.copyCell'), fn: () => copyElement(cell) })
-          items.push({ label: T('keep.copyRow'), fn: () => copyRow(tr) })
-          items.push({ label: T('keep.copyCol'), fn: () => copyColumn(table, ci) })
-          items.push({ label: T('keep.copyTable'), fn: () => copyTable(table) })
-          if (Number.isFinite(line))
-            items.push({ label: T('keep.openSource'), fn: () => openSourceAt(line) })
-          items.push('sep')
-          buildTableItems(items, ti, ri, ci, isHeader)
+          selectCell(cell)
+          items.push(...tableItemsForCell(cell))
         } else {
           const block = e.target.closest('.km-block')
           if (!block || !host.contains(block)) return
+          const bi = Number(block.getAttribute('data-bi'))
           const line = lineForBlock(block)
           items.push({ label: T('keep.copy'), fn: () => copyElement(block) })
           items.push({ label: T('keep.openSource'), fn: () => openSourceAt(line) })
+          const sourceBlock = blocksRef.current[bi]
+          if (sourceBlock?.type === 'heading') {
+            items.push('sep')
+            items.push({
+              label: T('links.findReferences'),
+              fn: () => onFindReferencesRef.current?.({
+                type: 'heading',
+                line: sourceBlock.start + 1,
+                text: sourceBlock.text
+              })
+            })
+            items.push({
+              label: T('links.renameHeading'),
+              fn: () => onRenameHeadingRef.current?.({
+                type: 'heading',
+                line: sourceBlock.start + 1,
+                text: sourceBlock.text
+              })
+            })
+          }
+          if (structuralBlock(bi)) {
+            items.push('sep')
+            items.push({
+              label: T('keep.blockInsertAbove'),
+              fn: () => performBlockCommand('insertAbove', bi)
+            })
+            items.push({
+              label: T('keep.blockInsertBelow'),
+              fn: () => performBlockCommand('insertBelow', bi)
+            })
+            items.push({
+              label: T('keep.blockDuplicate'),
+              fn: () => performBlockCommand('duplicate', bi)
+            })
+            items.push({
+              label: T('keep.blockDelete'),
+              fn: () => performBlockCommand('delete', bi)
+            })
+          }
         }
       }
       if (!items.length) return
@@ -1586,6 +2179,57 @@ function KeepEditor({
       if (e.key !== 'Escape') return
       if (activeConfirmRef.current) closeConfirm() // Esc on the modal = cancel
       else if (activeMenuRef.current) closeMenu()
+      else if (activePopRef.current) closePop()
+      else if (selectedCellRef.current) clearTableSelection({ focusTable: true })
+    }
+    const onLinkHover = (e) => {
+      decorateInternalLink(e.target.closest?.('a[href]'))
+    }
+    const onFocusIn = (e) => {
+      const cell = e.target.closest?.('td, th')
+      if (cell && host.contains(cell)) {
+        if (!cell.classList.contains('km-cell-selected')) selectCell(cell, { focus: false })
+        return
+      }
+      const table = e.target.closest?.('table.km-table')
+      if (table && host.contains(table)) {
+        const first = visibleCellInRow(table.tHead?.rows?.[0], 0, 1)
+        if (first) selectCell(first)
+      }
+    }
+    const onTableKeyDown = (e) => {
+      if (!e.target.closest?.('table.km-table')) return
+      const cell = resolveSelection()
+      if (!cell) return
+      let handled = false
+      if (e.key === 'Enter' || e.key === 'F2') {
+        handled = performTableCommand('edit')
+      } else if (e.altKey && e.key === 'ArrowDown') {
+        handled = performTableCommand('filter')
+      } else if ((e.shiftKey && e.key === 'F10') || e.key === 'ContextMenu') {
+        handled = performTableCommand('menu')
+      } else if (e.key === 'ArrowLeft') handled = moveSelectedCell('left')
+      else if (e.key === 'ArrowRight') handled = moveSelectedCell('right')
+      else if (e.key === 'ArrowUp') handled = moveSelectedCell('up')
+      else if (e.key === 'ArrowDown') handled = moveSelectedCell('down')
+      else if (e.key === 'Tab') {
+        handled = moveSelectedCell(e.shiftKey ? 'previous' : 'next')
+      } else if (e.key === 'Escape') {
+        const dismissedOverlay = Boolean(activeMenuRef.current || activePopRef.current)
+        if (activeMenuRef.current) closeMenu()
+        else if (activePopRef.current) closePop()
+        else clearTableSelection({ focusTable: true })
+        if (dismissedOverlay) {
+          queueMicrotask(() => {
+            const selected = resolveSelection()
+            selected?.focus({ preventScroll: true })
+          })
+        }
+        handled = true
+      }
+      if (!handled) return
+      e.preventDefault()
+      e.stopPropagation()
     }
     // Scrolling abandons an open right-click menu (its anchor moved away). The
     // cell editor stays open on purpose (it may hold unsaved edits) and is
@@ -1614,9 +2258,10 @@ function KeepEditor({
     }
     resumeFloatingRef.current = () => {
       const cell = activeCellPopRef.current
-      if (!cell) return
-      cell.pop.style.display = ''
-      repositionCellPop()
+      if (cell) {
+        cell.pop.style.display = ''
+        repositionCellPop()
+      }
     }
     // Only worth re-measuring once the doc is fully streamed; mid-stream the next
     // chunk's finishRenderRange will measure the rest anyway (the host is visible again).
@@ -1627,8 +2272,13 @@ function KeepEditor({
 
     host.addEventListener('dblclick', onDblClick)
     host.addEventListener('click', onClick)
+    host.addEventListener('change', onTaskChange)
     host.addEventListener('contextmenu', onContextMenu)
+    host.addEventListener('mouseover', onLinkHover)
     host.addEventListener('copy', onCopy)
+    host.addEventListener('paste', pasteIntoSelectedCells)
+    host.addEventListener('focusin', onFocusIn)
+    host.addEventListener('keydown', onTableKeyDown)
     document.addEventListener('click', onDocDown)
     document.addEventListener('keydown', onEsc)
     window.addEventListener('scroll', onScroll, true)
@@ -1706,6 +2356,94 @@ function KeepEditor({
         : blockRect.top - scrollerRect.top - topInset
       return true
     }
+    const captureNavigationContext = () => {
+      const collapsed = [...collapsedRef.current].slice(0, 50)
+      const selection = selectedCellRef.current ? { ...selectedCellRef.current } : null
+      let table = selection
+        ? host.querySelector(`table.km-table[data-ti="${selection.ti}"]`)
+        : null
+      if (!table) {
+        const rawOffset = markdownOffsetFromViewportTop(false)
+        const bi = Number.isFinite(rawOffset) ? blockIndexForOffset(rawOffset) : -1
+        table = bi >= 0
+          ? host.querySelector(`.km-block[data-bi="${bi}"] table.km-table[data-ti]`)
+          : null
+      }
+      if (!table) return { collapsed }
+
+      const ti = Number(table.getAttribute('data-ti'))
+      const wrap = table.closest('.km-table-wrap')
+      const tableFilters = filterStateRef.current[ti] || {}
+      const filterEntries = Object.entries(tableFilters)
+        .filter(([, excluded]) => excluded instanceof Set && excluded.size)
+        .map(([column, excluded]) => ({
+          column: Number(column),
+          excluded: [...excluded].map(String)
+        }))
+      const filterValueCount = filterEntries.reduce(
+        (count, filter) => count + filter.excluded.length,
+        0
+      )
+      return {
+        collapsed,
+        table: {
+          ti,
+          scrollLeft: wrap?.scrollLeft || 0,
+          selection: selection?.ti === ti ? selection : null,
+          restoreFilters: filterValueCount <= 200,
+          filters: filterValueCount <= 200 ? filterEntries : undefined
+        }
+      }
+    }
+    const restoreNavigationContext = (context) => {
+      if (!context || typeof context !== 'object') return false
+      flushRemaining()
+      if (Array.isArray(context.collapsed)) {
+        collapsedRef.current = new Set(context.collapsed.slice(0, 50))
+        applyCollapsed()
+      }
+      const tableContext = context.table
+      if (!tableContext || !Number.isFinite(tableContext.ti)) return true
+      const ti = Math.max(0, Math.floor(tableContext.ti))
+      const table = host.querySelector(`table.km-table[data-ti="${ti}"]`)
+      if (!table) return true
+
+      if (tableContext.restoreFilters) {
+        const nextFilters = {}
+        for (const filter of tableContext.filters || []) {
+          if (!Number.isFinite(filter?.column) || !Array.isArray(filter.excluded)) continue
+          const excluded = new Set(filter.excluded.map(String))
+          if (excluded.size) nextFilters[Math.max(0, Math.floor(filter.column))] = excluded
+        }
+        if (Object.keys(nextFilters).length) filterStateRef.current[ti] = nextFilters
+        else delete filterStateRef.current[ti]
+        applyFilter(ti)
+        const syncButtons = (root) => {
+          root
+            .querySelectorAll?.(`.km-filter-btn[data-ti="${ti}"]`)
+            .forEach((button) => {
+              const column = Number(button.getAttribute('data-ci'))
+              button.classList.toggle('active', !!nextFilters[column]?.size)
+            })
+        }
+        syncButtons(host)
+        document.querySelectorAll('.km-float-header').forEach(syncButtons)
+        reportFilter()
+      }
+
+      const wrap = table.closest('.km-table-wrap')
+      if (wrap && Number.isFinite(tableContext.scrollLeft)) {
+        wrap.scrollLeft = Math.max(0, tableContext.scrollLeft)
+      }
+      if (tableContext.selection && tableContext.selection.ti === ti) {
+        selectedCellRef.current = { ...tableContext.selection }
+        restoreSelectedCell()
+      } else if (selectedCellRef.current?.ti === ti) {
+        clearTableSelection()
+      }
+      tableScrollRef.current?.update()
+      return true
+    }
     const replaceMarkdown = (markdown) => {
       if (destroyed) return false
       closeBlockEdit(false)
@@ -1714,10 +2452,60 @@ function KeepEditor({
       closeMenu()
       filterStateRef.current = {}
       columnStateRef.current = {}
-      applyRawLines(String(markdown ?? '').split('\n'), { emit: false })
+      historyRef.current = { undo: [], redo: [] }
+      reportHistory()
+      applyRawLines(String(markdown ?? '').split('\n'), { record: false, emit: false })
       rerender()
       onFilterChangeRef.current?.(null)
       return true
+    }
+    const syncMarkdown = (markdown) => {
+      if (destroyed || activeCellPopRef.current || activeBlockEditRef.current) return false
+      const next = String(markdown ?? '').split('\n')
+      if (rawLinesRef.current.join('\n') === next.join('\n')) return true
+      closePop()
+      closeMenu()
+      filterStateRef.current = {}
+      columnStateRef.current = {}
+      selectedCellRef.current = null
+      historyRef.current = { undo: [], redo: [] }
+      reportHistory()
+      applyRawLines(next, { record: false, emit: false })
+      rerender()
+      onFilterChangeRef.current?.(null)
+      return true
+    }
+    const highlightMarkdownOffset = (rawOffset) => {
+      host.querySelectorAll('.km-source-position').forEach((el) => el.classList.remove('km-source-position'))
+      if (!Number.isFinite(rawOffset)) return false
+      const bi = blockIndexForOffset(rawOffset)
+      const block = bi >= 0 ? host.querySelector(`.km-block[data-bi="${bi}"]`) : null
+      if (!block) return false
+      revealHeading(block)
+      block.classList.add('km-source-position')
+      return true
+    }
+    const getReferenceContext = () => {
+      const fallbackOffset = markdownOffsetFromViewportTop(false)
+      const bi = lastInteractedBi >= 0
+        ? lastInteractedBi
+        : Number.isFinite(fallbackOffset)
+          ? blockIndexForOffset(fallbackOffset)
+          : -1
+      const sourceBlock = bi >= 0 ? blocksRef.current[bi] : null
+      const block = bi >= 0 ? host.querySelector(`.km-block[data-bi="${bi}"]`) : null
+      const href = block?.querySelector('a[href]')?.getAttribute('href')
+      if (href) {
+        return { type: 'link', href, line: (sourceBlock?.start || 0) + 1 }
+      }
+      if (sourceBlock?.type === 'heading') {
+        return {
+          type: 'heading',
+          line: sourceBlock.start + 1,
+          text: sourceBlock.text
+        }
+      }
+      return null
     }
     const insertMarkdown = (markdown) => {
       if (destroyed) return false
@@ -1793,16 +2581,43 @@ function KeepEditor({
       getMarkdown: () => rawLinesRef.current.join('\n'),
       getScroller,
       replaceMarkdown,
+      syncMarkdown,
+      highlightMarkdownOffset,
+      getReferenceContext,
       insertMarkdown,
+      tableCommand: (command) => performTableCommand(command),
+      hasTableSelection: () => !!resolveSelection(),
+      blockCommand: (command) => performBlockCommand(command),
+      replaceLineRange: (start, deleteCount, insertedLines) => {
+        const changed = applyRawPatch(start, deleteCount, insertedLines, {
+          meta: {
+            kind: 'restore',
+            target: { line: start + 1 },
+            summaryKey: 'keep.changeRestore'
+          }
+        })
+        if (!changed) return false
+        filterStateRef.current = {}
+        columnStateRef.current = {}
+        rerender()
+        onFilterChangeRef.current?.(null)
+        return true
+      },
       undo: () => performHistory('undo'),
       redo: () => performHistory('redo'),
       hasDraft: () => !!(activeCellPopRef.current || activeBlockEditRef.current),
       focusDraft,
-      markdownOffsetFromSelection: () => null,
+      selectionLineRange,
+      markdownOffsetFromSelection: () => {
+        const lines = selectionLineRange()
+        return lines ? lineStartOffset(rawLinesRef.current.join('\n'), lines.start) : null
+      },
       markdownOffsetFromViewportTop,
       navigationOffsetFromViewportTop: () => markdownOffsetFromViewportTop(false),
       restoreMarkdownOffset,
-      isSelectionVisible: () => false,
+      captureNavigationContext,
+      restoreNavigationContext,
+      isSelectionVisible: () => !!currentSelectionRange(),
       // PDF export: a clean snapshot without the edit affordances / filter ▼. The
       // export render leaves mermaid/math as empty placeholders (they fill async in
       // the live DOM), so copy each already-rendered diagram/formula across by index
@@ -1859,6 +2674,7 @@ function KeepEditor({
       closeMenu()
       closeConfirm()
       closeCellPop()
+      clearTableSelection()
       tableScrollRef.current?.destroy() // remove body-appended floating headers
       tableScrollRef.current = null
       activeBlockEditRef.current = null // drop block-edit tracking (host is torn down)
@@ -1867,8 +2683,13 @@ function KeepEditor({
       onFilterChangeRef.current?.(null) // drop this tab's filter badge on unmount
       host.removeEventListener('dblclick', onDblClick)
       host.removeEventListener('click', onClick)
+      host.removeEventListener('change', onTaskChange)
       host.removeEventListener('contextmenu', onContextMenu)
+      host.removeEventListener('mouseover', onLinkHover)
       host.removeEventListener('copy', onCopy)
+      host.removeEventListener('paste', pasteIntoSelectedCells)
+      host.removeEventListener('focusin', onFocusIn)
+      host.removeEventListener('keydown', onTableKeyDown)
       document.removeEventListener('click', onDocDown)
       document.removeEventListener('keydown', onEsc)
       window.removeEventListener('scroll', onScroll, true)
@@ -1932,15 +2753,6 @@ function KeepEditor({
       <ZoomLightbox item={lightbox} onClose={() => setLightbox(null)} t={t} />
     </>
   )
-}
-
-// Decode a URL component, tolerating malformed escapes (return the input as-is).
-function safeDecode(s) {
-  try {
-    return decodeURIComponent(s)
-  } catch {
-    return s
-  }
 }
 
 // Tiny local escapers (avoid importing if tree-shaking matters; mirror parser).

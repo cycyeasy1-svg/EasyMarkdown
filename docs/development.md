@@ -67,9 +67,9 @@ npm run test:watch # 监视模式（开发时用）
 - 测试放在 `test/`（与 `src/` 同级），按被测模块命名（如 `test/keep-parser.test.js`）。
 - 默认运行环境是 `node`。需要 `localStorage` / `document` 的测试在文件首行加 `// @vitest-environment happy-dom`（见 `test/settings.test.js`）。
 - 配置在 `vitest.config.mjs`，镜像了 `electron.vite.config.mjs` 的 `define`（`__APP_VERSION__`）。
-- **只测纯函数**。当前覆盖：`keep-parser`（Markdown 解析 / 表格编辑）、`paths`（跨平台路径 / 版本 / 工作区净化）、`components/editor-images`（相对路径 → `file://`）、`main/helpers`（`isRestrictedRoot`/`isAbsolutePath`/`MD_RE` 等 watcher 安全函数）、`settings`/`find`/`blocks`。
-- **主进程纯函数已抽到 [src/main/helpers.js](../src/main/helpers.js)**（`index.js` 顶部 import 了 `electron`，测试无法直接 import index.js）。以后要单测新的主进程纯逻辑，先把它移到 helpers.js 再 import。
-- 新增 / 改动纯函数时，同步补 / 改对应用例。DOM、ProseMirror 命令、异步渲染（mermaid 等）不在单测范围内 —— 由下面的 CDP（将来迁 Playwright）E2E 覆盖。
+- **只测纯函数**。当前覆盖包括：`keep-parser`（Markdown 解析 / 表格编辑 / 任务列表）、`keep-history`（最小行补丁、事务元数据与容量限制）、`keep-review`（局部差异、部分恢复、CRLF 保持、2 万行表格性能上限与大范围改写降级）、`navigation-history`（后退/前进栈）、`link-navigation`（内部链接提示与右侧打开判定）、`sidebar-tree`（延迟树可见项顺序）、`paths`（跨平台路径 / 会话 / 预览标签 / 最近文件 / 工作区净化）、`components/editor-images`、`editor-math`、`editor-mermaid`、`editor-tablescroll` 性能守卫、`sourceFold` / `source-position`、`main/helpers`、`main/markdown-links`、`main/local-history`、`settings` / `find` / `blocks` 等。
+- **主进程纯函数已抽到 [src/main/helpers.js](../src/main/helpers.js)、[src/main/markdown-links.js](../src/main/markdown-links.js) 与 [src/main/local-history.js](../src/main/local-history.js)**（`index.js` 顶部 import 了 `electron`，测试无法直接 import index.js）。以后要单测新的主进程纯逻辑，先移到不依赖 Electron 的模块再 import。
+- 新增 / 改动纯函数时，同步补 / 改对应用例。DOM、ProseMirror 命令、异步渲染（Mermaid 等）不在单测范围内，由下面的 Playwright E2E 覆盖。
 
 ## 自动化测试：E2E（Playwright）
 
@@ -82,17 +82,36 @@ npm run test:e2e   # 先 electron-vite build，再 playwright test
 - 配置 `playwright.config.mjs`(testDir `test/e2e`,匹配 `*.spec.js`);用例在 [test/e2e/](../test/e2e/),fixture 在 `test/e2e/fixtures/`(committed,确定性)。
 - **启动机制**在 [test/e2e/helpers.js](../test/e2e/helpers.js) 的 `launchApp()`:
   - 启动**构建产物** `out/main/index.js`(主进程无 `ELECTRON_RENDERER_URL` 时走 `loadFile(out/renderer/index.html)`)——所以**必须先 `npm run build`**(`test:e2e` 脚本已带)。
-  - 每次启动传 `--user-data-dir=<临时目录>`:既隔离 session/localStorage,又绕开**单实例锁**(锁按 userData 分),不会被转发到正在跑的 dev 实例。
+  - 默认每次启动传 `--user-data-dir=<临时目录>`:既隔离 session/localStorage,又绕开**单实例锁**(锁按 userData 分),不会被转发到正在跑的 dev 实例。需要验证跨重启状态时，可显式复用 `userDataDir`，并在第一次 teardown 时设置 `preserveUserData`。
   - **清掉 `ELECTRON_RUN_AS_NODE`**:某些 shell/CI(包括本仓库的自动化环境)设了它,会让 electron 退化成纯 Node(`import 'electron'` 拿不到 app、进程直接退出 → Playwright 报 "Process failed to launch")。
   - teardown 用 `app.evaluate(({app}) => app.exit(0))` **强制退出**,绕过主进程"未保存变更"的关窗确认守卫(自动化下没人回 `app:confirm-close`,否则会挂起)。
 - fixture 作为启动参数传入 → `extractArgs` 把 .md 开成 tab。首次运行(全新 userData)还会自动开"使用说明"引导文档,所以**断言前先点 fixture 的 tab 激活它**。
 - **编辑器无关断言**:打开的 .md 在 **keep 模式**(`.km-*`,引擎是 `keep-parser.js`)渲染,而引导文档在 **Milkdown**(`.ProseMirror`)——所以用 `getByRole`/`getByText` 按语义断言,别绑定某一种编辑器的 class。
+- **Markdown 链接工作流**：`test/e2e/markdown-links.spec.js` 用临时工作区覆盖链接诊断、`F8` 跳转、Keep 标题引用查找、标题重命名预览/应用，以及文件重命名的取消与批量更新。
+- **标签历史与 MRU**：`test/e2e/tab-history.spec.js` 覆盖 `Ctrl+Tab` 浮层的松键 / Enter / Esc、按顺序切换、关闭标签原位置恢复、文件已移动 / 删除通知，以及未命名草稿不进入关闭历史。
+- **文件树键盘与 ARIA**：`test/e2e/sidebar-keyboard.spec.js` 覆盖 roving focus、层级与展开状态、
+  方向键、Enter、F2、Delete、Shift+F10 菜单、键盘新建、`Ctrl/Cmd+X/V` 移动，以及长树的滚动跟随。
+- **预览标签**：`test/e2e/preview-tabs.spec.js` 覆盖文件树单击复用预览槽、双击 / Enter / 编辑升级，以及跨重启恢复预览状态。
+- **内部链接高级操作**：`test/e2e/internal-link-navigation.spec.js` 覆盖悬停目标说明、`Alt/Option+Click` 右侧打开与锚点跳转。
+- **Zen 模式**：`test/e2e/zen-mode.spec.js` 覆盖外壳隐藏、屏幕边缘临时显示，以及编辑内容和编辑器挂载保持。
+- **永久本地历史**：`test/e2e/local-history.spec.js` 复用同一 userData 跨重启，覆盖历史列表、版本比较、Keep 事务恢复与 Undo。
 - 用例分两类:
   - **`smoke.spec.js`** —— 启动、开文件渲染标题、列表/表格块渲染。
   - **`interactions.spec.js`** —— 真实编辑(港自 `scripts/etv.mjs`):
     - keep 模式块"编辑源码"(点 `.km-src-edit` → `.km-src-editor` textarea → 改 → 点 `.km-src-actions .ok` 提交 → 重渲染);提交是 **Ctrl/Cmd+Enter 或点 OK**(Enter 是换行,Esc 取消)。
     - keep 模式表格单元格编辑(双击 `.km-table td` → `.km-cell-pop .km-cp-input` → 改 → OK),端到端覆盖 `keep-parser.js` 的 `replaceCellInLine`。
+    - Keep 状态栏 Undo/Redo 按钮的 disabled/tooltip/往返恢复，以及草稿期间历史操作被保护。
+    - 未确认的单元格草稿切换标签后仍保留，取消后标签恢复为未修改。
+    - 命令面板 `@` 当前文档标题搜索，与 `Alt+←` / `Alt+→` 跳转历史联动。
     - Milkdown 的 Ctrl+2 转标题 + 右键块菜单转换:先点状态栏 **"切换编辑模式"** 按钮(`button[title*="切换编辑模式"]`)把当前 tab 从 keep 切到 Milkdown(`.ProseMirror`);右键 → `.block-ctxmenu`(¶ + H1–H6 共 7 项)→ 点"标题 2"项,块转 H2。
+  - **`settings-tabs.spec.js`** —— 标签迁移按钮只在溢出时出现，tooltip 明确为上一个/下一个标签，并能切换相邻标签；同时覆盖设置标签页与标签固定流程。
+  - **`keep-features.spec.js`** —— Keep 操作语义提示与通知内 Undo、当前修改审阅、逐项恢复后再 Undo、修改定位、模式切换前审阅，以及外部文件冲突时与磁盘最新版的只读比较。
+  - **`table-keyboard.spec.js`** —— Keep 表格的单元格选择、方向键 / Tab 移动、Enter 编辑、Alt+↓ 筛选、Shift+F10 菜单、TSV 矩形粘贴的一次 Undo、命令面板行列操作，并确认选中单元格不再生成重复的浮动工具条。
+  - **`keep-structure.spec.js`** —— GFM 任务切换的一次 Undo/Redo、块插入草稿保护、嵌套列表整体复制，以及内容块删除后的 Undo。
+  - **`navigation-context.spec.js`** —— 导航返回时恢复 Keep 的表格筛选、横向位置、选中格、标题折叠，以及源码视图的完整选区。
+  - **`source-keep-split.spec.js`** —— Keep 下状态栏维持单个视图按钮，并按「富文本 → 源码 → 富文本 + 源码」循环；同时覆盖同一文档源码 + Keep 的节点保持、双向内容/滚动/定位同步、左右互换，以及固定预览后切换源码标签。
+  - **`source-mode-upgrade.spec.js`** —— Milkdown 下同一个视图按钮仍只在「富文本 ↔ 源码」之间切换，不进入 Keep 专用的同步分栏状态。
+  - **`command-palette-modes.spec.js`** —— 无前缀文件、`>` 命令、`@` 当前标题、`#` 工作区标题、`:` 行号、`?` 帮助，以及 MRU 与快捷键显示。
 - **选区浮动工具栏没港**:它是 Crepe 自带气泡(`.milkdown-toolbar`,app 往里注入了 `.hm-heading-item` 标题按钮),只在**真实指针拖选**时出现,且在自动化下不可靠地布局/可点(etv 旧的 `.block-selbar` 已不存在);它的块转换走的是和 Ctrl+2/右键菜单同一条路径(Editor.jsx),已被覆盖,故有意不测。选区若要测,用**真实鼠标拖选**(`page.mouse.down/move/up`,trusted 事件能驱动 ProseMirror 选区;合成 CDP 拖拽不行)。
 - keep 模式相对图片→`file://` 已修并有 E2E(`images.md`),见下方"图片支持"。
 

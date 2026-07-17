@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { selectMarkdownBranches } from '../src/renderer/src/sidebar-tree.js'
+import { flattenVisibleTree, selectMarkdownBranches } from '../src/renderer/src/sidebar-tree.js'
 
 describe('selectMarkdownBranches', () => {
   it('expands only directories that contain Markdown directly or below them', () => {
@@ -66,5 +66,58 @@ describe('selectMarkdownBranches', () => {
     const result = selectMarkdownBranches(tree, ['/workspace'])
 
     expect(result.expanded.has('/workspace/notes')).toBe(true)
+  })
+})
+
+describe('flattenVisibleTree', () => {
+  const workspaces = [
+    { rootPath: '/one', rootName: 'one' },
+    { rootPath: '/two', rootName: 'two' }
+  ]
+  const childrenMap = {
+    '/one': [
+      { name: 'docs', path: '/one/docs', type: 'dir' },
+      { name: 'a.md', path: '/one/a.md', type: 'file' }
+    ],
+    '/one/docs': [
+      { name: 'nested.md', path: '/one/docs/nested.md', type: 'file' }
+    ],
+    '/two': [
+      { name: 'b.md', path: '/two/b.md', type: 'file' }
+    ]
+  }
+
+  it('returns roots and only descendants under expanded folders', () => {
+    const rows = flattenVisibleTree(
+      workspaces,
+      childrenMap,
+      new Set(['/one', '/one/docs'])
+    )
+    expect(rows.map((row) => row.path)).toEqual([
+      '/one',
+      '/one/docs',
+      '/one/docs/nested.md',
+      '/one/a.md',
+      '/two'
+    ])
+  })
+
+  it('records depth and parent paths for ArrowLeft navigation', () => {
+    const rows = flattenVisibleTree(
+      workspaces,
+      childrenMap,
+      new Set(['/one', '/one/docs', '/two'])
+    )
+    expect(rows.find((row) => row.path === '/one/docs/nested.md')).toMatchObject({
+      depth: 2,
+      parentPath: '/one/docs',
+      type: 'file',
+      isRoot: false
+    })
+    expect(rows.find((row) => row.path === '/two')).toMatchObject({
+      depth: 0,
+      parentPath: null,
+      isRoot: true
+    })
   })
 })

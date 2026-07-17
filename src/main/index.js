@@ -1,22 +1,35 @@
 import { app, BrowserWindow, ipcMain, dialog, Menu, MenuItem, shell, net, nativeTheme, session } from 'electron'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import { dirname, join, basename, extname, resolve, sep } from 'node:path'
+import { dirname, join, basename, extname, resolve, relative, sep } from 'node:path'
 import fs from 'node:fs/promises'
 import { existsSync, statSync, constants as fsConstants } from 'node:fs'
 import chokidar from 'chokidar'
 import { execFile, spawn } from 'node:child_process'
+import { createHash, randomUUID } from 'node:crypto'
 import {
   MD_EXTS,
   MD_RE,
+  isAbsolutePath,
   isRestrictedRoot,
   imageNameParts,
   attachmentNameParts,
   getAllowedExternalUrl,
   searchContentLines,
+  extractMarkdownHeadings,
   shouldSkipWorkspaceEntry,
   docLangAttr,
   winDefaultOpenerRegOps
 } from './helpers.js'
+import {
+  appendLocalHistorySnapshot,
+  localHistoryMetadata
+} from './local-history.js'
+import {
+  createFileRenamePlan,
+  createHeadingRenamePlan,
+  diagnoseMarkdownContent,
+  findMarkdownReferences
+} from './markdown-links.js'
 import { canGrantLocalFonts, createLocalFontGrant } from './security.js'
 import {
   DEFAULT_FONT_WRITE_EN,
@@ -630,6 +643,236 @@ ipcMain.handle('search:cancel', () => {
   searchGeneration++
 })
 
+// ── Markdown link intelligence ──
+// All workspace-wide work is deliberately on demand: opening the Problems /
+// References surface or requesting a rename starts a bounded walk. Nothing is
+// indexed during app startup or ordinary typing.
+const LINK_INDEX_MAX_FILES = 5000
+const LINK_INDEX_MAX_FILE_BYTES = 1024 * 1024
+const LINK_INDEX_MAX_DEPTH = 12
+
+async function readMarkdownWorkspaceFiles(roots, options = {}) {
+  const files = []
+  const seen = new Set()
+  let scanned = 0
+  let truncated = false
+  let yieldedAt = 0
+  const overrides = new Map(
+    (Array.isArray(options.overrides) ? options.overrides : [])
+      .filter((item) => item?.path && typeof item.content === 'string')
+      .map((item) => [resolve(item.path), item.content])
+  )
+  const safeRoots = [...new Set(Array.isArray(roots) ? roots : [])]
+    .filter((root) => typeof root === 'string' && !isRestrictedRoot(root))
+
+  const addFile = async (path) => {
+    const absolute = resolve(path)
+    const key = process.platform === 'win32' ? absolute.toLowerCase() : absolute
+    if (seen.has(key) || files.length >= LINK_INDEX_MAX_FILES) return
+    seen.add(key)
+    scanned += 1
+    try {
+      const override = overrides.get(absolute)
+      if (override != null) {
+        files.push({ path: absolute, content: override })
+      } else {
+        const stat = await fs.stat(absolute)
+        if (!stat.isFile() || stat.size > LINK_INDEX_MAX_FILE_BYTES) return
+        files.push({ path: absolute, content: await fs.readFile(absolute, 'utf8') })
+      }
+    } catch {
+      /* unreadable/deleted file — skip */
+    }
+    if (scanned - yieldedAt >= 25) {
+      yieldedAt = scanned
+      await new Promise((resolveYield) => setImmediate(resolveYield))
+    }
+  }
+
+  const walk = async (dir, depth = 0) => {
+    if (depth > LINK_INDEX_MAX_DEPTH || files.length >= LINK_INDEX_MAX_FILES) {
+      truncated = true
+      return
+    }
+    let entries
+    try {
+      entries = await fs.readdir(dir, { withFileTypes: true })
+    } catch {
+      return
+    }
+    for (const entry of entries) {
+      if (files.length >= LINK_INDEX_MAX_FILES) {
+        truncated = true
+        return
+      }
+      if (shouldSkipWorkspaceEntry(entry.name, entry.isDirectory(), options.showHidden)) continue
+      const path = join(dir, entry.name)
+      if (entry.isDirectory()) await walk(path, depth + 1)
+      else if (entry.isFile() && /\.(md|markdown|mdx)$/i.test(entry.name)) await addFile(path)
+    }
+  }
+
+  for (const root of safeRoots) await walk(root, 0)
+  // An open target can sit outside the current workspace. Include explicit
+  // overrides even when no workspace root contains them.
+  for (const path of overrides.keys()) await addFile(path)
+  return { files, filesScanned: scanned, truncated }
+}
+
+ipcMain.handle('markdown-links:diagnose', async (_e, payload = {}) => {
+  const docPath = typeof payload.docPath === 'string' ? payload.docPath : ''
+  const content = String(payload.content ?? '')
+  if (!docPath) return { problems: [], error: 'unsaved' }
+  const problems = await diagnoseMarkdownContent({
+    docPath,
+    content,
+    exists: async (path) => {
+      try {
+        return (await fs.stat(path)).isFile()
+      } catch {
+        return false
+      }
+    },
+    readFile: (path) => fs.readFile(path, 'utf8')
+  })
+  return { problems, error: '' }
+})
+
+ipcMain.handle('markdown-links:references', async (_e, payload = {}) => {
+  const targetPath = typeof payload.targetPath === 'string' ? payload.targetPath : ''
+  if (!targetPath) return { groups: [], filesScanned: 0, truncated: false, error: 'no-target' }
+  const roots = [...(Array.isArray(payload.roots) ? payload.roots : []), dirname(targetPath)]
+  const indexed = await readMarkdownWorkspaceFiles(roots, {
+    showHidden: !!payload.showHidden,
+    overrides: payload.overrides
+  })
+  return {
+    groups: findMarkdownReferences(indexed.files, targetPath, String(payload.anchor || '')),
+    filesScanned: indexed.filesScanned,
+    truncated: indexed.truncated,
+    error: ''
+  }
+})
+
+ipcMain.handle('markdown-links:plan-heading-rename', async (_e, payload = {}) => {
+  const targetPath = typeof payload.targetPath === 'string' ? payload.targetPath : ''
+  if (!targetPath) return { error: 'no-target', files: [], totalChanges: 0 }
+  const roots = [...(Array.isArray(payload.roots) ? payload.roots : []), dirname(targetPath)]
+  const indexed = await readMarkdownWorkspaceFiles(roots, {
+    showHidden: !!payload.showHidden,
+    overrides: payload.overrides
+  })
+  return {
+    ...createHeadingRenamePlan(
+      indexed.files,
+      targetPath,
+      payload.line,
+      payload.newHeading
+    ),
+    filesScanned: indexed.filesScanned,
+    truncated: indexed.truncated
+  }
+})
+
+ipcMain.handle('markdown-links:plan-file-rename', async (_e, payload = {}) => {
+  const oldPath = typeof payload.oldPath === 'string' ? payload.oldPath : ''
+  const newPath = typeof payload.newPath === 'string' ? payload.newPath : ''
+  if (!oldPath || !newPath) return { error: 'no-target', files: [], totalChanges: 0 }
+  const roots = [...(Array.isArray(payload.roots) ? payload.roots : []), dirname(oldPath)]
+  const indexed = await readMarkdownWorkspaceFiles(roots, {
+    showHidden: !!payload.showHidden,
+    overrides: payload.overrides
+  })
+  return {
+    ...createFileRenamePlan(indexed.files, oldPath, newPath),
+    filesScanned: indexed.filesScanned,
+    truncated: indexed.truncated
+  }
+})
+
+async function validateMarkdownPlan(plan) {
+  if (!plan || !Array.isArray(plan.files)) throw new Error('Invalid Markdown update plan.')
+  for (const file of plan.files) {
+    if (!file?.path || typeof file.original !== 'string' || typeof file.updated !== 'string') {
+      throw new Error('Invalid Markdown update plan.')
+    }
+    const current = await fs.readFile(file.path, 'utf8')
+    if (current !== file.original) {
+      throw new Error(`The file changed after preview: ${file.path}`)
+    }
+  }
+}
+
+async function writeMarkdownPlan(plan) {
+  await validateMarkdownPlan(plan)
+  const written = []
+  try {
+    for (const file of plan.files) {
+      await fs.writeFile(file.path, file.updated, 'utf8')
+      written.push(file)
+    }
+  } catch (error) {
+    const rollbackErrors = []
+    for (const file of written.reverse()) {
+      try {
+        await fs.writeFile(file.path, file.original, 'utf8')
+      } catch (rollbackError) {
+        rollbackErrors.push(`${file.path}: ${rollbackError?.message || rollbackError}`)
+      }
+    }
+    const suffix = rollbackErrors.length
+      ? ` Rollback also failed: ${rollbackErrors.join('; ')}`
+      : ' Completed files were rolled back.'
+    throw new Error(`${error?.message || error}${suffix}`)
+  }
+  const files = []
+  for (const file of plan.files) {
+    const stat = await fs.stat(file.path)
+    files.push({ path: file.path, content: file.updated, mtimeMs: stat.mtimeMs })
+  }
+  return files
+}
+
+ipcMain.handle('markdown-links:apply-plan', async (_e, plan) => ({
+  ok: true,
+  files: await writeMarkdownPlan(plan)
+}))
+
+ipcMain.handle('markdown-links:rename-file', async (_e, payload = {}) => {
+  const oldPath = String(payload.oldPath || '')
+  const newPath = String(payload.newPath || '')
+  if (!oldPath || !newPath) throw new Error('Invalid rename target.')
+  if (existsSync(newPath) && newPath.toLowerCase() !== oldPath.toLowerCase()) {
+    throw new Error('A file or folder with that name already exists.')
+  }
+  const plan = payload.updateLinks ? payload.plan : { files: [] }
+  await validateMarkdownPlan(plan)
+  const written = []
+  try {
+    for (const file of plan.files) {
+      await fs.writeFile(file.path, file.updated, 'utf8')
+      written.push(file)
+    }
+    await fs.rename(oldPath, newPath)
+  } catch (error) {
+    for (const file of written.reverse()) {
+      try {
+        await fs.writeFile(file.path, file.original, 'utf8')
+      } catch {
+        /* the thrown message below still makes the partial failure explicit */
+      }
+    }
+    throw new Error(`${error?.message || error} Link changes were rolled back where possible.`)
+  }
+  const files = []
+  for (const file of plan.files) {
+    const resultPath = file.path.toLowerCase() === oldPath.toLowerCase() ? newPath : file.path
+    const stat = await fs.stat(resultPath)
+    files.push({ path: resultPath, content: file.updated, mtimeMs: stat.mtimeMs })
+  }
+  return { ok: true, files }
+})
+
 // Print the current document via the system print dialog. Same hidden-window
 // rendering pipeline as export:pdf, but ends in webContents.print() so the
 // user picks a printer / paper / copies natively.
@@ -662,6 +905,138 @@ ipcMain.handle('fs:writeFile', async (_e, path, content) => {
   await fs.writeFile(path, content, 'utf8')
   const stat = await fs.stat(path)
   return { mtimeMs: stat.mtimeMs }
+})
+
+const LOCAL_HISTORY_MAX_SNAPSHOT_BYTES = 2 * 1024 * 1024
+const LOCAL_HISTORY_MAX_TOTAL_BYTES = 64 * 1024 * 1024
+const localHistoryDir = () => join(app.getPath('userData'), 'local-history')
+const localHistoryKey = (docPath) =>
+  createHash('sha256')
+    .update(process.platform === 'win32' ? docPath.toLowerCase() : docPath)
+    .digest('hex')
+const localHistoryFile = (docPath) => join(localHistoryDir(), `${localHistoryKey(docPath)}.json`)
+
+async function readLocalHistoryRecord(docPath) {
+  try {
+    const record = JSON.parse(await fs.readFile(localHistoryFile(docPath), 'utf8'))
+    return record?.path === docPath && Array.isArray(record.snapshots)
+      ? record
+      : { version: 1, path: docPath, snapshots: [] }
+  } catch {
+    return { version: 1, path: docPath, snapshots: [] }
+  }
+}
+
+async function writeLocalHistoryRecord(docPath, record) {
+  await fs.mkdir(localHistoryDir(), { recursive: true })
+  await fs.writeFile(localHistoryFile(docPath), JSON.stringify(record), 'utf8')
+}
+
+async function pruneLocalHistoryStorage(protectedFile = '') {
+  let entries
+  try {
+    entries = await fs.readdir(localHistoryDir(), { withFileTypes: true })
+  } catch {
+    return
+  }
+  const files = []
+  for (const entry of entries) {
+    if (!entry.isFile() || !entry.name.endsWith('.json')) continue
+    const path = join(localHistoryDir(), entry.name)
+    try {
+      const stat = await fs.stat(path)
+      files.push({ path, size: stat.size, mtimeMs: stat.mtimeMs })
+    } catch {
+      /* file disappeared while pruning */
+    }
+  }
+  let total = files.reduce((sum, file) => sum + file.size, 0)
+  files.sort((a, b) => {
+    if (a.path === protectedFile) return 1
+    if (b.path === protectedFile) return -1
+    return a.mtimeMs - b.mtimeMs
+  })
+  for (const file of files) {
+    if (total <= LOCAL_HISTORY_MAX_TOTAL_BYTES) break
+    try {
+      await fs.rm(file.path, { force: true })
+      total -= file.size
+    } catch {
+      /* best effort */
+    }
+  }
+}
+
+ipcMain.handle('history:add', async (_e, payload) => {
+  const docPath = payload?.path
+  const content = payload?.content
+  if (!isAbsolutePath(docPath) || typeof content !== 'string') {
+    return { ok: false, error: 'Invalid history snapshot.' }
+  }
+  const size = Buffer.byteLength(content, 'utf8')
+  if (size > LOCAL_HISTORY_MAX_SNAPSHOT_BYTES) {
+    return { ok: false, skipped: 'too-large' }
+  }
+  const record = await readLocalHistoryRecord(docPath)
+  const result = appendLocalHistorySnapshot(record, {
+    id: randomUUID(),
+    path: docPath,
+    content,
+    reason: payload?.reason === 'autosave' ? 'autosave' : 'manual',
+    size
+  })
+  if (result.changed) {
+    await writeLocalHistoryRecord(docPath, result.record)
+    await pruneLocalHistoryStorage(localHistoryFile(docPath))
+  }
+  return { ok: true, entries: localHistoryMetadata(result.record) }
+})
+
+ipcMain.handle('history:list', async (_e, docPath) => {
+  if (!isAbsolutePath(docPath)) return []
+  return localHistoryMetadata(await readLocalHistoryRecord(docPath))
+})
+
+ipcMain.handle('history:read', async (_e, docPath, snapshotId) => {
+  if (!isAbsolutePath(docPath) || typeof snapshotId !== 'string') return null
+  const record = await readLocalHistoryRecord(docPath)
+  const snapshot = record.snapshots.find((item) => item.id === snapshotId)
+  return snapshot
+    ? {
+        id: snapshot.id,
+        createdAt: snapshot.createdAt,
+        reason: snapshot.reason,
+        size: snapshot.size,
+        content: snapshot.content
+      }
+    : null
+})
+
+ipcMain.handle('history:delete', async (_e, docPath, snapshotId) => {
+  if (!isAbsolutePath(docPath)) return { ok: false }
+  const file = localHistoryFile(docPath)
+  if (!snapshotId) {
+    await fs.rm(file, { force: true })
+    return { ok: true, entries: [] }
+  }
+  const record = await readLocalHistoryRecord(docPath)
+  const next = {
+    ...record,
+    snapshots: record.snapshots.filter((item) => item.id !== snapshotId)
+  }
+  if (next.snapshots.length) await writeLocalHistoryRecord(docPath, next)
+  else await fs.rm(file, { force: true })
+  return { ok: true, entries: localHistoryMetadata(next) }
+})
+
+ipcMain.handle('history:clear', async () => {
+  const userDataRoot = resolve(app.getPath('userData'))
+  const root = resolve(localHistoryDir())
+  if (root !== userDataRoot && root.startsWith(userDataRoot + sep)) {
+    await fs.rm(root, { recursive: true, force: true })
+    return { ok: true }
+  }
+  return { ok: false }
 })
 
 ipcMain.handle('fs:rename', async (_e, oldPath, newPath) => {
@@ -758,6 +1133,83 @@ ipcMain.handle('fs:listFiles', async (_e, root) => {
   const acc = []
   await listFilesFlat(root, root, acc, 0)
   return acc
+})
+
+const WORKSPACE_HEADING_MAX_FILES = 5000
+const WORKSPACE_HEADING_MAX_ITEMS = 3000
+const WORKSPACE_HEADING_MAX_FILE_BYTES = 1024 * 1024
+
+ipcMain.handle('workspace-headings:index', async (_e, roots, options = {}) => {
+  const items = []
+  let filesScanned = 0
+  let truncated = false
+  let yieldedAt = 0
+  const safeRoots = [...new Set(Array.isArray(roots) ? roots : [])]
+    .filter((root) => !isRestrictedRoot(root))
+
+  const walk = async (root, dir, depth = 0) => {
+    if (
+      depth > 12 ||
+      truncated ||
+      filesScanned >= WORKSPACE_HEADING_MAX_FILES ||
+      items.length >= WORKSPACE_HEADING_MAX_ITEMS
+    ) {
+      truncated = true
+      return
+    }
+    let entries
+    try {
+      entries = await fs.readdir(dir, { withFileTypes: true })
+    } catch {
+      return
+    }
+    for (const entry of entries) {
+      if (truncated) return
+      if (shouldSkipWorkspaceEntry(entry.name, entry.isDirectory(), options.showHidden)) continue
+      const path = join(dir, entry.name)
+      if (entry.isDirectory()) {
+        await walk(root, path, depth + 1)
+        continue
+      }
+      if (!/\.(md|markdown|mdx)$/i.test(entry.name)) continue
+      filesScanned += 1
+      try {
+        const stat = await fs.stat(path)
+        if (stat.size > WORKSPACE_HEADING_MAX_FILE_BYTES) continue
+        const content = await fs.readFile(path, 'utf8')
+        const headings = extractMarkdownHeadings(
+          content,
+          WORKSPACE_HEADING_MAX_ITEMS - items.length
+        )
+        const rel = relative(root, path).replace(/\\/g, '/')
+        for (const heading of headings) {
+          items.push({
+            ...heading,
+            path,
+            name: entry.name,
+            rel: `${basename(root)}/${rel}`
+          })
+          if (items.length >= WORKSPACE_HEADING_MAX_ITEMS) {
+            truncated = true
+            break
+          }
+        }
+      } catch {
+        /* unreadable file — skip */
+      }
+      if (filesScanned - yieldedAt >= 25) {
+        yieldedAt = filesScanned
+        await new Promise((resolveYield) => setImmediate(resolveYield))
+      }
+      if (filesScanned >= WORKSPACE_HEADING_MAX_FILES) truncated = true
+    }
+  }
+
+  for (const root of safeRoots) {
+    await walk(root, root)
+    if (truncated) break
+  }
+  return { items, filesScanned, truncated }
 })
 
 ipcMain.handle('fs:openFolderTree', async (_e, dir) => ({
@@ -1194,6 +1646,7 @@ const MENU_STRINGS = {
     print: 'Print…',
     settings: 'Settings…',
     closeTab: 'Close Tab',
+    reopenClosedTab: 'Reopen Closed Tab',
     edit: 'Edit',
     find: 'Find',
     replace: 'Replace',
@@ -1222,6 +1675,7 @@ const MENU_STRINGS = {
     print: '打印…',
     settings: '设置…',
     closeTab: '关闭标签页',
+    reopenClosedTab: '重新打开已关闭的标签',
     closeWindow: '关闭窗口',
     quit: '退出',
     edit: '编辑',
@@ -1261,6 +1715,7 @@ const MENU_STRINGS = {
     print: '印刷…',
     settings: '設定…',
     closeTab: 'タブを閉じる',
+    reopenClosedTab: '閉じたタブを再度開く',
     closeWindow: 'ウィンドウを閉じる',
     quit: '終了',
     edit: '編集',
@@ -1320,6 +1775,15 @@ function buildMenu() {
         { label: L.settings, accelerator: 'CmdOrCtrl+,', click: menuCmd('settings') },
         { type: 'separator' },
         { label: L.closeTab, accelerator: 'CmdOrCtrl+W', click: menuCmd('closeTab') },
+        {
+          label: L.reopenClosedTab,
+          accelerator: 'CmdOrCtrl+Shift+T',
+          // Renderer capture handles this so the shortcut also works while an
+          // editor/input owns focus. Keep the accelerator visible in the menu
+          // without registering a second native handler that would double-fire.
+          registerAccelerator: false,
+          click: menuCmd('reopenClosedTab')
+        },
         // macOS: give "Close Window" Shift+Cmd+W so it doesn't fight Close Tab
         // for Cmd+W (role 'close' otherwise defaults to Cmd+W). Windows: Quit.
         isMac
@@ -1354,7 +1818,7 @@ function buildMenu() {
         { label: L.toggleOutline, accelerator: 'CmdOrCtrl+Shift+L', click: menuCmd('toggleOutline') },
         { label: L.toggleSource, accelerator: 'CmdOrCtrl+/', click: menuCmd('toggleSource') },
         { type: 'separator' },
-        { label: L.toggleTheme, accelerator: 'CmdOrCtrl+Shift+T', click: menuCmd('toggleTheme') },
+        { label: L.toggleTheme, click: menuCmd('toggleTheme') },
         { type: 'separator' },
         // Content-only zoom (not Electron's whole-window webFrame zoom): the
         // renderer scales just the editor document. Keep the familiar

@@ -1,22 +1,31 @@
-import { memo, useCallback, useEffect, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Icon } from './icons.jsx'
 import { useI18n } from '../i18n.jsx'
 import { baseName, dirName as parentDir, joinPath as join, isMarkdownName, isValidName, isExistsError } from '../paths.js'
-import { selectMarkdownBranches } from '../sidebar-tree.js'
+import { flattenVisibleTree, selectMarkdownBranches } from '../sidebar-tree.js'
 import { copyToClipboard, fireToast } from '../ui.js'
+
+const treePathKey = (path) => {
+  const normalized = String(path || '').replace(/\\/g, '/').replace(/\/+$/, '')
+  return /^[a-zA-Z]:\//.test(normalized) || normalized.startsWith('//')
+    ? normalized.toLowerCase()
+    : normalized
+}
 
 // Memoized: the parent (App) re-renders on every keystroke, but the file tree only
 // depends on the workspace roots, the open-file set, and the active path — none of
 // which change while typing. With stable props (App useCallbacks its handlers and
 // keys the open-path set by its contents), memo skips re-rendering the whole tree
 // on each content edit. See the openTabPaths memo + onSidebarOpenFile in App.jsx.
-function Sidebar({ workspaces, activePath, openTabPaths, openTabPathsRaw, onOpenFile, onOpenRight, onExportPdf, onAddFolder, onRemoveFolder, onReorderFolder, refreshNonce, showHiddenFiles = false }) {
+function Sidebar({ workspaces, activePath, openTabPaths, openTabPathsRaw, onOpenFile, onOpenRight, onExportPdf, onAddFolder, onRemoveFolder, onReorderFolder, onRenamePath, refreshNonce, showHiddenFiles = false }) {
   const { t } = useI18n()
+  const isMobile = window.api.platform === 'ios' || window.api.platform === 'android'
   const copyText = (text) => copyToClipboard(text, t('code.copied'))
   const [childrenMap, setChildrenMap] = useState({}) // path -> nodes[]
   const [expanded, setExpanded] = useState(() => new Set())
   const [menu, setMenu] = useState(null) // { x, y, node }
   const [rename, setRename] = useState(null) // { path, value }
+  const [cutNode, setCutNode] = useState(null) // keyboard/context-menu move source
   // Inline creation: { dir, type: 'file'|'folder', value }
   const [creating, setCreating] = useState(null)
   const [isExpandingAll, setIsExpandingAll] = useState(false)
@@ -28,6 +37,7 @@ function Sidebar({ workspaces, activePath, openTabPaths, openTabPathsRaw, onOpen
   // Drag-and-drop: path being dragged, and the folder currently hovered as a
   // drop target (for highlighting).
   const dragPathRef = useRef(null)
+  const dragTypeRef = useRef(null)
   const [dragOver, setDragOver] = useState(null)
   // Separate channel for reordering workspace roots by dragging their headers (vs
   // dragPathRef, which moves files/folders INTO a directory). rootDrop marks the
@@ -40,6 +50,12 @@ function Sidebar({ workspaces, activePath, openTabPaths, openTabPathsRaw, onOpen
   childrenRef.current = childrenMap
   // The DOM row of the currently-open file, used to scroll it into view.
   const activeRowRef = useRef(null)
+  // Roving tree focus: exactly one visible treeitem is in the Tab order. DOM
+  // refs let Arrow navigation focus and reveal it without querying the whole tree.
+  const [focusedPath, setFocusedPath] = useState(null)
+  const treeRowRefs = useRef(new Map())
+  const pendingTreeFocusRef = useRef(null)
+  const menuRef = useRef(null)
   // Last path we scrolled to — so we reveal a file once when it's opened, not on
   // every later manual expand/collapse of unrelated folders.
   const lastScrolledRef = useRef(null)
@@ -49,11 +65,58 @@ function Sidebar({ workspaces, activePath, openTabPaths, openTabPathsRaw, onOpen
   const showHiddenRef = useRef(showHiddenFiles)
   showHiddenRef.current = showHiddenFiles
 
-  const roots = workspaces || []
+  const roots = useMemo(() => workspaces || [], [workspaces])
   // Stable identity for the set of roots, so the init effect only re-runs when the
   // roots actually change (childrenMap/expanded are keyed by absolute path, so they
   // happily hold many roots' subtrees at once).
   const rootsKey = roots.map((w) => w.rootPath).join('\n')
+  const visibleRows = useMemo(
+    () => flattenVisibleTree(roots, childrenMap, expanded),
+    [roots, childrenMap, expanded]
+  )
+  const visibleRowsKey = visibleRows.map((row) => row.path).join('\n')
+  const visibleRowMap = useMemo(
+    () => new Map(visibleRows.map((row) => [treePathKey(row.path), row])),
+    [visibleRows]
+  )
+  const focusedRow = focusedPath ? visibleRowMap.get(treePathKey(focusedPath)) : null
+  const activeRow = activePath ? visibleRowMap.get(treePathKey(activePath)) : null
+  const effectiveFocusedPath =
+    focusedRow?.path ||
+    activeRow?.path ||
+    visibleRows[0]?.path ||
+    null
+
+  const focusTreePath = useCallback((path) => {
+    if (!path) return
+    const key = treePathKey(path)
+    pendingTreeFocusRef.current = key
+    setFocusedPath(path)
+    const apply = () => {
+      const row = treeRowRefs.current.get(key)
+      if (!row) return false
+      pendingTreeFocusRef.current = null
+      row.focus({ preventScroll: true })
+      row.scrollIntoView({ block: 'nearest' })
+      return true
+    }
+    requestAnimationFrame(apply)
+  }, [])
+
+  useEffect(() => {
+    const pending = pendingTreeFocusRef.current
+    if (!pending) {
+      if (effectiveFocusedPath !== focusedPath) setFocusedPath(effectiveFocusedPath)
+      return
+    }
+    requestAnimationFrame(() => {
+      const row = treeRowRefs.current.get(pending)
+      if (!row) return
+      pendingTreeFocusRef.current = null
+      row.focus({ preventScroll: true })
+      row.scrollIntoView({ block: 'nearest' })
+    })
+  }, [effectiveFocusedPath, focusedPath, visibleRowsKey])
 
   const loadDir = useCallback(async (dir) => {
     const requestedHidden = showHiddenFiles
@@ -220,15 +283,25 @@ function Sidebar({ workspaces, activePath, openTabPaths, openTabPathsRaw, onOpen
     }
   }, [activePath, expanded, childrenMap])
 
-  const toggle = async (node) => {
-    const next = new Set(expanded)
-    if (next.has(node.path)) {
+  const expandNode = useCallback(async (node) => {
+    if (!node?.path) return
+    setExpanded((current) => new Set(current).add(node.path))
+    if (childrenRef.current[node.path] === undefined) await loadDir(node.path)
+  }, [loadDir])
+
+  const collapseNode = useCallback((node) => {
+    if (!node?.path) return
+    setExpanded((current) => {
+      if (!current.has(node.path)) return current
+      const next = new Set(current)
       next.delete(node.path)
-    } else {
-      next.add(node.path)
-      if (!childrenMap[node.path]) await loadDir(node.path)
-    }
-    setExpanded(next)
+      return next
+    })
+  }, [])
+
+  const toggle = async (node) => {
+    if (expanded.has(node.path)) collapseNode(node)
+    else await expandNode(node)
   }
 
   const closeMenu = useCallback(() => setMenu(null), [])
@@ -241,6 +314,14 @@ function Sidebar({ workspaces, activePath, openTabPaths, openTabPathsRaw, onOpen
       window.removeEventListener('blur', closeMenu)
     }
   }, [menu, closeMenu])
+
+  useEffect(() => {
+    if (!menu) return
+    const raf = requestAnimationFrame(() => {
+      menuRef.current?.querySelector('button:not(:disabled)')?.focus()
+    })
+    return () => cancelAnimationFrame(raf)
+  }, [menu])
 
   const refreshParentOf = async (path) => {
     const p = parentDir(path)
@@ -326,11 +407,12 @@ function Sidebar({ workspaces, activePath, openTabPaths, openTabPathsRaw, onOpen
     }
   }
 
-  const doDelete = async (node) => {
+  const doDelete = async (node, focusAfterPath = null) => {
     if (!window.confirm(t('confirm.trash', { name: node.name }))) return
     try {
       await window.api.deleteItem(node.path)
       await refreshParentOf(node.path)
+      if (focusAfterPath) focusTreePath(focusAfterPath)
     } catch (e) {
       window.alert((t('err.delete') || 'Could not delete: ') + e.message)
     }
@@ -403,23 +485,37 @@ function Sidebar({ workspaces, activePath, openTabPaths, openTabPathsRaw, onOpen
   }
 
   // Move a dragged file/folder into a destination directory.
-  const moveInto = async (srcPath, destDir) => {
-    if (!srcPath || !destDir) return
+  const moveInto = async (srcPath, destDir, sourceType = null) => {
+    if (!srcPath || !destDir) return null
     const src = srcPath.replace(/\\/g, '/')
     const dest = destDir.replace(/\\/g, '/')
     // No-op if it's already in that folder; never move a folder into itself or
     // one of its own descendants.
-    if (parentDir(src) === dest) return
-    if (dest === src || dest.startsWith(src + '/')) return
+    if (parentDir(src) === dest) return null
+    if (dest === src || dest.startsWith(src + '/')) return null
+    const newPath = join(destDir, baseName(srcPath))
     try {
-      await window.api.rename(srcPath, join(destDir, baseName(srcPath)))
+      const completed = sourceType === 'file' && onRenamePath
+        ? await onRenamePath(srcPath, newPath)
+        : await window.api.rename(srcPath, newPath)
+      if (completed === false) return null
     } catch (e) {
       window.alert(isExistsError(e) ? t('err.nameExists') : (t('err.move') || 'Could not move: ') + e.message)
-      return
+      return null
     }
     await refreshParentOf(srcPath)
     if (childrenMap[destDir] !== undefined) await loadDir(destDir)
     setExpanded((s) => new Set(s).add(destDir))
+    return newPath
+  }
+
+  const pasteCutNode = async (targetNode) => {
+    if (!cutNode || !targetNode) return
+    const source = cutNode
+    const destDir = targetNode.type === 'dir' ? targetNode.path : parentDir(targetNode.path)
+    setCutNode(null)
+    const newPath = await moveInto(source.path, destDir, source.type)
+    if (newPath) focusTreePath(newPath)
   }
 
   // Drop handlers wired onto folder rows (and the root area).
@@ -436,9 +532,11 @@ function Sidebar({ workspaces, activePath, openTabPaths, openTabPathsRaw, onOpen
       e.preventDefault()
       e.stopPropagation()
       const src = dragPathRef.current
+      const sourceType = dragTypeRef.current
       dragPathRef.current = null
+      dragTypeRef.current = null
       setDragOver(null)
-      moveInto(src, destDir)
+      moveInto(src, destDir, sourceType)
     }
   })
 
@@ -494,31 +592,169 @@ function Sidebar({ workspaces, activePath, openTabPaths, openTabPathsRaw, onOpen
         if (from !== rootPath) onReorderFolder?.(from, rootPath, pos)
       } else if (dragPathRef.current) {
         const src = dragPathRef.current
+        const sourceType = dragTypeRef.current
         dragPathRef.current = null
+        dragTypeRef.current = null
         setDragOver(null)
-        moveInto(src, rootPath)
+        moveInto(src, rootPath, sourceType)
       }
     }
   })
 
   const commitRename = async () => {
     if (!rename || committingRef.current) return
-    const { path, value } = rename
+    const { path, value, type } = rename
     const clean = value.trim()
-    setRename(null)
-    if (!clean || clean === baseName(path)) return
-    if (!isValidName(clean)) {
-      window.alert((t('err.invalidName') || 'Invalid name: ') + clean)
+    if (!clean || clean === baseName(path)) {
+      setRename(null)
+      focusTreePath(path)
       return
     }
+    if (!isValidName(clean)) {
+      setRename(null)
+      window.alert((t('err.invalidName') || 'Invalid name: ') + clean)
+      focusTreePath(path)
+      return
+    }
+    const newPath = join(parentDir(path), clean)
+    pendingTreeFocusRef.current = treePathKey(newPath)
+    setFocusedPath(newPath)
     committingRef.current = true
+    setRename(null)
     try {
-      await window.api.rename(path, join(parentDir(path), clean))
+      const completed = type === 'file' && onRenamePath
+        ? await onRenamePath(path, newPath)
+        : await window.api.rename(path, newPath)
+      if (completed === false) {
+        pendingTreeFocusRef.current = null
+        setFocusedPath(path)
+        return
+      }
       await refreshParentOf(path)
+      focusTreePath(newPath)
     } catch (e) {
       window.alert(isExistsError(e) ? t('err.nameExists') : (t('err.rename') || 'Could not rename: ') + e.message)
+      focusTreePath(path)
     } finally {
       committingRef.current = false
+    }
+  }
+
+  const startRenameNode = (node) => {
+    if (!node || node.isRoot) return
+    setRename({ path: node.path, value: node.name, type: node.type })
+  }
+
+  const cancelRename = () => {
+    const path = rename?.path
+    setRename(null)
+    if (path) focusTreePath(path)
+  }
+
+  const openNodeMenu = (node, pointerEvent = null) => {
+    if (!node) return
+    focusTreePath(node.path)
+    const row = treeRowRefs.current.get(treePathKey(node.path))
+    const rect = row?.getBoundingClientRect()
+    const fromPointer =
+      pointerEvent &&
+      Number.isFinite(pointerEvent.clientX) &&
+      Number.isFinite(pointerEvent.clientY) &&
+      (pointerEvent.clientX !== 0 || pointerEvent.clientY !== 0)
+    setMenu({
+      x: fromPointer ? pointerEvent.clientX : (rect?.left || 0) + 28,
+      y: fromPointer ? pointerEvent.clientY : (rect?.top || 0) + Math.min(rect?.height || 28, 24),
+      node,
+      returnPath: node.path
+    })
+  }
+
+  const handleTreeKeyDown = async (event, node) => {
+    if (rename || creating) return
+    const index = visibleRows.findIndex((row) => row.path === node.path)
+    if (index < 0) return
+    const handled = () => {
+      event.preventDefault()
+      event.stopPropagation()
+    }
+
+    const commandKey = event.ctrlKey || event.metaKey
+    if (commandKey && event.key.toLowerCase() === 'x' && !node.isRoot) {
+      handled()
+      setCutNode({ path: node.path, type: node.type })
+      return
+    }
+    if (commandKey && event.key.toLowerCase() === 'v' && cutNode) {
+      handled()
+      await pasteCutNode(node)
+      return
+    }
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      handled()
+      const nextIndex = Math.max(
+        0,
+        Math.min(visibleRows.length - 1, index + (event.key === 'ArrowDown' ? 1 : -1))
+      )
+      focusTreePath(visibleRows[nextIndex]?.path)
+      return
+    }
+    if (event.key === 'Home' || event.key === 'End') {
+      handled()
+      focusTreePath(event.key === 'Home' ? visibleRows[0]?.path : visibleRows.at(-1)?.path)
+      return
+    }
+    if (event.key === 'ArrowRight' && node.type === 'dir') {
+      handled()
+      if (!expanded.has(node.path)) {
+        await expandNode(node)
+      } else {
+        const firstChild = visibleRows[index + 1]
+        if (firstChild?.parentPath === node.path) focusTreePath(firstChild.path)
+      }
+      return
+    }
+    if (event.key === 'ArrowLeft') {
+      if (node.type !== 'dir' && !node.parentPath) return
+      handled()
+      if (node.type === 'dir' && expanded.has(node.path)) {
+        collapseNode(node)
+        focusTreePath(node.path)
+      } else if (node.parentPath) {
+        focusTreePath(node.parentPath)
+      }
+      return
+    }
+    if (event.key === 'Enter') {
+      handled()
+      if (node.type === 'dir') await toggle(node)
+      else onOpenFile(node.path, { preview: false })
+      return
+    }
+    if (event.key === 'F2' && !node.isRoot) {
+      handled()
+      startRenameNode(node)
+      return
+    }
+    if (event.key === 'Delete' && !node.isRoot) {
+      handled()
+      const normalized = node.path.replace(/\\/g, '/').replace(/\/+$/, '')
+      const nextOutside = visibleRows
+        .slice(index + 1)
+        .find((row) => {
+          const path = row.path.replace(/\\/g, '/')
+          return path !== normalized && !path.startsWith(normalized + '/')
+        })
+      const focusAfter =
+        nextOutside?.path ||
+        node.parentPath ||
+        visibleRows[Math.max(0, index - 1)]?.path ||
+        null
+      await doDelete(node, focusAfter)
+      return
+    }
+    if ((event.shiftKey && event.key === 'F10') || event.key === 'ContextMenu') {
+      handled()
+      openNodeMenu(node)
     }
   }
 
@@ -562,7 +798,7 @@ function Sidebar({ workspaces, activePath, openTabPaths, openTabPathsRaw, onOpen
 
   // Render the inline creation input
   const renderCreatingInput = (depth) => (
-    <div className="tree-row creating-row" style={{ paddingLeft: 8 + depth * 14 }}>
+    <div className="tree-row creating-row" role="none" style={{ paddingLeft: 8 + depth * 14 }}>
       <span className="tree-chevron" />
       <Icon name={creating.type === 'file' ? 'file' : 'folder'} size={15} className="tree-icon" />
       <input
@@ -600,28 +836,72 @@ function Sidebar({ workspaces, activePath, openTabPaths, openTabPathsRaw, onOpen
     const isOpenTab = !isDir && !isActive && openTabPaths?.has(node.path.replace(/\\/g, '/'))
     const renaming = rename && rename.path === node.path
     const isDropTarget = isDir && dragOver === node.path
+    const rowInfo = visibleRowMap.get(treePathKey(node.path))
+    const treeNode = {
+      ...node,
+      isRoot: false,
+      parentPath: rowInfo?.parentPath || parentDir(node.path),
+      depth
+    }
     return (
-      <div key={node.path}>
+      <div key={node.path} role="none">
         <div
-          ref={isActive ? activeRowRef : undefined}
-          className={`tree-row${isActive ? ' active' : ''}${isOpenTab ? ' opened' : ''}${isDropTarget ? ' drag-over' : ''}`}
+          ref={(element) => {
+            const key = treePathKey(node.path)
+            if (element) treeRowRefs.current.set(key, element)
+            else treeRowRefs.current.delete(key)
+            if (isActive) activeRowRef.current = element
+            else if (
+              !element &&
+              activeRowRef.current?.dataset?.treePath === node.path
+            ) {
+              activeRowRef.current = null
+            }
+          }}
+          data-tree-path={node.path}
+          className={`tree-row${isActive ? ' active' : ''}${isOpenTab ? ' opened' : ''}${isDropTarget ? ' drag-over' : ''}${treePathKey(cutNode?.path) === treePathKey(node.path) ? ' cut' : ''}`}
           style={{ paddingLeft: 8 + depth * 14 }}
+          role="treeitem"
+          tabIndex={effectiveFocusedPath === node.path ? 0 : -1}
+          aria-level={depth + 1}
+          aria-expanded={isDir ? isOpen : undefined}
+          aria-selected={effectiveFocusedPath === node.path}
+          aria-current={isActive ? 'page' : undefined}
+          aria-keyshortcuts={
+            isDir
+              ? 'ArrowUp ArrowDown ArrowLeft ArrowRight Enter F2 Delete Shift+F10 Control+X Meta+X Control+V Meta+V'
+              : 'ArrowUp ArrowDown ArrowLeft Enter F2 Delete Shift+F10 Control+X Meta+X Control+V Meta+V'
+          }
           draggable={!renaming}
           onDragStart={(e) => {
             dragPathRef.current = node.path
+            dragTypeRef.current = node.type
             e.dataTransfer.effectAllowed = 'move'
             e.dataTransfer.setData('text/plain', node.path)
           }}
           onDragEnd={() => {
             dragPathRef.current = null
+            dragTypeRef.current = null
             setDragOver(null)
           }}
           {...(isDir ? dropProps(node.path) : {})}
-          onClick={() => (isDir ? toggle(node) : onOpenFile(node.path))}
+          onFocus={() => setFocusedPath(node.path)}
+          onKeyDown={(event) => handleTreeKeyDown(event, treeNode)}
+          onClick={() => {
+            focusTreePath(node.path)
+            if (isDir) toggle(node)
+            else onOpenFile(node.path, { preview: !isMobile })
+          }}
+          onDoubleClick={(event) => {
+            if (isDir) return
+            event.preventDefault()
+            event.stopPropagation()
+            onOpenFile(node.path, { preview: false })
+          }}
           onContextMenu={(e) => {
             e.preventDefault()
             e.stopPropagation()
-            setMenu({ x: e.clientX, y: e.clientY, node })
+            openNodeMenu(treeNode, e)
           }}
           title={node.path}
         >
@@ -644,14 +924,21 @@ function Sidebar({ workspaces, activePath, openTabPaths, openTabPathsRaw, onOpen
                   else e.target.select()
                 }}
                 onClick={(e) => e.stopPropagation()}
-                onChange={(e) => setRename({ ...rename, value: e.target.value })}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') commitRename()
-                  if (e.key === 'Escape') setRename(null)
-                }}
+                 onChange={(e) => setRename({ ...rename, value: e.target.value })}
+                 onKeyDown={(e) => {
+                   e.stopPropagation()
+                   if (e.key === 'Enter') {
+                     e.preventDefault()
+                     commitRename()
+                   }
+                   if (e.key === 'Escape') {
+                     e.preventDefault()
+                     cancelRename()
+                   }
+                 }}
                 onBlur={commitRename}
               />
-              {editActions(commitRename, () => setRename(null))}
+              {editActions(commitRename, cancelRename)}
             </>
           ) : (
             <span className="tree-label">{node.name}</span>
@@ -664,7 +951,7 @@ function Sidebar({ workspaces, activePath, openTabPaths, openTabPathsRaw, onOpen
             subfolders) — say so instead of looking like the click did nothing. */}
         {isDir && isOpen && childrenMap[node.path]?.length === 0 &&
           !(creating && creating.dir === node.path) && (
-            <div className="tree-empty tree-empty-nested" style={{ paddingLeft: 8 + (depth + 1) * 14 }}>
+            <div className="tree-empty tree-empty-nested" role="none" style={{ paddingLeft: 8 + (depth + 1) * 14 }}>
               {t('side.emptyFolder')}
             </div>
           )}
@@ -681,17 +968,42 @@ function Sidebar({ workspaces, activePath, openTabPaths, openTabPathsRaw, onOpen
     const rootNodes = childrenMap[rootPath] || []
     const isDropTarget = dragOver === rootPath
     const dropLine = rootDrop?.path === rootPath ? ` root-drop-${rootDrop.pos}` : ''
+    const rootNode = {
+      type: 'dir',
+      path: rootPath,
+      name: ws.rootName,
+      isRoot: true,
+      parentPath: null,
+      depth: 0
+    }
     return (
-      <div key={rootPath} className="tree-root">
+      <div key={rootPath} className="tree-root" role="none">
         <div
+          ref={(element) => {
+            const key = treePathKey(rootPath)
+            if (element) treeRowRefs.current.set(key, element)
+            else treeRowRefs.current.delete(key)
+          }}
+          data-tree-path={rootPath}
           className={`tree-row tree-root-row${isDropTarget ? ' drag-over' : ''}${dropLine}`}
           style={{ paddingLeft: 8 }}
+          role="treeitem"
+          tabIndex={effectiveFocusedPath === rootPath ? 0 : -1}
+          aria-level={1}
+          aria-expanded={isOpen}
+          aria-selected={effectiveFocusedPath === rootPath}
+          aria-keyshortcuts="ArrowUp ArrowDown ArrowLeft ArrowRight Enter Shift+F10 Control+V Meta+V"
           {...rootDnd(rootPath)}
-          onClick={() => toggle({ path: rootPath })}
+          onFocus={() => setFocusedPath(rootPath)}
+          onKeyDown={(event) => handleTreeKeyDown(event, rootNode)}
+          onClick={() => {
+            focusTreePath(rootPath)
+            toggle(rootNode)
+          }}
           onContextMenu={(e) => {
             e.preventDefault()
             e.stopPropagation()
-            setMenu({ x: e.clientX, y: e.clientY, node: { type: 'dir', path: rootPath, name: ws.rootName, isRoot: true } })
+            openNodeMenu(rootNode, e)
           }}
           title={rootPath}
         >
@@ -699,13 +1011,13 @@ function Sidebar({ workspaces, activePath, openTabPaths, openTabPathsRaw, onOpen
           <Icon name={isOpen ? 'folder-open' : 'folder'} size={15} className="tree-icon" />
           <span className="tree-label tree-root-label">{ws.rootName}</span>
           <span className="tree-root-actions" onClick={(e) => e.stopPropagation()}>
-            <button title={t('side.newFile')} onClick={() => startNewFile(rootPath)}>
+            <button tabIndex={-1} title={t('side.newFile')} onClick={() => startNewFile(rootPath)}>
               <Icon name="file-plus" size={14} />
             </button>
-            <button title={t('side.newFolder')} onClick={() => startNewFolder(rootPath)}>
+            <button tabIndex={-1} title={t('side.newFolder')} onClick={() => startNewFolder(rootPath)}>
               <Icon name="folder-plus" size={14} />
             </button>
-            <button title={t('side.removeFolder')} onClick={() => onRemoveFolder?.(rootPath)}>
+            <button tabIndex={-1} title={t('side.removeFolder')} onClick={() => onRemoveFolder?.(rootPath)}>
               <Icon name="close" size={13} />
             </button>
           </span>
@@ -714,7 +1026,7 @@ function Sidebar({ workspaces, activePath, openTabPaths, openTabPathsRaw, onOpen
           <>
             {creating && creating.dir === rootPath && renderCreatingInput(1)}
             {rootNodes.length === 0 && !(creating && creating.dir === rootPath) ? (
-              <div className="tree-empty tree-empty-nested" style={{ paddingLeft: 8 + 14 }}>{t('side.empty')}</div>
+              <div className="tree-empty tree-empty-nested" role="none" style={{ paddingLeft: 8 + 14 }}>{t('side.empty')}</div>
             ) : (
               rootNodes.map((n) => renderNode(n, 1))
             )}
@@ -757,43 +1069,81 @@ function Sidebar({ workspaces, activePath, openTabPaths, openTabPathsRaw, onOpen
           </span>
         </div>
       )}
-      <div className="tree">
+      <div
+        className="tree"
+        role="tree"
+        aria-label={t('side.treeLabel')}
+        aria-multiselectable="false"
+      >
         {roots.map((ws) => renderRoot(ws))}
       </div>
 
       {menu && (
-        <div className="context-menu" style={{
-          left: Math.min(menu.x, window.innerWidth - 210),
-          top: Math.min(menu.y, window.innerHeight - 340)
-        }} onClick={(e) => e.stopPropagation()}>
-          <button onClick={() => { startNewFile(menu.node ? (menu.node.type === 'dir' ? menu.node.path : parentDir(menu.node.path)) : null); setMenu(null) }}>{t('side.ctxNewFile')}</button>
-          <button onClick={() => { startNewFolder(menu.node ? (menu.node.type === 'dir' ? menu.node.path : parentDir(menu.node.path)) : null); setMenu(null) }}>{t('side.ctxNewFolder')}</button>
-          {menu.node?.type === 'dir' && <button onClick={() => { refreshDir(menu.node.path); setMenu(null) }}>{t('side.refresh')}</button>}
+        <div
+          ref={menuRef}
+          className="context-menu"
+          role="menu"
+          aria-label={t('side.contextMenu')}
+          style={{
+            left: Math.min(menu.x, window.innerWidth - 210),
+            top: Math.min(menu.y, window.innerHeight - 340)
+          }}
+          onClick={(e) => e.stopPropagation()}
+          onKeyDown={(event) => {
+            const items = [...(menuRef.current?.querySelectorAll('button:not(:disabled)') || [])]
+            const index = items.indexOf(document.activeElement)
+            if (event.key === 'Escape') {
+              event.preventDefault()
+              event.stopPropagation()
+              const returnPath = menu.returnPath
+              setMenu(null)
+              focusTreePath(returnPath)
+              return
+            }
+            if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+              event.preventDefault()
+              event.stopPropagation()
+              const delta = event.key === 'ArrowDown' ? 1 : -1
+              items[(Math.max(0, index) + delta + items.length) % items.length]?.focus()
+              return
+            }
+            if (event.key === 'Home' || event.key === 'End') {
+              event.preventDefault()
+              event.stopPropagation()
+              ;(event.key === 'Home' ? items[0] : items.at(-1))?.focus()
+            }
+          }}
+        >
+          <button role="menuitem" onClick={() => { startNewFile(menu.node ? (menu.node.type === 'dir' ? menu.node.path : parentDir(menu.node.path)) : null); setMenu(null) }}>{t('side.ctxNewFile')}</button>
+          <button role="menuitem" onClick={() => { startNewFolder(menu.node ? (menu.node.type === 'dir' ? menu.node.path : parentDir(menu.node.path)) : null); setMenu(null) }}>{t('side.ctxNewFolder')}</button>
+          {menu.node?.type === 'dir' && <button role="menuitem" onClick={() => { refreshDir(menu.node.path); setMenu(null); focusTreePath(menu.returnPath) }}>{t('side.refresh')}</button>}
           {menu.node?.type === 'file' && onOpenRight && (
             <>
-              <div className="menu-sep" />
-              <button onClick={() => { onOpenRight(menu.node.path); setMenu(null) }}>{t('tab.openRight')}</button>
+              <div className="menu-sep" role="separator" />
+              <button role="menuitem" onClick={() => { onOpenRight(menu.node.path); setMenu(null) }}>{t('tab.openRight')}</button>
             </>
           )}
-          {menu.node && <div className="menu-sep" />}
-          {menu.node && <button onClick={() => { copyText(menu.node.path); setMenu(null) }}>{t('tab.copyPath')}</button>}
-          {menu.node && <button onClick={() => { copyText(menu.node.name); setMenu(null) }}>{t('tab.copyName')}</button>}
-          {menu.node && window.api.capabilities?.revealInFolder !== false && <button onClick={() => { window.api.showInFolder(menu.node.path); setMenu(null) }}>{t('side.reveal')}</button>}
+          {menu.node && <div className="menu-sep" role="separator" />}
+          {menu.node && <button role="menuitem" onClick={() => { copyText(menu.node.path); setMenu(null); focusTreePath(menu.returnPath) }}>{t('tab.copyPath')}</button>}
+          {menu.node && <button role="menuitem" onClick={() => { copyText(menu.node.name); setMenu(null); focusTreePath(menu.returnPath) }}>{t('tab.copyName')}</button>}
+          {menu.node && !menu.node.isRoot && <button role="menuitem" onClick={() => { setCutNode({ path: menu.node.path, type: menu.node.type }); setMenu(null); focusTreePath(menu.returnPath) }}>{t('side.cut')}</button>}
+          {menu.node && <button role="menuitem" disabled={!cutNode} onClick={async () => { const target = menu.node; setMenu(null); await pasteCutNode(target) }}>{t('side.paste')}</button>}
+          {menu.node && window.api.capabilities?.revealInFolder !== false && <button role="menuitem" onClick={() => { window.api.showInFolder(menu.node.path); setMenu(null); focusTreePath(menu.returnPath) }}>{t('side.reveal')}</button>}
           {/* Root folders: remove from the sidebar (does not touch disk). */}
           {menu.node?.isRoot && (
             <>
-              <div className="menu-sep" />
-              <button onClick={() => { onRemoveFolder?.(menu.node.path); setMenu(null) }}>{t('side.removeFolder')}</button>
+              <div className="menu-sep" role="separator" />
+              <button role="menuitem" onClick={() => { onRemoveFolder?.(menu.node.path); setMenu(null) }}>{t('side.removeFolder')}</button>
             </>
           )}
-          {menu.node && !menu.node.isRoot && <div className="menu-sep" />}
-          {menu.node && !menu.node.isRoot && <button onClick={() => { setRename({ path: menu.node.path, value: menu.node.name }); setMenu(null) }}>{t('side.rename')}</button>}
-          {menu.node?.type === 'file' && <button onClick={() => { doDuplicate(menu.node); setMenu(null) }}>{t('side.duplicate')}</button>}
+          {menu.node && !menu.node.isRoot && <div className="menu-sep" role="separator" />}
+          {menu.node && !menu.node.isRoot && <button role="menuitem" onClick={() => { startRenameNode(menu.node); setMenu(null) }}>{t('side.rename')}</button>}
+          {menu.node?.type === 'file' && <button role="menuitem" onClick={() => { doDuplicate(menu.node); setMenu(null); focusTreePath(menu.returnPath) }}>{t('side.duplicate')}</button>}
           {menu.node?.type === 'file' && isMarkdownName(menu.node.name) && window.api.capabilities?.pdfExport !== false && (
-            <button onClick={() => { onExportPdf?.(menu.node.path); setMenu(null) }}>{t('side.exportPdf')}</button>
+            <button role="menuitem" onClick={() => { onExportPdf?.(menu.node.path); setMenu(null) }}>{t('side.exportPdf')}</button>
           )}
-          {menu.node && !menu.node.isRoot && <div className="menu-sep" />}
-          {menu.node && !menu.node.isRoot && <button className="danger" onClick={() => { doDelete(menu.node); setMenu(null) }}>{t('side.delete')}</button>}
+          {menu.node && !menu.node.isRoot && <div className="menu-sep" role="separator" />}
+          {menu.node && !menu.node.isRoot && <button role="menuitem" className="danger" onClick={() => { doDelete(menu.node); setMenu(null) }}>{t('side.delete')}</button>}
         </div>
       )}
     </div>

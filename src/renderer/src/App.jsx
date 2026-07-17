@@ -11,6 +11,7 @@ import Outline, { parseHeadingDetails } from './components/Outline.jsx'
 import StatusBar from './components/StatusBar.jsx'
 import SaveFab from './components/SaveFab.jsx'
 import CommandPalette from './components/CommandPalette.jsx'
+import TabSwitcher from './components/TabSwitcher.jsx'
 import { Icon } from './components/icons.jsx'
 import { THEMES, DEFAULT_THEME, applyTheme } from './themes.js'
 import { I18nProvider, translate, DEFAULT_LANG } from './i18n.jsx'
@@ -20,8 +21,12 @@ import WindowControls from './components/WindowControls.jsx'
 import UpdateToast from './components/UpdateToast.jsx'
 import RenameModal from './components/RenameModal.jsx'
 import ModeSwitchDialog from './components/ModeSwitchDialog.jsx'
+import KeepChangeReview from './components/KeepChangeReview.jsx'
+import LocalHistoryDialog from './components/LocalHistoryDialog.jsx'
 import Settings from './components/Settings.jsx'
 import SearchPanel from './components/SearchPanel.jsx'
+import LinkIntelligencePanel from './components/LinkIntelligencePanel.jsx'
+import LinkUpdateDialog from './components/LinkUpdateDialog.jsx'
 import {
   loadSettings,
   saveSettings,
@@ -35,7 +40,11 @@ import {
   ZOOM_STEP,
   DEFAULT_ZOOM
 } from './settings.js'
-import { attachmentLinkMarkdown } from '../../main/helpers.js'
+import {
+  attachmentLinkMarkdown,
+  extractMarkdownLinks,
+  slugifyMarkdownAnchor
+} from '../../main/helpers.js'
 import { applyCustomTheme } from './customThemes.js'
 import { fireToast, HM_TOAST_EVENT } from './ui.js'
 import logoUrl from './assets/logo.png'
@@ -57,7 +66,8 @@ import {
   isPlainTextDoc, isHeavyDoc, genId, LS, loadSession, buildSessionTabs,
   sessionSnapshotEqual, MD_DOC_RE,
   rememberRecent, removeRecentPath, clearUnpinnedRecents, toggleRecentPinned,
-  reorderTabsList, toggleTabPinnedInList, pathInWorkspace
+  reorderTabsList, openPreviewTabInList, promotePreviewTabInList,
+  toggleTabPinnedInList, pathInWorkspace
 } from './paths.js'
 import {
   countSourceLines,
@@ -78,6 +88,16 @@ import {
   recordNavigationLocation,
   stepNavigationHistory
 } from './navigation-history.js'
+import {
+  buildMruTabOrder,
+  createClosedTabEntry,
+  insertRestoredTab,
+  pushClosedTabEntries,
+  removeClosedTabEntry,
+  sanitizeClosedTabs,
+  stepWrappedIndex,
+  touchTabMru
+} from './tab-history.js'
 
 const ONBOARDED_KEY = 'easymarkdown.onboarded.v1'
 // One-time coach-mark explaining Keep vs Milkdown, shown on first run only.
@@ -124,6 +144,68 @@ function findAnchorLine(content, anchor) {
   return 0
 }
 
+const safeDecodeURIComponent = (value) => {
+  try {
+    return decodeURIComponent(value)
+  } catch {
+    return value
+  }
+}
+
+function markdownContextAtOffset(content, rawOffset) {
+  const source = String(content ?? '')
+  const offset = Math.max(0, Math.min(Number(rawOffset) || 0, source.length))
+  const { line } = lineColumnAtOffset(source, offset)
+  const links = extractMarkdownLinks(source)
+  const exactLink = links.find((link) => offset >= link.start && offset <= link.end)
+  const lineLinks = links.filter((link) => link.line === line + 1)
+  const link = exactLink || (lineLinks.length === 1 ? lineLinks[0] : null)
+  if (link) return { type: 'link', href: link.target, line: link.line }
+  const rawLine = source.split('\n')[line]?.replace(/\r$/, '') || ''
+  const heading = rawLine.match(/^\s{0,3}#{1,6}\s+(.+?)\s*#*\s*$/)
+  if (!heading) return null
+  return {
+    type: 'heading',
+    line: line + 1,
+    text: heading[1].replace(/\s*\{#[^}]+\}\s*$/, '').trim()
+  }
+}
+
+function resolveReferenceTarget(tab, context) {
+  if (!tab?.path || !context) return null
+  if (context.type === 'heading') {
+    const explicit = String(context.text || '').match(/\s*\{#([^}\s]+)\}\s*$/)?.[1]
+    const text = String(context.text || '').replace(/\s*\{#[^}]+\}\s*$/, '').trim()
+    return {
+      targetPath: tab.path,
+      anchor: explicit || slugifyMarkdownAnchor(text),
+      label: text || baseName(tab.path)
+    }
+  }
+  const href = String(context.href || '').trim()
+  if (!href || (!/^[a-zA-Z]:[\\/]/.test(href) && /^[a-z][a-z\d+.-]*:/i.test(href))) {
+    return null
+  }
+  const hashAt = href.indexOf('#')
+  const beforeHash = hashAt >= 0 ? href.slice(0, hashAt) : href
+  const queryAt = beforeHash.indexOf('?')
+  const rawPath = queryAt >= 0 ? beforeHash.slice(0, queryAt) : beforeHash
+  const anchor = hashAt >= 0 ? safeDecodeURIComponent(href.slice(hashAt + 1)) : ''
+  let targetPath = tab.path
+  if (rawPath) {
+    const decoded = safeDecodeURIComponent(rawPath)
+    targetPath = isAbsolutePath(decoded)
+      ? decoded
+      : resolveRelPath(dirName(tab.path), decoded)
+    if (!/\.[a-z0-9]+$/i.test(targetPath)) targetPath += '.md'
+  }
+  return {
+    targetPath,
+    anchor,
+    label: anchor ? `${baseName(targetPath)}#${anchor}` : baseName(targetPath)
+  }
+}
+
 // Pure line/fold helpers live in sourceFold.js (unit-tested in
 // test/source-fold.test.js). Memoized: App passes stable per-tab handlers and
 // style objects, so a pane only re-renders when its own value/layout changes.
@@ -134,7 +216,9 @@ const SourceEditorPane = memo(function SourceEditorPane({
   style,
   onPaneFocus,
   onPaneMouseDown,
-  onChange
+  onChange,
+  onViewportChange,
+  onSelectionChange,
 }) {
   const localTextareaRef = useRef(null)
   const lineNumbersRef = useRef(null)
@@ -413,6 +497,20 @@ const SourceEditorPane = memo(function SourceEditorPane({
     return true
   }, [fullOffsetFromDisplay, markInteraction, onChange])
 
+  const getViewportOffset = useCallback(() => {
+    const el = localTextareaRef.current
+    if (!el) return 0
+    const lines = fullLinesNow()
+    const row = Math.max(
+      0,
+      Math.floor((el.scrollTop + sourceMetrics.lineHeight * 0.5) / sourceMetrics.lineHeight)
+    )
+    const sourceLine = hasFoldsRef.current && foldViewRef.current
+      ? foldViewRef.current.visibleMap[Math.min(row, foldViewRef.current.visibleMap.length - 1)]
+      : Math.min(row, lines.length - 1)
+    return offsetForLineColumn(lines, sourceLine, 0)
+  }, [fullLinesNow, sourceMetrics.lineHeight])
+
   useLayoutEffect(() => {
     if (!Number.isFinite(pendingCaretRef.current)) return
     const el = localTextareaRef.current
@@ -439,17 +537,28 @@ const SourceEditorPane = memo(function SourceEditorPane({
         start: fullOffsetFromDisplay(el.selectionStart),
         end: fullOffsetFromDisplay(el.selectionEnd)
       }),
-      getViewportOffset: () => {
-        const lines = fullLinesNow()
-        const row = Math.max(
-          0,
-          Math.floor((el.scrollTop + sourceMetrics.lineHeight * 0.5) / sourceMetrics.lineHeight)
-        )
-        const sourceLine = hasFoldsRef.current && foldViewRef.current
-          ? foldViewRef.current.visibleMap[Math.min(row, foldViewRef.current.visibleMap.length - 1)]
-          : Math.min(row, lines.length - 1)
-        return offsetForLineColumn(lines, sourceLine, 0)
+      restoreFullSelection: (selection, options = {}) => {
+        const full = String(valueRef.current ?? '')
+        const start = Math.max(0, Math.min(Number(selection?.start) || 0, full.length))
+        const end = Math.max(start, Math.min(Number(selection?.end) || start, full.length))
+        displayOffsetFromFull(start, true)
+        displayOffsetFromFull(end, true)
+        let applied = false
+        const apply = () => {
+          if (applied) return
+          const displayStart = displayOffsetFromFull(start, false)
+          const displayEnd = displayOffsetFromFull(end, false)
+          if (!Number.isFinite(displayStart) || !Number.isFinite(displayEnd)) return
+          programmaticUntilRef.current = performance.now() + 180
+          el.setSelectionRange(displayStart, displayEnd)
+          if (options.focus) el.focus({ preventScroll: true })
+          if (options.notify) onSelectionChange?.(end)
+          applied = true
+        }
+        requestAnimationFrame(apply)
+        setTimeout(apply, 90)
       },
+      getViewportOffset,
       fullRangeToDisplayRange: (start, end, expand = false) => {
         const displayStart = displayOffsetFromFull(start, expand)
         const displayEnd = displayOffsetFromFull(end, expand)
@@ -471,7 +580,9 @@ const SourceEditorPane = memo(function SourceEditorPane({
     displayOffsetFromFull,
     fullLinesNow,
     fullOffsetFromDisplay,
+    getViewportOffset,
     insertMarkdown,
+    onSelectionChange,
     scrollToSourceLine,
     scrollToSourceOffset,
     sourceMetrics.lineHeight,
@@ -506,14 +617,18 @@ const SourceEditorPane = memo(function SourceEditorPane({
 
   const handleScroll = useCallback(() => {
     syncSourceGutters()
-    if (performance.now() > programmaticUntilRef.current) markInteraction('scroll')
-  }, [markInteraction, syncSourceGutters])
+    if (performance.now() > programmaticUntilRef.current) {
+      markInteraction('scroll')
+      onViewportChange?.(getViewportOffset())
+    }
+  }, [getViewportOffset, markInteraction, onViewportChange, syncSourceGutters])
 
   const handleSelect = useCallback((e) => {
     if (document.activeElement === e.currentTarget && performance.now() > programmaticUntilRef.current) {
       markInteraction('selection')
+      onSelectionChange?.(fullOffsetFromDisplay(e.currentTarget.selectionEnd))
     }
-  }, [markInteraction])
+  }, [fullOffsetFromDisplay, markInteraction, onSelectionChange])
 
   const toggleFold = useCallback((key) => {
     setCollapsedKeys((prev) => {
@@ -581,6 +696,17 @@ export default function App() {
   const isMobile = window.api.platform === 'ios' || window.api.platform === 'android'
   const [tabs, setTabs] = useState([])
   const [activeId, setActiveId] = useState(null)
+  const [closedTabs, setClosedTabs] = useState(() => sanitizeClosedTabs(session.closedTabs))
+  const closedTabsRef = useRef(closedTabs)
+  closedTabsRef.current = closedTabs
+  const replaceClosedTabs = useCallback((nextOrUpdater) => {
+    const next =
+      typeof nextOrUpdater === 'function'
+        ? nextOrUpdater(closedTabsRef.current)
+        : nextOrUpdater
+    closedTabsRef.current = next
+    setClosedTabs(next)
+  }, [])
   // Multi-root workspace: an array of { rootPath, rootName }, each rendered as its
   // own collapsible tree in the sidebar. Upgrading users with the old single
   // `session.workspace` get it migrated to the first root.
@@ -614,6 +740,13 @@ export default function App() {
   const sourceModeRef = useRef(sourceMode)
   sourceModeRef.current = sourceMode
   const [paletteOpen, setPaletteOpen] = useState(false)
+  const [zenMode, setZenMode] = useState(false)
+  const [zenReveal, setZenReveal] = useState(false)
+  const zenHideTimerRef = useRef(0)
+  const [tabSwitcher, setTabSwitcher] = useState(null)
+  const tabSwitcherRef = useRef(tabSwitcher)
+  tabSwitcherRef.current = tabSwitcher
+  const mruTabIdsRef = useRef([])
   const navigationHistoryRef = useRef({ back: [], forward: [] })
   const [, setNavigationVersion] = useState(0)
   const rememberNavigationRef = useRef(() => {})
@@ -623,6 +756,30 @@ export default function App() {
   // Bumped each time workspace search is invoked so an already-open panel
   // re-focuses its input (Ctrl+Shift+F while the panel is showing).
   const [searchFocusNonce, setSearchFocusNonce] = useState(0)
+  const [linkPanel, setLinkPanel] = useState({
+    enabled: false,
+    view: 'problems',
+    problemTabId: null,
+    docPath: '',
+    problems: [],
+    diagnosing: false,
+    referenceGroups: [],
+    referencesRunning: false,
+    referenceLabel: '',
+    filesScanned: 0,
+    truncated: false
+  })
+  const linkPanelRef = useRef(linkPanel)
+  linkPanelRef.current = linkPanel
+  const linkDiagnosisGenerationRef = useRef(0)
+  const linkReferenceGenerationRef = useRef(0)
+  const linkDiagnosisTimerRef = useRef(0)
+  const problemCursorRef = useRef(new Map())
+  const [headingRenameState, setHeadingRenameState] = useState(null)
+  const [linkUpdateState, setLinkUpdateState] = useState(null)
+  const findCurrentReferencesRef = useRef(() => {})
+  const beginHeadingRenameRef = useRef(() => {})
+  const stepProblemRef = useRef(() => {})
   // "Home" shows the welcome/landing page while keeping open tabs mounted (so
   // returning to a document doesn't re-create its editor). Cleared whenever a
   // tab is activated or a file is opened.
@@ -632,6 +789,14 @@ export default function App() {
   // independent editor — both panes are fully editable. Driven by the tab
   // right-click menu ("Open in Split") and the top-bar toggle.
   const [splitId, setSplitId] = useState(null)
+  // Same-document Source + Keep split. This is independent from the existing
+  // two-tab split: the source side follows the active tab, while the Keep side
+  // can either follow it or stay pinned to one document.
+  const [sourceSplitEnabled, setSourceSplitEnabled] = useState(false)
+  const [sourcePreviewId, setSourcePreviewId] = useState(null)
+  const [sourcePreviewPinned, setSourcePreviewPinned] = useState(false)
+  const [sourceOnLeft, setSourceOnLeft] = useState(true)
+  const [sourceScrollSync, setSourceScrollSync] = useState(true)
   // Fraction of the editor area given to the left pane (0..1), dragged via the
   // divider between the two panes.
   const [splitRatio, setSplitRatio] = useState(0.5)
@@ -685,6 +850,10 @@ export default function App() {
   // cancel. Native window.confirm cannot express or localize that action set.
   const [modeSwitchState, setModeSwitchState] = useState(null)
   const [modeSwitchSaving, setModeSwitchSaving] = useState(false)
+  // Shared line-level review surface for current Keep edits, external-file
+  // conflicts, and Keep ⇄ Milkdown warnings.
+  const [changeReview, setChangeReview] = useState(null)
+  const [localHistoryState, setLocalHistoryState] = useState(null)
   // User preferences (page width, font size, zoom). Persisted separately from
   // the session; see settings.js.
   const [settings, setSettings] = useState(loadSettings)
@@ -700,6 +869,8 @@ export default function App() {
   const [keepDraftIds, setKeepDraftIds] = useState(() => new Set())
   const keepDraftIdsRef = useRef(keepDraftIds)
   keepDraftIdsRef.current = keepDraftIds
+  const keepCommitRef = useRef(() => {})
+  const jumpToTabLineRef = useRef(() => {})
 
   const editorHostRef = useRef(null) // active rich editor's scroll container
   const editorAreaRef = useRef(null) // flex row holding the editor panes (for split-drag math)
@@ -708,6 +879,9 @@ export default function App() {
   const sourceBaselinesRef = useRef({}) // tab id -> source value + interaction revision at entry
   const pendingSourceRestoreRef = useRef(null)
   const pendingPreviewRestoreRef = useRef(null)
+  const sourceSplitContentTimerRef = useRef(0)
+  const sourceSplitScrollLockRef = useRef({ side: null, until: 0 })
+  const sourceSplitPreviewRafRef = useRef(0)
   const findInputRef = useRef(null)
   const openFindRef = useRef(null)
   const findStartRef = useRef(null)
@@ -751,6 +925,8 @@ export default function App() {
   // Tab ids the user explicitly chose to render richly despite being "heavy"
   // (would otherwise open in the fast plain-text editor to avoid a long freeze).
   const [richForced, setRichForced] = useState(() => new Set())
+  const richForcedRef = useRef(richForced)
+  richForcedRef.current = richForced
   // Tab ids the user explicitly switched to the Milkdown (Crepe) editor. `.md`
   // docs default to the source-backed "keep" editor (zero-diff saves); this Set
   // opts a tab into full WYSIWYG instead. Mirrors `richForced` (heavy-doc opt-in).
@@ -782,6 +958,10 @@ export default function App() {
     () => paletteOpen && activeTab ? parseHeadingDetails(activeTab.content) : EMPTY_PALETTE_HEADINGS,
     [paletteOpen, activeTab]
   )
+  const paletteLineCount = useMemo(
+    () => paletteOpen && activeTab ? activeTab.content.split('\n').length : 1,
+    [paletteOpen, activeTab]
+  )
   const activePath = activeTab?.path || null
   // Native (OS-separator) paths of every open tab — used by the sidebar to expand
   // the tree to each open file (must match the tree's `node.path` format).
@@ -808,7 +988,8 @@ export default function App() {
         x.title,
         x.path || '',
         x.content !== x.savedContent || keepDraftIds.has(x.id),
-        !!x.pinned
+        !!x.pinned,
+        !!x.preview
       ])
     )
     .join('\n')
@@ -819,7 +1000,8 @@ export default function App() {
         title: x.title,
         path: x.path,
         dirty: x.content !== x.savedContent || keepDraftIds.has(x.id),
-        pinned: !!x.pinned
+        pinned: !!x.pinned,
+        preview: !!x.preview
       })),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [tabsStripKey]
@@ -831,6 +1013,19 @@ export default function App() {
     [tabs, splitId]
   )
   const split = !home && !!splitTab && splitId !== activeId
+  const sourcePreviewTab = useMemo(
+    () => (sourcePreviewId != null ? tabs.find((t) => t.id === sourcePreviewId) || null : null),
+    [tabs, sourcePreviewId]
+  )
+  const sourceSplit =
+    sourceSplitEnabled &&
+    !home &&
+    !!activeTab &&
+    !isPlainTextDoc(activeTab) &&
+    !!sourcePreviewTab &&
+    !isPlainTextDoc(sourcePreviewTab) &&
+    !milkdownForced.has(sourcePreviewTab.id)
+  const layoutSplit = split || sourceSplit
   // Always-current activeId for callbacks that fire after a tab switch.
   const activeIdRef = useRef(activeId)
   activeIdRef.current = activeId
@@ -840,6 +1035,16 @@ export default function App() {
   splitRef.current = split
   const splitIdRef = useRef(splitId)
   splitIdRef.current = splitId
+  const sourceSplitRef = useRef(sourceSplit)
+  sourceSplitRef.current = sourceSplit
+  const sourcePreviewIdRef = useRef(sourcePreviewId)
+  sourcePreviewIdRef.current = sourcePreviewId
+  const sourcePreviewPinnedRef = useRef(sourcePreviewPinned)
+  sourcePreviewPinnedRef.current = sourcePreviewPinned
+  const sourceOnLeftRef = useRef(sourceOnLeft)
+  sourceOnLeftRef.current = sourceOnLeft
+  const sourceScrollSyncRef = useRef(sourceScrollSync)
+  sourceScrollSyncRef.current = sourceScrollSync
   const focusedPaneRef = useRef(focusedPane)
   focusedPaneRef.current = focusedPane
 
@@ -931,6 +1136,35 @@ export default function App() {
     if (activeId == null) return
     setMountedIds((prev) => (prev.has(activeId) ? prev : new Set(prev).add(activeId)))
   }, [activeId])
+
+  useEffect(() => {
+    if (!sourceSplitEnabled) return
+    if (sourcePreviewPinned) {
+      if (!sourcePreviewTab || isPlainTextDoc(sourcePreviewTab) || milkdownForced.has(sourcePreviewTab.id)) {
+        setSourceSplitEnabled(false)
+        setSourcePreviewPinned(false)
+      }
+      return
+    }
+    if (!activeTab || isPlainTextDoc(activeTab) || milkdownForced.has(activeTab.id)) {
+      setSourceSplitEnabled(false)
+      setSourcePreviewId(null)
+      return
+    }
+    if (sourcePreviewId !== activeTab.id) setSourcePreviewId(activeTab.id)
+  }, [
+    activeTab,
+    milkdownForced,
+    sourcePreviewId,
+    sourcePreviewPinned,
+    sourcePreviewTab,
+    sourceSplitEnabled
+  ])
+
+  useEffect(() => () => {
+    clearTimeout(sourceSplitContentTimerRef.current)
+    if (sourceSplitPreviewRafRef.current) cancelAnimationFrame(sourceSplitPreviewRafRef.current)
+  }, [])
 
   useEffect(() => {
     if (!startupRestored) return
@@ -1084,26 +1318,307 @@ export default function App() {
     (tab) => !!tab && (tab.content !== tab.savedContent || keepDraftIdsRef.current.has(tab.id)),
     []
   )
+  const promotePreviewTab = useCallback((id) => {
+    const next = promotePreviewTabInList(tabsRef.current, id)
+    if (next === tabsRef.current) return false
+    tabsRef.current = next
+    setTabs(next)
+    return true
+  }, [])
   const guardKeepDraft = useCallback((id) => {
     if (!id || !keepDraftIdsRef.current.has(id)) return true
     editorApis.current[id]?.focusDraft?.()
     fireToast(tRef.current('keep.finishDraft'), { sticky: true })
     return false
   }, [])
+  const openMarkdownOverrides = useCallback(() =>
+    tabsRef.current
+      .filter((tab) => tab.path && MD_DOC_RE.test(tab.path) && !tab.loading)
+      .map((tab) => ({ path: tab.path, content: tab.content })), [])
+
+  const diagnoseLinksForTab = useCallback(async (tab) => {
+    const generation = ++linkDiagnosisGenerationRef.current
+    if (!tab?.path || !MD_DOC_RE.test(tab.path)) {
+      setLinkPanel((prev) => ({
+        ...prev,
+        enabled: true,
+        problemTabId: tab?.id || null,
+        docPath: '',
+        problems: [],
+        diagnosing: false
+      }))
+      return []
+    }
+    setLinkPanel((prev) => ({
+      ...prev,
+      enabled: true,
+      problemTabId: tab.id,
+      docPath: tab.path,
+      diagnosing: true
+    }))
+    try {
+      const result = await window.api.diagnoseMarkdownLinks?.({
+        docPath: tab.path,
+        content: tab.content
+      })
+      if (generation !== linkDiagnosisGenerationRef.current) return []
+      const problems = result?.problems || []
+      setLinkPanel((prev) => ({
+        ...prev,
+        problemTabId: tab.id,
+        docPath: tab.path,
+        problems,
+        diagnosing: false
+      }))
+      return problems
+    } catch (error) {
+      if (generation !== linkDiagnosisGenerationRef.current) return []
+      setLinkPanel((prev) => ({ ...prev, diagnosing: false, problems: [] }))
+      fireToast(tRef.current('links.checkFailed', { msg: error?.message || error }), {
+        kind: 'error',
+        sticky: true
+      })
+      return []
+    }
+  }, [])
+
+  const openProblemsPanel = useCallback(() => {
+    const tab = tabsRef.current.find((item) => item.id === activeIdRef.current)
+    setSidebarMode('links')
+    setSidebarOpen(true)
+    setLinkPanel((prev) => ({ ...prev, enabled: true, view: 'problems' }))
+    diagnoseLinksForTab(tab)
+  }, [diagnoseLinksForTab])
+
+  useEffect(() => {
+    if (!linkPanel.enabled) return
+    clearTimeout(linkDiagnosisTimerRef.current)
+    const tab = tabsRef.current.find((item) => item.id === activeId)
+    linkDiagnosisTimerRef.current = setTimeout(() => diagnoseLinksForTab(tab), 650)
+    return () => clearTimeout(linkDiagnosisTimerRef.current)
+  }, [activeId, activeTab?.path, activeTab?.content, linkPanel.enabled, diagnoseLinksForTab])
+
+  const currentReferenceContext = useCallback(() => {
+    const id = activeIdRef.current
+    const tab = tabsRef.current.find((item) => item.id === id)
+    if (!tab) return null
+    const sourceApi = sourceRef.current?.__hmSourceApi
+    if (sourceApi && (sourceModeRef.current || sourceSplitRef.current)) {
+      const selection = sourceApi.getFullSelection?.()
+      return markdownContextAtOffset(tab.content, selection?.end ?? sourceApi.getViewportOffset?.())
+    }
+    const api = editorApis.current[id]
+    const keepContext = api?.getReferenceContext?.()
+    if (keepContext) return keepContext
+    const offset =
+      api?.markdownOffsetFromSelection?.() ??
+      api?.navigationOffsetFromViewportTop?.() ??
+      api?.markdownOffsetFromViewportTop?.()
+    return markdownContextAtOffset(tab.content, offset)
+  }, [])
+
+  const findMarkdownReferencesForContext = useCallback(async (context = null) => {
+    const tab = tabsRef.current.find((item) => item.id === activeIdRef.current)
+    const actualContext = context || currentReferenceContext()
+    const target = resolveReferenceTarget(tab, actualContext)
+    if (!target?.targetPath) {
+      fireToast(tRef.current('links.noReferenceTarget'), { sticky: true })
+      return
+    }
+    const generation = ++linkReferenceGenerationRef.current
+    setSidebarMode('links')
+    setSidebarOpen(true)
+    setLinkPanel((prev) => ({
+      ...prev,
+      enabled: true,
+      view: 'references',
+      referencesRunning: true,
+      referenceGroups: [],
+      referenceLabel: target.label,
+      filesScanned: 0,
+      truncated: false
+    }))
+    try {
+      const result = await window.api.findMarkdownReferences?.({
+        roots: workspacesRef.current.map((workspace) => workspace.rootPath),
+        targetPath: target.targetPath,
+        anchor: target.anchor,
+        overrides: openMarkdownOverrides(),
+        showHidden: settings.showHiddenFiles
+      })
+      if (generation !== linkReferenceGenerationRef.current) return
+      setLinkPanel((prev) => ({
+        ...prev,
+        referencesRunning: false,
+        referenceGroups: result?.groups || [],
+        referenceLabel: target.label,
+        filesScanned: result?.filesScanned || 0,
+        truncated: !!result?.truncated
+      }))
+    } catch (error) {
+      if (generation !== linkReferenceGenerationRef.current) return
+      setLinkPanel((prev) => ({ ...prev, referencesRunning: false, referenceGroups: [] }))
+      fireToast(tRef.current('links.searchFailed', { msg: error?.message || error }), {
+        kind: 'error',
+        sticky: true
+      })
+    }
+  }, [currentReferenceContext, openMarkdownOverrides, settings.showHiddenFiles])
+  findCurrentReferencesRef.current = findMarkdownReferencesForContext
+
+  const beginHeadingRename = useCallback((context = null) => {
+    const tab = tabsRef.current.find((item) => item.id === activeIdRef.current)
+    const actual = context || currentReferenceContext()
+    if (!tab?.path || !actual || (actual.type && actual.type !== 'heading')) {
+      fireToast(tRef.current('links.noHeading'), { sticky: true })
+      return
+    }
+    if (hasUnsavedTab(tab)) {
+      fireToast(tRef.current('links.saveBeforeRename'), { sticky: true })
+      return
+    }
+    setHeadingRenameState({
+      tabId: tab.id,
+      path: tab.path,
+      line: actual.line,
+      value: String(actual.text || '').replace(/\s*\{#[^}]+\}\s*$/, '').trim()
+    })
+  }, [currentReferenceContext, hasUnsavedTab])
+  beginHeadingRenameRef.current = beginHeadingRename
+
+  const syncAppliedMarkdownFiles = useCallback((files, aliases = []) => {
+    const normalized = new Map(
+      (files || []).map((file) => [String(file.path || '').replace(/\\/g, '/').toLowerCase(), file])
+    )
+    for (const alias of aliases) {
+      const file = normalized.get(String(alias.to || '').replace(/\\/g, '/').toLowerCase())
+      if (file) normalized.set(String(alias.from || '').replace(/\\/g, '/').toLowerCase(), file)
+    }
+    if (!normalized.size) return
+    const reloadIds = new Set()
+    for (const tab of tabsRef.current) {
+      const file = normalized.get(String(tab.path || '').replace(/\\/g, '/').toLowerCase())
+      if (!file) continue
+      const synced = editorApis.current[tab.id]?.syncMarkdown?.(file.content)
+      if (!synced && milkdownForcedRef.current.has(tab.id)) reloadIds.add(tab.id)
+    }
+    setTabs((prev) => prev.map((tab) => {
+      const file = normalized.get(String(tab.path || '').replace(/\\/g, '/').toLowerCase())
+      if (!file) return tab
+      return {
+        ...tab,
+        content: file.content,
+        savedContent: file.content,
+        mtimeMs: file.mtimeMs,
+        reloadNonce: reloadIds.has(tab.id) ? tab.reloadNonce + 1 : tab.reloadNonce,
+        heavy: isHeavyDoc(file.content)
+      }
+    }))
+  }, [])
+
+  const dirtyPlanPaths = useCallback((plan) => {
+    const changed = new Set(
+      (plan?.files || []).map((file) => String(file.path || '').replace(/\\/g, '/').toLowerCase())
+    )
+    return tabsRef.current
+      .filter((tab) =>
+        changed.has(String(tab.path || '').replace(/\\/g, '/').toLowerCase()) &&
+        hasUnsavedTab(tab)
+      )
+      .map((tab) => tab.path)
+  }, [hasUnsavedTab])
+
+  const commitHeadingRename = useCallback(async (rawName) => {
+    const state = headingRenameState
+    setHeadingRenameState(null)
+    const newHeading = String(rawName || '').trim()
+    if (!state || !newHeading || newHeading === state.value) return
+    try {
+      const plan = await window.api.planHeadingRename?.({
+        roots: workspacesRef.current.map((workspace) => workspace.rootPath),
+        targetPath: state.path,
+        line: state.line,
+        newHeading,
+        showHidden: settings.showHiddenFiles
+      })
+      if (plan?.error) throw new Error(tRef.current('links.invalidHeading'))
+      setLinkUpdateState({
+        kind: 'heading',
+        plan,
+        busy: false,
+        dirtyPaths: dirtyPlanPaths(plan)
+      })
+    } catch (error) {
+      fireToast(tRef.current('links.planFailed', { msg: error?.message || error }), {
+        kind: 'error',
+        sticky: true
+      })
+    }
+  }, [dirtyPlanPaths, headingRenameState, settings.showHiddenFiles])
+
+  const stepMarkdownProblem = useCallback(async (previous = false) => {
+    const tab = tabsRef.current.find((item) => item.id === activeIdRef.current)
+    if (!tab) return
+    let problems =
+      linkPanelRef.current.problemTabId === tab.id
+        ? linkPanelRef.current.problems
+        : []
+    if (!problems.length) problems = await diagnoseLinksForTab(tab)
+    if (!problems.length) {
+      fireToast(tRef.current('links.noProblems'))
+      return
+    }
+    const current = problemCursorRef.current.get(tab.id) ?? (previous ? 0 : -1)
+    const next = (current + (previous ? -1 : 1) + problems.length) % problems.length
+    problemCursorRef.current.set(tab.id, next)
+    jumpToTabLineRef.current(tab.id, problems[next].line)
+    fireToast(tRef.current('links.problemPosition', { n: next + 1, m: problems.length }))
+  }, [diagnoseLinksForTab])
+  stepProblemRef.current = stepMarkdownProblem
+
+  useEffect(() => {
+    const onKeyDown = (event) => {
+      if (event.key === 'F8') {
+        event.preventDefault()
+        event.stopPropagation()
+        stepProblemRef.current(!!event.shiftKey)
+        return
+      }
+      if (event.key !== 'F2' || event.shiftKey || event.ctrlKey || event.metaKey || event.altKey) return
+      if (event.target?.closest?.('table.km-table, .tree, .hm-rename-modal, .hm-review')) return
+      event.preventDefault()
+      event.stopPropagation()
+      beginHeadingRenameRef.current()
+    }
+    window.addEventListener('keydown', onKeyDown, true)
+    return () => window.removeEventListener('keydown', onKeyDown, true)
+  }, [])
   const captureNavigationLocation = useCallback(() => {
-    const tabId = activeIdRef.current
+    const pane = layoutSplit ? focusedPaneRef.current : 'left'
+    const dualSourceSide = sourceOnLeftRef.current ? 'left' : 'right'
+    const inDualSource = sourceSplitRef.current && pane === dualSourceSide
+    const tabId = sourceSplitRef.current
+      ? inDualSource ? activeIdRef.current : sourcePreviewIdRef.current
+      : pane === 'right' ? splitIdRef.current : activeIdRef.current
     if (!tabId || !tabsRef.current.some((tab) => tab.id === tabId)) return null
-    const inSource = sourceModeIdsRef.current.has(tabId)
+    const inSource = inDualSource || (pane === 'left' && sourceModeIdsRef.current.has(tabId))
+    const sourceApi = inSource ? sourceRef.current?.__hmSourceApi : null
+    const previewApi = !inSource ? editorApis.current[tabId] : null
     const rawOffset = inSource
-      ? sourceRef.current?.__hmSourceApi?.getViewportOffset?.()
-      : editorApis.current[tabId]?.navigationOffsetFromViewportTop?.() ??
-        editorApis.current[tabId]?.markdownOffsetFromViewportTop?.()
+      ? sourceApi?.getViewportOffset?.()
+      : previewApi?.navigationOffsetFromViewportTop?.() ??
+        previewApi?.markdownOffsetFromViewportTop?.()
+    const context = inSource
+      ? { sourceSelection: sourceApi?.getFullSelection?.() }
+      : previewApi?.captureNavigationContext?.()
     return {
       tabId,
       rawOffset: Number.isFinite(rawOffset) ? rawOffset : 0,
-      sourceMode: inSource
+      sourceMode: inSource,
+      pane,
+      context
     }
-  }, [])
+  }, [layoutSplit])
   const rememberNavigation = useCallback(() => {
     const location = captureNavigationLocation()
     if (!location) return false
@@ -1119,13 +1634,20 @@ export default function App() {
   const restoreNavigationLocation = useCallback((location) => {
     if (!location?.tabId || !tabsRef.current.some((tab) => tab.id === location.tabId)) return false
     setHome(false)
-    setFocusedPane('left')
+    const restoreRight =
+      location.pane === 'right' &&
+      !location.sourceMode &&
+      !!activeIdRef.current &&
+      activeIdRef.current !== location.tabId
+    setFocusedPane(restoreRight ? 'right' : 'left')
+    focusedTabRef.current = location.tabId
     if (location.sourceMode) {
       pendingSourceRestoreRef.current = {
         id: location.tabId,
         rawOffset: location.rawOffset,
         follow: false,
-        selectLine: false
+        selectLine: false,
+        context: location.context
       }
       setSourceMountedIds((prev) => prev.has(location.tabId) ? prev : new Set(prev).add(location.tabId))
       setSourceModeIds((prev) => new Set(prev).add(location.tabId))
@@ -1133,7 +1655,8 @@ export default function App() {
       pendingPreviewRestoreRef.current = {
         id: location.tabId,
         rawOffset: location.rawOffset,
-        follow: false
+        follow: false,
+        context: location.context
       }
       setSourceModeIds((prev) => {
         if (!prev.has(location.tabId)) return prev
@@ -1142,24 +1665,36 @@ export default function App() {
         return next
       })
     }
-    setActiveId(location.tabId)
+    if (restoreRight) setSplitId(location.tabId)
+    else setActiveId(location.tabId)
     // A same-tab jump does not change the activeId/sourceMode effect dependencies,
     // so also apply directly. Retries cover a different tab/view mounting.
     const apply = () => {
-      if (activeIdRef.current !== location.tabId) return
+      const visible =
+        activeIdRef.current === location.tabId ||
+        (splitIdRef.current === location.tabId && !location.sourceMode)
+      if (!visible) return
       if (location.sourceMode) {
-        sourceRef.current?.__hmSourceApi?.scrollToOffset?.(location.rawOffset, {
+        const api = sourceRef.current?.__hmSourceApi
+        api?.scrollToOffset?.(location.rawOffset, {
           align: 'top',
           placeCaret: false,
           focus: false
         })
+        if (location.context?.sourceSelection) {
+          api?.restoreFullSelection?.(location.context.sourceSelection, { focus: false })
+        }
       } else {
-        editorApis.current[location.tabId]?.restoreMarkdownOffset?.(location.rawOffset, false)
+        const api = editorApis.current[location.tabId]
+        api?.restoreNavigationContext?.(location.context)
+        api?.restoreMarkdownOffset?.(location.rawOffset, false)
+        api?.restoreNavigationContext?.(location.context)
       }
     }
     requestAnimationFrame(apply)
     setTimeout(apply, 90)
     setTimeout(apply, 220)
+    setTimeout(apply, 500)
     return true
   }, [])
 
@@ -1258,6 +1793,104 @@ export default function App() {
     }
   }, [guardKeepDraft])
 
+  const closeSourceSplit = useCallback(() => {
+    const id = activeIdRef.current
+    const previewId = sourcePreviewIdRef.current
+    if (id && previewId === id) {
+      const tab = tabsRef.current.find((item) => item.id === id)
+      const sourceApi = sourceRef.current?.__hmSourceApi
+      const rawOffset = sourceApi?.getViewportOffset?.()
+      editorApis.current[id]?.syncMarkdown?.(tab?.content ?? sourceApi?.getFullValue?.() ?? '')
+      if (Number.isFinite(rawOffset)) {
+        pendingPreviewRestoreRef.current = { id, rawOffset, follow: false }
+      }
+    }
+    if (previewId) editorApis.current[previewId]?.highlightMarkdownOffset?.(null)
+    setSourceSplitEnabled(false)
+    setSourcePreviewPinned(false)
+    setSourcePreviewId(null)
+    setFocusedPane('left')
+  }, [])
+
+  const toggleSourceSplit = useCallback(() => {
+    if (sourceSplitRef.current) {
+      closeSourceSplit()
+      return
+    }
+    const id = activeIdRef.current
+    const tab = tabsRef.current.find((item) => item.id === id)
+    if (!id || !tab || isPlainTextDoc(tab)) return
+    if (!guardKeepDraft(id)) return
+    if (milkdownForcedRef.current.has(id)) {
+      fireToast(tRef.current('sourceSplit.keepRequired'))
+      return
+    }
+    const api = editorApis.current[id]
+    const caretOffset = api?.markdownOffsetFromSelection?.()
+    const viewportOffset = api?.markdownOffsetFromViewportTop?.()
+    pendingSourceRestoreRef.current = {
+      id,
+      rawOffset: Number.isFinite(caretOffset)
+        ? caretOffset
+        : Number.isFinite(viewportOffset)
+          ? viewportOffset
+          : 0,
+      follow: Number.isFinite(caretOffset),
+      selectLine: false
+    }
+    setSplitId(null)
+    setSourceMountedIds((prev) => prev.has(id) ? prev : new Set(prev).add(id))
+    setSourceModeIds((prev) => {
+      if (!prev.has(id)) return prev
+      const next = new Set(prev)
+      next.delete(id)
+      return next
+    })
+    setSourcePreviewId(id)
+    setSourcePreviewPinned(false)
+    setSourceSplitEnabled(true)
+    setFocusedPane(sourceOnLeftRef.current ? 'left' : 'right')
+  }, [closeSourceSplit, guardKeepDraft])
+
+  const syncSourceSplitViewport = useCallback((side, id, rawOffset) => {
+    if (
+      !sourceSplitRef.current ||
+      !sourceScrollSyncRef.current ||
+      sourcePreviewIdRef.current !== activeIdRef.current ||
+      id !== activeIdRef.current ||
+      !Number.isFinite(rawOffset)
+    ) return
+    const now = performance.now()
+    const lock = sourceSplitScrollLockRef.current
+    if (lock.side === side && now < lock.until) return
+    if (side === 'source') {
+      sourceSplitScrollLockRef.current = { side: 'preview', until: now + 220 }
+      editorApis.current[id]?.restoreMarkdownOffset?.(rawOffset, false)
+    } else {
+      sourceSplitScrollLockRef.current = { side: 'source', until: now + 220 }
+      sourceRef.current?.__hmSourceApi?.scrollToOffset?.(rawOffset, { align: 'top' })
+    }
+  }, [])
+
+  const locateSourceFromPreview = useCallback((id, lineIdx) => {
+    if (!sourceSplitRef.current || !Number.isFinite(lineIdx)) return
+    const activate = id !== activeIdRef.current
+    if (activate) {
+      setActiveId(id)
+      setSourcePreviewId(id)
+    }
+    const apply = () => {
+      const tab = tabsRef.current.find((item) => item.id === id)
+      if (!tab) return
+      sourceRef.current?.__hmSourceApi?.scrollToOffset?.(
+        lineStartOffset(tab.content, Math.max(0, lineIdx)),
+        { align: 'center', selectLine: true, focus: true, userNavigation: true }
+      )
+    }
+    requestAnimationFrame(apply)
+    setTimeout(apply, activate ? 120 : 0)
+  }, [])
+
   // From keep mode's "open source here": enable source mode for this tab and
   // remember the 0-based source line to select once the textarea is visible.
   const openSourceAtLine = useCallback((lineIdx) => {
@@ -1277,6 +1910,7 @@ export default function App() {
   }, [guardKeepDraft])
 
   const applyEditorMode = useCallback((id, toMilkdown) => {
+    promotePreviewTab(id)
     if (toMilkdown) keepToMilkdownInitRef.current.add(id)
     else keepToMilkdownInitRef.current.delete(id)
     setMilkdownForced((prev) => {
@@ -1285,7 +1919,22 @@ export default function App() {
       else next.delete(id)
       return next
     })
-  }, [])
+  }, [promotePreviewTab])
+
+  const requestEditorMode = useCallback((toMilkdown) => {
+    const id = activeIdRef.current
+    const tab = tabsRef.current.find((t) => t.id === id)
+    if (!tab || isPlainTextDoc(tab)) return false
+    if (!guardKeepDraft(id)) return false
+    if (milkdownForcedRef.current.has(id) === toMilkdown) return true
+    if (tab.content !== tab.savedContent) {
+      setModeSwitchSaving(false)
+      setModeSwitchState({ id, direction: toMilkdown ? 'toMilkdown' : 'toKeep' })
+      return true
+    }
+    applyEditorMode(id, toMilkdown)
+    return true
+  }, [applyEditorMode, guardKeepDraft])
 
   // Switch the active Markdown tab between keep mode (source-backed, default) and
   // the Milkdown WYSIWYG editor. Dirty transitions go through the project-styled
@@ -1293,20 +1942,35 @@ export default function App() {
   // lands in the safe plain-source + "load rich" banner path first.
   const toggleEditorMode = useCallback(() => {
     const id = activeIdRef.current
-    const tab = tabsRef.current.find((t) => t.id === id)
-    if (!tab || isPlainTextDoc(tab) || sourceModeRef.current) return
-    if (!guardKeepDraft(id)) return
     const toMilkdown = !milkdownForcedRef.current.has(id)
-    if (tab.content !== tab.savedContent) {
-      setModeSwitchSaving(false)
-      setModeSwitchState({ id, direction: toMilkdown ? 'toMilkdown' : 'toKeep' })
+    if (sourceSplitRef.current && toMilkdown) closeSourceSplit()
+    requestEditorMode(toMilkdown)
+  }, [closeSourceSplit, requestEditorMode])
+
+  const selectViewMode = useCallback((mode) => {
+    const id = activeIdRef.current
+    const tab = tabsRef.current.find((item) => item.id === id)
+    if (!id || !tab || isPlainTextDoc(tab)) return
+    if (mode === 'richSource') {
+      if (sourceSplitRef.current) return
+      if (sourceModeRef.current) toggleSource()
+      if (milkdownForcedRef.current.has(id)) {
+        fireToast(tRef.current('sourceSplit.keepRequired'))
+        return
+      }
+      setTimeout(() => toggleSourceSplit(), sourceModeRef.current ? 80 : 0)
       return
     }
-    applyEditorMode(id, toMilkdown)
-  }, [applyEditorMode, guardKeepDraft])
+    if (sourceSplitRef.current) closeSourceSplit()
+    if (mode === 'source') {
+      if (!sourceModeRef.current) setTimeout(() => toggleSource(), sourceSplitRef.current ? 80 : 0)
+      return
+    }
+    if (sourceModeRef.current) toggleSource()
+  }, [closeSourceSplit, toggleSource, toggleSourceSplit])
 
   useLayoutEffect(() => {
-    if (!sourceMode) return
+    if (!sourceMode && !sourceSplit) return
     const pending = pendingSourceRestoreRef.current
     if (!pending || pending.id !== activeId) return
     let applied = false
@@ -1321,6 +1985,9 @@ export default function App() {
         selectLine: pending.selectLine,
         focus: pending.follow && !findOpenRef.current
       })
+      if (pending.context?.sourceSelection) {
+        api.restoreFullSelection?.(pending.context.sourceSelection, { focus: false })
+      }
       const interaction = api.getInteractionState?.() || { revision: 0 }
       sourceBaselinesRef.current[pending.id] = {
         value: api.getFullValue?.() ?? source.value,
@@ -1338,17 +2005,19 @@ export default function App() {
       clearTimeout(t1)
       clearTimeout(t2)
     }
-  }, [activeId, sourceMode])
+  }, [activeId, sourceMode, sourceSplit])
 
   // Restore the preview position after leaving source mode. The preview stays
   // mounted, but a short retry covers layout work after it becomes visible.
   useEffect(() => {
-    if (sourceMode) return
+    if (sourceMode || sourceSplit) return
     const pending = pendingPreviewRestoreRef.current
-    if (!pending || pending.id !== activeId) return
+    if (!pending || (pending.id !== activeId && pending.id !== splitId)) return
     const apply = () => {
       const api = editorApis.current[pending.id]
+      api?.restoreNavigationContext?.(pending.context)
       if (!api?.restoreMarkdownOffset?.(pending.rawOffset, pending.follow)) return
+      api.restoreNavigationContext?.(pending.context)
       pendingPreviewRestoreRef.current = null
     }
     const raf = requestAnimationFrame(apply)
@@ -1357,7 +2026,7 @@ export default function App() {
       cancelAnimationFrame(raf)
       clearTimeout(t1)
     }
-  }, [activeId, sourceMode])
+  }, [activeId, sourceMode, sourceSplit, splitId])
 
   // --------------------------- open files --------------------------
   // Read a session-restore PLACEHOLDER tab's file from disk and fill its content
@@ -1402,6 +2071,7 @@ export default function App() {
 
   const openPaths = useCallback(async (paths, silent = false, options = {}) => {
     if (!paths || !paths.length) return null
+    const wantsPreview = !silent && !!options.preview && paths.length === 1
     // An explicit open (anything but the silent session restore) means the user
     // wants *this* file in front — record it synchronously so the restore effect
     // won't activate the previous session's tab on top of it.
@@ -1425,6 +2095,7 @@ export default function App() {
         // yet — load it now so callers that read it next (PDF export, the editor)
         // see the real document, not an empty buffer.
         if (existing.loading) await fillTab(existing.id)
+        if (!wantsPreview && existing.preview) promotePreviewTab(existing.id)
         lastId = existing.id
         lastPath = path
         remember(path)
@@ -1435,6 +2106,7 @@ export default function App() {
         // Re-check after the await in case a concurrent open added this path.
         const concurrent = tabsRef.current.find((t) => (t.path || '').replace(/\\/g, '/') === norm)
         if (concurrent) {
+          if (!wantsPreview && concurrent.preview) promotePreviewTab(concurrent.id)
           lastId = concurrent.id
           lastPath = path
           remember(path)
@@ -1450,10 +2122,29 @@ export default function App() {
           savedContent: content,
           mtimeMs,
           reloadNonce: 0,
-          heavy: isHeavyDoc(content)
+          heavy: isHeavyDoc(content),
+          preview: wantsPreview
         }
-        tabsRef.current = [...tabsRef.current, newTab] // keep snapshot current for the next iteration
-        setTabs((prev) => [...prev, newTab])
+        if (wantsPreview) {
+          const currentPreview = tabsRef.current.find((tab) => tab.preview)
+          const previewProtected =
+            currentPreview &&
+            (
+              hasUnsavedTab(currentPreview) ||
+              currentPreview.id === splitIdRef.current ||
+              (
+                sourcePreviewPinnedRef.current &&
+                currentPreview.id === sourcePreviewIdRef.current
+              )
+            )
+          if (previewProtected) promotePreviewTab(currentPreview.id)
+          const result = openPreviewTabInList(tabsRef.current, newTab)
+          tabsRef.current = result.tabs
+          setTabs(result.tabs)
+        } else {
+          tabsRef.current = [...tabsRef.current, newTab] // keep snapshot current for the next iteration
+          setTabs(tabsRef.current)
+        }
         lastPath = path
         remember(path)
       } catch (e) {
@@ -1477,7 +2168,7 @@ export default function App() {
       if (!silent && options.followSidebar) focusSidebarForOpenedPath(lastPath)
     }
     return lastId
-  }, [fillTab, focusSidebarForOpenedPath])
+  }, [fillTab, focusSidebarForOpenedPath, hasUnsavedTab, promotePreviewTab])
 
   const newTab = useCallback(() => {
     const id = genId()
@@ -1495,6 +2186,7 @@ export default function App() {
 
   const updateContent = useCallback((id, md, isInitial) => {
     const preserveSavedBaseline = isInitial && keepToMilkdownInitRef.current.delete(id)
+    if (!isInitial) promotePreviewTab(id)
     setTabs((prev) =>
       prev.map((t) => {
         if (t.id !== id) return t
@@ -1513,7 +2205,7 @@ export default function App() {
       })
     )
     if (!isInitial) refreshFindAfterEditRef.current(id)
-  }, [])
+  }, [promotePreviewTab])
 
   // Per-tab stable handlers for the (memoized) editor panes. Inline lambdas in
   // the editor-area map would give every mounted editor fresh props each App
@@ -1523,9 +2215,54 @@ export default function App() {
   const getTabHandlers = (id) => {
     let h = tabHandlersRef.current.get(id)
     if (!h) {
+      const focusPane = (view) => {
+        focusedTabRef.current = id
+        if (sourceSplitRef.current) {
+          const sourceSide = sourceOnLeftRef.current ? 'left' : 'right'
+          setFocusedPane(view === 'source' ? sourceSide : sourceSide === 'left' ? 'right' : 'left')
+        } else if (splitRef.current) {
+          setFocusedPane(id === splitIdRef.current ? 'right' : 'left')
+        }
+      }
       h = {
         onChange: (md, isInitial) => updateContent(id, md, isInitial),
-        onSourceChange: (e) => updateContent(id, e.target.value, false),
+        onSourceChange: (e) => {
+          const markdown = e.target.value
+          if (
+            sourceSplitRef.current &&
+            sourcePreviewIdRef.current === id &&
+            keepDraftIdsRef.current.has(id)
+          ) {
+            fireToast(tRef.current('keep.finishDraft'))
+            return
+          }
+          updateContent(id, markdown, false)
+          if (sourceSplitRef.current && sourcePreviewIdRef.current === id) {
+            clearTimeout(sourceSplitContentTimerRef.current)
+            sourceSplitContentTimerRef.current = setTimeout(() => {
+              editorApis.current[id]?.syncMarkdown?.(markdown)
+            }, 140)
+          }
+        },
+        onSourceViewportChange: (rawOffset) => syncSourceSplitViewport('source', id, rawOffset),
+        onSourceSelectionChange: (rawOffset) => {
+          if (sourceSplitRef.current && sourcePreviewIdRef.current === id) {
+            editorApis.current[id]?.highlightMarkdownOffset?.(rawOffset)
+          }
+        },
+        onPreviewScroll: (e) => {
+          if (
+            e.target !== e.currentTarget ||
+            !sourceSplitRef.current ||
+            sourcePreviewIdRef.current !== id ||
+            sourceSplitPreviewRafRef.current
+          ) return
+          sourceSplitPreviewRafRef.current = requestAnimationFrame(() => {
+            sourceSplitPreviewRafRef.current = 0
+            const rawOffset = editorApis.current[id]?.navigationOffsetFromViewportTop?.()
+            syncSourceSplitViewport('preview', id, rawOffset)
+          })
+        },
         onReady: (api) => {
           editorApis.current[id] = api
         },
@@ -1546,19 +2283,23 @@ export default function App() {
           setKeepHistoryState((prev) => {
             const nextState = {
               canUndo: !!state?.canUndo,
-              canRedo: !!state?.canRedo
+              canRedo: !!state?.canRedo,
+              undoEntry: state?.undoEntry || null,
+              redoEntry: state?.redoEntry || null
             }
             const current = prev[id]
             if (
               current?.canUndo === nextState.canUndo &&
-              current?.canRedo === nextState.canRedo
+              current?.canRedo === nextState.canRedo &&
+              current?.undoEntry === nextState.undoEntry &&
+              current?.redoEntry === nextState.redoEntry
             ) return prev
             return { ...prev, [id]: nextState }
           }),
-        onPaneFocus: () => {
-          focusedTabRef.current = id
-          if (splitRef.current) setFocusedPane(id === splitIdRef.current ? 'right' : 'left')
-        }
+        onCommit: (entry) => keepCommitRef.current(id, entry),
+        onPaneFocus: () => focusPane('preview'),
+        onSourcePaneFocus: () => focusPane('source'),
+        onLocateSource: (line) => locateSourceFromPreview(id, line)
       }
       tabHandlersRef.current.set(id, h)
     }
@@ -1567,6 +2308,10 @@ export default function App() {
   // Drop cached handlers when their tab closes (keyed on the id list, so a
   // content edit never touches this).
   const tabIdsKey = tabs.map((x) => x.id).join('\n')
+  useEffect(() => {
+    const live = new Set(tabIdsKey.split('\n').filter(Boolean))
+    mruTabIdsRef.current = touchTabMru(mruTabIdsRef.current, activeId, live)
+  }, [activeId, tabIdsKey])
   useEffect(() => {
     const ids = new Set(tabIdsKey.split('\n').filter(Boolean))
     for (const k of [...tabHandlersRef.current.keys()]) {
@@ -1578,46 +2323,89 @@ export default function App() {
   const leftPaneStyle = useMemo(
     () => ({
       order: 1,
-      flex: split ? `0 0 calc(${(splitRatio * 100).toFixed(2)}% - 3px)` : undefined
+      flex: layoutSplit ? `0 0 calc(${(splitRatio * 100).toFixed(2)}% - 3px)` : undefined
     }),
-    [split, splitRatio]
+    [layoutSplit, splitRatio]
   )
   const rightPaneStyle = useMemo(() => ({ order: 3, flex: undefined }), [])
 
+  const rememberClosedTabs = useCallback((closingTabs, allTabs) => {
+    const closedAt = Date.now()
+    const entries = (closingTabs || [])
+      .filter((tab) => !tab.preview)
+      .map((tab, closeOffset) => {
+        const discardedChanges = hasUnsavedTab(tab)
+        const viewMode = sourceModeIdsRef.current.has(tab.id)
+          ? 'source'
+          : milkdownForcedRef.current.has(tab.id)
+            ? 'milkdown'
+            : 'keep'
+        return createClosedTabEntry(tab, allTabs.findIndex((item) => item.id === tab.id), {
+          closedAt: closedAt + closeOffset,
+          viewMode,
+          richForced: richForcedRef.current.has(tab.id),
+          discardedChanges
+        })
+      })
+      .filter(Boolean)
+    if (entries.length) {
+      replaceClosedTabs((history) => pushClosedTabEntries(history, entries))
+    }
+    if ((closingTabs || []).some(hasUnsavedTab)) {
+      fireToast(tRef.current('tab.closedDirtyPolicy'), { duration: 5000 })
+    }
+  }, [hasUnsavedTab, replaceClosedTabs])
+
   const closeTab = useCallback(
     (id) => {
-      setTabs((prev) => {
-        const tab = prev.find((x) => x.id === id)
-        if (hasUnsavedTab(tab)) {
-          if (!window.confirm(tRef.current('confirm.closeUnsaved', { name: tab.title }))) return prev
-        }
-        const idx = prev.findIndex((x) => x.id === id)
-        const next = prev.filter((x) => x.id !== id)
-        setActiveId((cur) => {
-          if (cur !== id) return cur
-          if (next.length === 0) return null
-          return next[Math.min(idx, next.length - 1)].id
-        })
-        return next
+      const prev = tabsRef.current
+      const tab = prev.find((item) => item.id === id)
+      if (!tab) return
+      if (
+        hasUnsavedTab(tab) &&
+        !window.confirm(tRef.current('confirm.closeUnsaved', { name: tab.title }))
+      ) return
+      const idx = prev.findIndex((item) => item.id === id)
+      const next = prev.filter((item) => item.id !== id)
+      rememberClosedTabs([tab], prev)
+      tabsRef.current = next
+      setTabs(next)
+      setActiveId((cur) => {
+        if (cur !== id) return cur
+        if (next.length === 0) return null
+        return next[Math.min(idx, next.length - 1)].id
       })
     },
-    [hasUnsavedTab]
+    [hasUnsavedTab, rememberClosedTabs]
   )
 
   // Show a tab in the right (split) pane. If it's currently the active tab, move
   // the left pane to a different tab so the two panes differ.
-  const openRight = useCallback((id) => {
+  const openRight = useCallback((id, preferredLeftId = null) => {
+    promotePreviewTab(id)
     setHome(false)
-    if (id === activeIdRef.current) {
+    setSourceSplitEnabled(false)
+    setSourcePreviewPinned(false)
+    setSourcePreviewId(null)
+    if (
+      preferredLeftId != null &&
+      preferredLeftId !== id &&
+      tabsRef.current.some((tab) => tab.id === preferredLeftId)
+    ) {
+      setActiveId(preferredLeftId)
+    } else if (id === activeIdRef.current) {
       const others = tabsRef.current.filter((t) => t.id !== id)
       if (!others.length) return // only one tab — nothing to split against
       setActiveId(others[others.length - 1].id)
     }
     setSplitId(id)
-  }, [])
+  }, [promotePreviewTab])
 
   // Toggle split: off → on picks the next tab as the right pane; on → off closes it.
   const toggleSplit = useCallback(() => {
+    setSourceSplitEnabled(false)
+    setSourcePreviewPinned(false)
+    setSourcePreviewId(null)
     setSplitId((cur) => {
       if (cur != null) return null
       const list = tabsRef.current
@@ -1687,8 +2475,52 @@ export default function App() {
   const renameTabFile = useCallback((id) => {
     const tab = tabsRef.current.find((t) => t.id === id)
     if (!tab?.path) return
+    promotePreviewTab(id)
     setRenameState({ id, value: baseName(tab.path) })
+  }, [promotePreviewTab])
+
+  const finishTabFileRename = useCallback((id, oldPath, newPath, name) => {
+    const norm = (value) => String(value || '').replace(/\\/g, '/').toLowerCase()
+    setTabs((prev) => prev.map((tab) =>
+      (id && tab.id === id) || norm(tab.path) === norm(oldPath)
+        ? { ...tab, path: newPath, title: name }
+        : tab
+    ))
+    setRecents((prev) => prev.map((recent) =>
+      recent.path === oldPath
+        ? { ...recent, path: newPath, name, dir: dirName(newPath) }
+        : recent
+    ))
+    setRefreshNonce((nonce) => nonce + 1)
   }, [])
+
+  const prepareMarkdownFileRename = useCallback(async ({
+    id = null,
+    oldPath,
+    newPath,
+    name = baseName(newPath)
+  }) => {
+    const plan = await window.api.planFileRename?.({
+      roots: workspacesRef.current.map((workspace) => workspace.rootPath),
+      oldPath,
+      newPath,
+      showHidden: settings.showHiddenFiles
+    })
+    if (plan?.error) throw new Error(plan.error)
+    if (plan?.totalChanges > 0) {
+      setLinkUpdateState({
+        kind: 'file',
+        plan,
+        busy: false,
+        dirtyPaths: dirtyPlanPaths(plan),
+        rename: { id, oldPath, newPath, name }
+      })
+      return false
+    }
+    await window.api.rename(oldPath, newPath)
+    finishTabFileRename(id, oldPath, newPath, name)
+    return true
+  }, [dirtyPlanPaths, finishTabFileRename, settings.showHiddenFiles])
 
   // Commit a tab-file rename from the dialog.
   const commitTabRename = useCallback(async (id, rawName) => {
@@ -1703,9 +2535,7 @@ export default function App() {
     }
     const newPath = joinPath(dirName(tab.path), name)
     try {
-      await window.api.rename(tab.path, newPath)
-      setTabs((prev) => prev.map((t) => (t.id === id ? { ...t, path: newPath, title: name } : t)))
-      setRefreshNonce((n) => n + 1)
+      await prepareMarkdownFileRename({ id, oldPath: tab.path, newPath, name })
     } catch (e) {
       window.alert(
         /eexist|already exists/i.test(e.message)
@@ -1713,7 +2543,62 @@ export default function App() {
           : tRef.current('err.rename') + e.message
       )
     }
-  }, [])
+  }, [prepareMarkdownFileRename])
+
+  const applyLinkUpdate = useCallback(async (updateLinks = true) => {
+    const state = linkUpdateState
+    if (!state || state.busy) return
+    if (updateLinks && state.dirtyPaths?.length) {
+      fireToast(tRef.current('links.saveAffectedFiles'), { sticky: true })
+      return
+    }
+    setLinkUpdateState((prev) => prev ? { ...prev, busy: true } : prev)
+    try {
+      if (state.kind === 'file') {
+        const result = await window.api.renameFileWithLinks?.({
+          ...state.rename,
+          updateLinks,
+          plan: updateLinks ? state.plan : { files: [] }
+        })
+        syncAppliedMarkdownFiles(result?.files || [], [{
+          from: state.rename.oldPath,
+          to: state.rename.newPath
+        }])
+        finishTabFileRename(
+          state.rename.id,
+          state.rename.oldPath,
+          state.rename.newPath,
+          state.rename.name
+        )
+        fireToast(tRef.current(
+          updateLinks ? 'links.renameUpdated' : 'links.renameOnlyDone',
+          { n: updateLinks ? state.plan.totalChanges : 0 }
+        ))
+      } else {
+        const result = await window.api.applyMarkdownLinkPlan?.(state.plan)
+        syncAppliedMarkdownFiles(result?.files || [])
+        fireToast(tRef.current('links.headingUpdated', { n: state.plan.totalChanges }))
+      }
+      setLinkUpdateState(null)
+      if (state.kind === 'heading' && linkPanelRef.current.enabled) {
+        setTimeout(() => {
+          const tab = tabsRef.current.find((item) => item.id === activeIdRef.current)
+          diagnoseLinksForTab(tab)
+        }, 80)
+      }
+    } catch (error) {
+      setLinkUpdateState((prev) => prev ? { ...prev, busy: false } : prev)
+      fireToast(tRef.current('links.applyFailed', { msg: error?.message || error }), {
+        kind: 'error',
+        sticky: true
+      })
+    }
+  }, [
+    diagnoseLinksForTab,
+    finishTabFileRename,
+    linkUpdateState,
+    syncAppliedMarkdownFiles
+  ])
 
   const duplicateTabFile = useCallback(async (id) => {
     const tab = tabsRef.current.find((t) => t.id === id)
@@ -1752,49 +2637,67 @@ export default function App() {
   // Close every tab except `keepId` (from the tab right-click menu). Pinned
   // tabs survive — pinning is exactly the "don't bulk-close this" contract.
   const closeOthers = useCallback((keepId) => {
-    setTabs((prev) => {
-      const others = prev.filter((t) => t.id !== keepId && !t.pinned)
-      if (!others.length) return prev
-      const firstDirty = others.find(hasUnsavedTab)
-      if (firstDirty && !window.confirm(tRef.current('confirm.closeUnsaved', { name: firstDirty.title }))) {
-        return prev
-      }
-      const next = prev.filter((t) => t.id === keepId || t.pinned)
-      setActiveId(keepId)
-      setSplitId((cur) => (cur != null && next.some((t) => t.id === cur) ? cur : null))
-      return next
-    })
-  }, [hasUnsavedTab])
+    const prev = tabsRef.current
+    const others = prev.filter((tab) => tab.id !== keepId && !tab.pinned)
+    if (!others.length) return
+    const firstDirty = others.find(hasUnsavedTab)
+    if (
+      firstDirty &&
+      !window.confirm(tRef.current('confirm.closeUnsaved', { name: firstDirty.title }))
+    ) return
+    const next = prev.filter((tab) => tab.id === keepId || tab.pinned)
+    rememberClosedTabs(others, prev)
+    tabsRef.current = next
+    setTabs(next)
+    setActiveId(keepId)
+    setSplitId((cur) => (cur != null && next.some((tab) => tab.id === cur) ? cur : null))
+  }, [hasUnsavedTab, rememberClosedTabs])
 
   // Close every tab on one side of `pivotId` (from the tab right-click menu).
   // `side` is 'left' (lower indexes) or 'right' (higher indexes).
   const closeSide = useCallback((pivotId, side) => {
-    setTabs((prev) => {
-      const idx = prev.findIndex((t) => t.id === pivotId)
-      if (idx === -1) return prev
-      const range = side === 'left' ? prev.slice(0, idx) : prev.slice(idx + 1)
-      const toClose = range.filter((t) => !t.pinned) // pinned tabs survive bulk closes
-      if (!toClose.length) return prev
-      const firstDirty = toClose.find(hasUnsavedTab)
-      if (firstDirty && !window.confirm(tRef.current('confirm.closeUnsaved', { name: firstDirty.title }))) {
-        return prev
-      }
-      const closing = new Set(toClose.map((t) => t.id))
-      const next = prev.filter((t) => !closing.has(t.id))
-      const survives = (id) => id != null && next.some((t) => t.id === id)
-      setActiveId((cur) => (survives(cur) ? cur : pivotId))
-      setSplitId((cur) => (survives(cur) ? cur : null))
-      return next
-    })
-  }, [hasUnsavedTab])
+    const prev = tabsRef.current
+    const idx = prev.findIndex((tab) => tab.id === pivotId)
+    if (idx === -1) return
+    const range = side === 'left' ? prev.slice(0, idx) : prev.slice(idx + 1)
+    const toClose = range.filter((tab) => !tab.pinned) // pinned tabs survive bulk closes
+    if (!toClose.length) return
+    const firstDirty = toClose.find(hasUnsavedTab)
+    if (
+      firstDirty &&
+      !window.confirm(tRef.current('confirm.closeUnsaved', { name: firstDirty.title }))
+    ) return
+    const closing = new Set(toClose.map((tab) => tab.id))
+    const next = prev.filter((tab) => !closing.has(tab.id))
+    const survives = (id) => id != null && next.some((tab) => tab.id === id)
+    rememberClosedTabs(toClose, prev)
+    tabsRef.current = next
+    setTabs(next)
+    setActiveId((cur) => (survives(cur) ? cur : pivotId))
+    setSplitId((cur) => (survives(cur) ? cur : null))
+  }, [hasUnsavedTab, rememberClosedTabs])
 
   // Tab-strip drag & drop reorder + pin toggle. Both keep the pinned group at
   // the front (pure helpers in paths.js); tabsRef is synced by the render pass.
   const reorderTabs = useCallback((fromId, toId) => {
-    setTabs((prev) => reorderTabsList(prev, fromId, toId))
+    const promoted = promotePreviewTabInList(tabsRef.current, fromId)
+    const next = reorderTabsList(promoted, fromId, toId)
+    tabsRef.current = next
+    setTabs(next)
   }, [])
   const toggleTabPin = useCallback((id) => {
-    setTabs((prev) => toggleTabPinnedInList(prev, id))
+    const next = toggleTabPinnedInList(tabsRef.current, id)
+    tabsRef.current = next
+    setTabs(next)
+  }, [])
+
+  const activatePrimaryTab = useCallback((id) => {
+    if (!tabsRef.current.some((tab) => tab.id === id)) return false
+    setHome(false)
+    if (id !== activeIdRef.current) rememberNavigationRef.current()
+    if (sourceSplitRef.current && !sourcePreviewPinnedRef.current) setSourcePreviewId(id)
+    setActiveId(id)
+    return true
   }, [])
 
   // Stable handlers for the memoized tab strip: split/pane routing is decided
@@ -1805,10 +2708,140 @@ export default function App() {
     if (splitRef.current && focusedPaneRef.current === 'right' && id !== activeIdRef.current) {
       setSplitId(id)
     } else {
-      if (id !== activeIdRef.current) rememberNavigationRef.current()
-      setActiveId(id)
+      activatePrimaryTab(id)
     }
+  }, [activatePrimaryTab])
+
+  const updateTabSwitcher = useCallback((next) => {
+    tabSwitcherRef.current = next
+    setTabSwitcher(next)
   }, [])
+
+  const selectTabSwitcherId = useCallback((id) => {
+    const current = tabSwitcherRef.current
+    if (!current) return
+    const index = current.ids.indexOf(id)
+    if (index < 0 || index === current.index) return
+    updateTabSwitcher({ ...current, index })
+  }, [updateTabSwitcher])
+
+  const cancelTabSwitcher = useCallback(() => {
+    updateTabSwitcher(null)
+  }, [updateTabSwitcher])
+
+  const commitTabSwitcher = useCallback((selectedId = null) => {
+    const current = tabSwitcherRef.current
+    if (!current) return
+    const id = selectedId || current.ids[current.index]
+    updateTabSwitcher(null)
+    if (id) activatePrimaryTab(id)
+  }, [activatePrimaryTab, updateTabSwitcher])
+
+  const openOrStepTabSwitcher = useCallback((delta, releaseKey) => {
+    const current = tabSwitcherRef.current
+    if (current) {
+      updateTabSwitcher({
+        ...current,
+        index: stepWrappedIndex(current.index, delta, current.ids.length)
+      })
+      return
+    }
+    const ids = buildMruTabOrder(
+      tabsRef.current,
+      mruTabIdsRef.current,
+      activeIdRef.current
+    )
+    if (ids.length < 2) return
+    updateTabSwitcher({
+      ids,
+      index: delta > 0 ? 1 : ids.length - 1,
+      initialId: activeIdRef.current,
+      releaseKey
+    })
+  }, [updateTabSwitcher])
+
+  const stepSequentialTab = useCallback((delta) => {
+    const list = tabsRef.current
+    if (list.length < 2) return false
+    const currentIndex = list.findIndex((tab) => tab.id === activeIdRef.current)
+    const index = stepWrappedIndex(currentIndex < 0 ? 0 : currentIndex, delta, list.length)
+    return activatePrimaryTab(list[index].id)
+  }, [activatePrimaryTab])
+
+  const restoreClosedTab = useCallback(async () => {
+    const entry = closedTabsRef.current.at(-1)
+    if (!entry) {
+      fireToast(tRef.current('tab.noClosed'))
+      return false
+    }
+    const existing = tabsRef.current.find(
+      (tab) => (tab.path || '').replace(/\\/g, '/') === entry.path.replace(/\\/g, '/')
+    )
+    if (existing) {
+      replaceClosedTabs((history) => removeClosedTabEntry(history, entry.closedId))
+      activatePrimaryTab(existing.id)
+      fireToast(tRef.current('tab.restoreAlreadyOpen', { name: entry.title }))
+      return true
+    }
+
+    let file
+    try {
+      file = await window.api.readFile(entry.path)
+    } catch (error) {
+      const missing = /ENOENT|not found|no such file/i.test(error?.message || '')
+      if (missing) {
+        replaceClosedTabs((history) => removeClosedTabEntry(history, entry.closedId))
+        fireToast(tRef.current('tab.restoreMissing', { name: entry.title }), {
+          kind: 'error',
+          sticky: true
+        })
+      } else {
+        fireToast(tRef.current('tab.restoreFailed', {
+          name: entry.title,
+          msg: error?.message || 'Unknown error'
+        }), {
+          kind: 'error',
+          sticky: true
+        })
+      }
+      return false
+    }
+
+    const id = genId()
+    const restored = {
+      id,
+      path: entry.path,
+      title: baseName(entry.path),
+      content: file.content,
+      savedContent: file.content,
+      mtimeMs: file.mtimeMs,
+      reloadNonce: 0,
+      heavy: isHeavyDoc(file.content),
+      pinned: !!entry.pinned
+    }
+    const nextTabs = insertRestoredTab(tabsRef.current, restored, entry.index)
+    tabsRef.current = nextTabs
+    setTabs(nextTabs)
+    replaceClosedTabs((history) => removeClosedTabEntry(history, entry.closedId))
+    if (entry.viewMode === 'source') {
+      setSourceModeIds((prev) => new Set(prev).add(id))
+    } else if (entry.viewMode === 'milkdown') {
+      setMilkdownForced((prev) => new Set(prev).add(id))
+      if (entry.richForced) setRichForced((prev) => new Set(prev).add(id))
+    }
+    setRecents((prev) =>
+      rememberRecent(prev, {
+        path: entry.path,
+        name: baseName(entry.path),
+        dir: dirName(entry.path),
+        openedAt: Date.now()
+      })
+    )
+    activatePrimaryTab(id)
+    fireToast(tRef.current('tab.restored', { name: entry.title }))
+    return true
+  }, [activatePrimaryTab, replaceClosedTabs])
+
   const onCloseLeftTabs = useCallback((id) => closeSide(id, 'left'), [closeSide])
   const onCloseRightTabs = useCallback((id) => closeSide(id, 'right'), [closeSide])
 
@@ -1821,6 +2854,23 @@ export default function App() {
         ? await window.api.inlineForSave(tab.content, targetPath)
         : { content: tab.content, changed: false }
       const { mtimeMs } = await window.api.writeFile(targetPath, written)
+      if (
+        settings.localHistory &&
+        window.api.localHistoryAdd &&
+        tab.path &&
+        tab.path.replace(/\\/g, '/') === targetPath.replace(/\\/g, '/') &&
+        tab.savedContent !== written
+      ) {
+        try {
+          await window.api.localHistoryAdd({
+            path: targetPath,
+            content: tab.savedContent,
+            reason: notify ? 'manual' : 'autosave'
+          })
+        } catch {
+          /* saving succeeded; local history is best-effort and must not fail it */
+        }
+      }
       setTabs((prev) =>
         prev.map((t) =>
           t.id === tab.id
@@ -1863,7 +2913,7 @@ export default function App() {
       fireToast(tRef.current('save.failed', { msg: e?.message || String(e) }), { sticky: true, kind: 'error' })
       return false
     }
-  }, [isMobile])
+  }, [isMobile, settings.localHistory])
 
   const saveTab = useCallback(
     async (id, forceDialog = false, opts) => {
@@ -1989,6 +3039,20 @@ export default function App() {
     setModeSwitchSaving(false)
   }, [applyEditorMode, modeSwitchSaving, modeSwitchState, saveTab])
 
+  const reviewModeSwitchChanges = useCallback(() => {
+    if (!modeSwitchState || modeSwitchSaving) return
+    const tab = tabsRef.current.find((item) => item.id === modeSwitchState.id)
+    if (!tab) return
+    setChangeReview({
+      tabId: tab.id,
+      baseline: tab.savedContent,
+      context: 'modeSwitch',
+      allowRestore: modeSwitchState.direction === 'toMilkdown',
+      titleKey: 'review.modeTitle',
+      descriptionKey: 'review.modeDescription'
+    })
+  }, [modeSwitchSaving, modeSwitchState])
+
   // Export a file (by path) to PDF: open/focus it, wait for its editor to mount,
   // then reuse the same HTML→PDF pipeline as the menu command. Driven from the
   // sidebar's right-click menu, where the file may not be open yet.
@@ -2058,13 +3122,29 @@ export default function App() {
 
   // Stable handler for the memoized Sidebar (an inline arrow would defeat memo).
   const onSidebarOpenFile = useCallback(
-    (p) => {
+    (p, options = {}) => {
       rememberNavigationRef.current()
-      openPaths([p])
+      openPaths([p], false, options)
       if (isMobile) setSidebarOpen(false)
     },
     [openPaths, isMobile]
   )
+  const onSidebarRenamePath = useCallback(async (oldPath, newPath) => {
+    try {
+      return await prepareMarkdownFileRename({
+        oldPath,
+        newPath,
+        name: baseName(newPath)
+      })
+    } catch (error) {
+      window.alert(
+        /eexist|already exists/i.test(error?.message || '')
+          ? tRef.current('err.nameExists')
+          : tRef.current('err.rename') + (error?.message || error)
+      )
+      return false
+    }
+  }, [prepareMarkdownFileRename])
 
   // A stable key for the set of roots, so the watch/list effects only re-run when
   // the roots actually change (not on every array-identity churn).
@@ -2089,6 +3169,15 @@ export default function App() {
       })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rootsKey])
+
+  const loadPaletteWorkspaceHeadings = useCallback(
+    () =>
+      window.api.listWorkspaceHeadings?.(
+        workspacesRef.current.map((workspace) => workspace.rootPath),
+        { showHidden: settings.showHiddenFiles }
+      ) || Promise.resolve({ items: [], filesScanned: 0, truncated: false }),
+    [settings.showHiddenFiles]
+  )
 
   // Rebuild every time the palette opens. This is the "manual freshness" escape
   // hatch for lazy folder watching: changes under collapsed, never-expanded dirs
@@ -2197,6 +3286,24 @@ export default function App() {
     },
     [reloadTabFromDisk]
   )
+
+  const reviewConflictChanges = useCallback(async (id) => {
+    const tab = tabsRef.current.find((item) => item.id === id)
+    if (!tab?.path) return
+    try {
+      const disk = await window.api.readFile(tab.path)
+      setChangeReview({
+        tabId: id,
+        baseline: disk.content,
+        context: 'conflict',
+        allowRestore: false,
+        titleKey: 'review.conflictTitle',
+        descriptionKey: 'review.conflictDescription'
+      })
+    } catch {
+      fireToast(tRef.current('review.readFailed'), { kind: 'error' })
+    }
+  }, [])
 
   // --------------------------- outline jump ------------------------
   const [activeHeading, setActiveHeading] = useState(-1)
@@ -2487,7 +3594,7 @@ export default function App() {
   // long as it's one of the two visible panes; otherwise the active (left) tab.
   const pickEditableId = () => {
     const f = focusedTabRef.current
-    if (f && (f === activeId || f === splitId)) return f
+    if (f && (f === activeId || f === splitId || (sourceSplit && f === sourcePreviewId))) return f
     return activeId
   }
 
@@ -2496,7 +3603,8 @@ export default function App() {
     const id = targetId || (
       focused && (
         focused === activeIdRef.current ||
-        (splitRef.current && focused === splitIdRef.current)
+        (splitRef.current && focused === splitIdRef.current) ||
+        (sourceSplitRef.current && focused === sourcePreviewIdRef.current)
       )
         ? focused
         : activeIdRef.current
@@ -2514,6 +3622,170 @@ export default function App() {
     return changed
   }, [guardKeepDraft])
 
+  keepCommitRef.current = (id, entry) => {
+    const meta = entry?.meta
+    fireToast(tRef.current(meta?.summaryKey || 'keep.changeEdit', meta?.summaryVars || undefined), {
+      actionLabel: tRef.current('keep.undoAction'),
+      onAction: () => runKeepHistory('undo', id),
+      duration: 5000
+    })
+  }
+
+  const openKeepReview = useCallback((targetId = null) => {
+    const id = targetId || activeIdRef.current
+    const tab = tabsRef.current.find((item) => item.id === id)
+    if (!tab || tab.content === tab.savedContent) return
+    if (!guardKeepDraft(id)) return
+    const isKeepPreview =
+      !isPlainTextDoc(tab) &&
+      !milkdownForcedRef.current.has(id) &&
+      !(id === activeIdRef.current && sourceModeRef.current)
+    setChangeReview({
+      tabId: id,
+      baseline: tab.savedContent,
+      context: 'current',
+      allowRestore: isKeepPreview,
+      titleKey: 'review.title',
+      descriptionKey: isKeepPreview ? 'review.description' : 'review.readOnlyDescription'
+    })
+  }, [guardKeepDraft])
+
+  const canRestoreLocalHistory = useCallback((id) => {
+    const tab = tabsRef.current.find((item) => item.id === id)
+    return !!(
+      tab &&
+      !isPlainTextDoc(tab) &&
+      !milkdownForcedRef.current.has(id) &&
+      !(id === activeIdRef.current && sourceModeRef.current && !sourceSplitRef.current) &&
+      editorApis.current[id]?.replaceLineRange
+    )
+  }, [])
+
+  const openLocalHistory = useCallback(async (targetId = null) => {
+    const id = targetId || activeIdRef.current
+    const tab = tabsRef.current.find((item) => item.id === id)
+    if (!settings.localHistory) {
+      fireToast(tRef.current('history.disabled'), { sticky: true })
+      return
+    }
+    if (!tab?.path) {
+      fireToast(tRef.current('history.needsSave'), { sticky: true })
+      return
+    }
+    try {
+      const entries = await window.api.localHistoryList?.(tab.path)
+      setLocalHistoryState({ tabId: id, entries: entries || [] })
+    } catch (error) {
+      fireToast(tRef.current('history.loadFailed', { msg: error?.message || String(error) }), {
+        kind: 'error',
+        sticky: true
+      })
+    }
+  }, [settings.localHistory])
+
+  const compareLocalHistory = useCallback(async (entry) => {
+    const state = localHistoryState
+    const tab = state && tabsRef.current.find((item) => item.id === state.tabId)
+    if (!tab?.path) return
+    const snapshot = await window.api.localHistoryRead?.(tab.path, entry.id)
+    if (!snapshot) return
+    setLocalHistoryState(null)
+    setChangeReview({
+      tabId: tab.id,
+      baseline: snapshot.content,
+      context: 'history',
+      allowRestore: canRestoreLocalHistory(tab.id),
+      titleKey: 'history.reviewTitle',
+      descriptionKey: 'history.reviewDescription'
+    })
+  }, [canRestoreLocalHistory, localHistoryState])
+
+  const restoreLocalHistory = useCallback(async (entry) => {
+    const state = localHistoryState
+    const tab = state && tabsRef.current.find((item) => item.id === state.tabId)
+    if (!tab?.path || !guardKeepDraft(tab.id)) return
+    const api = editorApis.current[tab.id]
+    if (!canRestoreLocalHistory(tab.id) || !api?.replaceLineRange) {
+      fireToast(tRef.current('history.restoreKeepOnly'), { sticky: true })
+      return
+    }
+    const snapshot = await window.api.localHistoryRead?.(tab.path, entry.id)
+    if (!snapshot) return
+    const changed = api.replaceLineRange(
+      0,
+      tab.content.split('\n').length,
+      snapshot.content.split('\n')
+    )
+    if (changed !== false) {
+      setLocalHistoryState(null)
+      fireToast(tRef.current('history.restored'), { kind: 'success' })
+    }
+  }, [canRestoreLocalHistory, guardKeepDraft, localHistoryState])
+
+  const deleteLocalHistoryEntry = useCallback(async (entry) => {
+    const state = localHistoryState
+    const tab = state && tabsRef.current.find((item) => item.id === state.tabId)
+    if (!tab?.path) return
+    const result = await window.api.localHistoryDelete?.(tab.path, entry.id)
+    if (result?.ok) {
+      setLocalHistoryState((current) =>
+        current?.tabId === tab.id ? { ...current, entries: result.entries || [] } : current
+      )
+    }
+  }, [localHistoryState])
+
+  const clearDocumentLocalHistory = useCallback(async () => {
+    const state = localHistoryState
+    const tab = state && tabsRef.current.find((item) => item.id === state.tabId)
+    if (!tab?.path) return
+    const result = await window.api.localHistoryDelete?.(tab.path)
+    if (result?.ok) {
+      setLocalHistoryState((current) => current ? { ...current, entries: [] } : current)
+    }
+  }, [localHistoryState])
+
+  const clearAllLocalHistory = useCallback(async () => {
+    const result = await window.api.localHistoryClear?.()
+    if (result?.ok) setLocalHistoryState(null)
+    return result
+  }, [])
+
+  const runKeepTableCommand = (command) => {
+    const id = pickEditableId()
+    const tab = tabsRef.current.find((item) => item.id === id)
+    if (
+      !tab ||
+      isPlainTextDoc(tab) ||
+      milkdownForcedRef.current.has(id) ||
+      (id === activeIdRef.current && sourceModeRef.current)
+    ) {
+      fireToast(tRef.current('keep.selectTableCell'))
+      return false
+    }
+    if (!guardKeepDraft(id)) return false
+    const handled = editorApis.current[id]?.tableCommand?.(command) === true
+    if (!handled) fireToast(tRef.current('keep.selectTableCell'))
+    return handled
+  }
+
+  const runKeepBlockCommand = (command) => {
+    const id = pickEditableId()
+    const tab = tabsRef.current.find((item) => item.id === id)
+    if (
+      !tab ||
+      isPlainTextDoc(tab) ||
+      milkdownForcedRef.current.has(id) ||
+      (id === activeIdRef.current && sourceModeRef.current)
+    ) {
+      fireToast(tRef.current('keep.selectBlock'))
+      return false
+    }
+    if (!guardKeepDraft(id)) return false
+    const handled = editorApis.current[id]?.blockCommand?.(command) === true
+    if (!handled) fireToast(tRef.current('keep.selectBlock'))
+    return handled
+  }
+
   useEffect(() => {
     const onKeyDown = (e) => {
       if (e.altKey || !(e.ctrlKey || e.metaKey)) return
@@ -2530,6 +3802,57 @@ export default function App() {
     window.addEventListener('keydown', onKeyDown, true)
     return () => window.removeEventListener('keydown', onKeyDown, true)
   }, [runKeepHistory])
+
+  useEffect(() => {
+    let chordUntil = 0
+    const onKeyDown = (event) => {
+      const key = event.key.toLowerCase()
+      const modifier = event.ctrlKey || event.metaKey
+      if (modifier && !event.altKey && !event.shiftKey && key === 'k') {
+        chordUntil = Date.now() + 1600
+        event.preventDefault()
+        return
+      }
+      if (!event.altKey && !event.shiftKey && key === 'z' && Date.now() <= chordUntil) {
+        chordUntil = 0
+        event.preventDefault()
+        event.stopPropagation()
+        setZenReveal(false)
+        setZenMode((enabled) => !enabled)
+        return
+      }
+      if (!['control', 'meta', 'shift', 'alt'].includes(key)) chordUntil = 0
+    }
+    window.addEventListener('keydown', onKeyDown, true)
+    return () => window.removeEventListener('keydown', onKeyDown, true)
+  }, [])
+
+  useEffect(() => {
+    clearTimeout(zenHideTimerRef.current)
+    if (!zenMode) return
+    const onMouseMove = (event) => {
+      const revealedLeft = sidebarOpen ? sidebarWidth + 52 : 52
+      const nearChrome =
+        event.clientY <= (zenReveal ? 54 : 7) ||
+        event.clientX <= (zenReveal ? revealedLeft : 7) ||
+        event.clientY >= window.innerHeight - (zenReveal ? 34 : 7)
+      if (nearChrome) {
+        clearTimeout(zenHideTimerRef.current)
+        if (!zenReveal) setZenReveal(true)
+      } else if (zenReveal && !zenHideTimerRef.current) {
+        zenHideTimerRef.current = setTimeout(() => {
+          zenHideTimerRef.current = 0
+          setZenReveal(false)
+        }, 850)
+      }
+    }
+    window.addEventListener('mousemove', onMouseMove, { passive: true })
+    return () => {
+      window.removeEventListener('mousemove', onMouseMove)
+      clearTimeout(zenHideTimerRef.current)
+      zenHideTimerRef.current = 0
+    }
+  }, [zenMode, zenReveal, sidebarOpen, sidebarWidth])
 
   const handlers = useRef({})
   handlers.current = {
@@ -2634,11 +3957,22 @@ export default function App() {
       })
     },
     closeTab: () => activeId && closeTab(activeId),
+    reopenClosedTab: restoreClosedTab,
+    previousTab: () => stepSequentialTab(-1),
+    nextTab: () => stepSequentialTab(1),
     undoKeep: () => runKeepHistory('undo'),
     redoKeep: () => runKeepHistory('redo'),
+    reviewKeep: () => openKeepReview(),
+    localHistory: () => openLocalHistory(),
+    tableCommand: (command) => runKeepTableCommand(command),
+    blockCommand: (command) => runKeepBlockCommand(command),
     navigateBack: () => navigateHistory('back'),
     navigateForward: () => navigateHistory('forward'),
     palette: () => setPaletteOpen((v) => !v),
+    toggleZen: () => {
+      setZenReveal(false)
+      setZenMode((enabled) => !enabled)
+    },
     toggleSidebar: () => setSidebarOpen((v) => !v),
     toggleOutline: () => {
       setSidebarMode('outline')
@@ -2653,6 +3987,9 @@ export default function App() {
       setSidebarOpen(true)
       setSearchFocusNonce((n) => n + 1)
     },
+    linkProblems: () => openProblemsPanel(),
+    findReferences: () => findCurrentReferencesRef.current(),
+    renameHeading: () => beginHeadingRenameRef.current(),
     toggleSource,
     toggleEditorMode,
     toggleTheme: cycleTheme,
@@ -2682,6 +4019,10 @@ export default function App() {
     () => runKeepHistory('redo', activeIdRef.current),
     [runKeepHistory]
   )
+  const onStatusReviewKeep = useCallback(
+    () => openKeepReview(activeIdRef.current),
+    [openKeepReview]
+  )
   const onStatusShare = useCallback(() => {
     const tab = tabsRef.current.find((x) => x.id === activeIdRef.current)
     if (!tab) return
@@ -2706,6 +4047,14 @@ export default function App() {
     [updateSettings]
   )
   const onPaletteClose = useCallback(() => setPaletteOpen(false), [])
+  const onKeepFindReferences = useCallback(
+    (context) => findCurrentReferencesRef.current(context),
+    []
+  )
+  const onKeepRenameHeading = useCallback(
+    (context) => beginHeadingRenameRef.current(context),
+    []
+  )
   const onPaletteOpenFile = useCallback(
     (p) => {
       rememberNavigationRef.current()
@@ -2794,24 +4143,91 @@ export default function App() {
     }
   }, [openPaths, addWorkspace])
 
-  // Ctrl+Tab cycling + restore session tabs on first mount
+  // Ctrl/Cmd+Tab opens an MRU switcher without changing the document under the
+  // user's hands until the modifier is released. Enter commits, Esc cancels;
+  // Ctrl/Cmd+PageUp/PageDown preserves deterministic strip-order navigation.
   useEffect(() => {
-    const onKey = (e) => {
-      if (e.ctrlKey && e.key === 'Tab') {
+    const onKeyDown = (e) => {
+      const modifier = e.ctrlKey || e.metaKey
+      if (
+        modifier &&
+        e.shiftKey &&
+        !e.altKey &&
+        (e.code === 'KeyT' || e.key.toLowerCase() === 't')
+      ) {
         e.preventDefault()
-        setTabs((prev) => {
-          if (prev.length < 2) return prev
-          const i = prev.findIndex((t) => t.id === activeId)
-          const ni = (i + (e.shiftKey ? -1 : 1) + prev.length) % prev.length
-          setActiveId(prev[ni].id)
-          setHome(false)
-          return prev
-        })
+        e.stopPropagation()
+        handlers.current.reopenClosedTab()
+        return
+      }
+      if (modifier && !e.altKey && e.key === 'Tab') {
+        e.preventDefault()
+        e.stopPropagation()
+        openOrStepTabSwitcher(
+          e.shiftKey ? -1 : 1,
+          e.metaKey ? 'Meta' : 'Control'
+        )
+        return
+      }
+      const current = tabSwitcherRef.current
+      if (current) {
+        if (e.key === 'Escape') {
+          e.preventDefault()
+          e.stopPropagation()
+          cancelTabSwitcher()
+          return
+        }
+        if (e.key === 'Enter') {
+          e.preventDefault()
+          e.stopPropagation()
+          commitTabSwitcher()
+          return
+        }
+        if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+          e.preventDefault()
+          e.stopPropagation()
+          updateTabSwitcher({
+            ...current,
+            index: stepWrappedIndex(
+              current.index,
+              e.key === 'ArrowDown' ? 1 : -1,
+              current.ids.length
+            )
+          })
+          return
+        }
+      }
+      if (
+        modifier &&
+        !e.altKey &&
+        !e.shiftKey &&
+        (e.key === 'PageUp' || e.key === 'PageDown')
+      ) {
+        e.preventDefault()
+        e.stopPropagation()
+        stepSequentialTab(e.key === 'PageDown' ? 1 : -1)
       }
     }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [activeId])
+    const onKeyUp = (e) => {
+      const current = tabSwitcherRef.current
+      if (current && e.key === current.releaseKey) commitTabSwitcher()
+    }
+    const onBlur = () => cancelTabSwitcher()
+    window.addEventListener('keydown', onKeyDown, true)
+    window.addEventListener('keyup', onKeyUp, true)
+    window.addEventListener('blur', onBlur)
+    return () => {
+      window.removeEventListener('keydown', onKeyDown, true)
+      window.removeEventListener('keyup', onKeyUp, true)
+      window.removeEventListener('blur', onBlur)
+    }
+  }, [
+    cancelTabSwitcher,
+    commitTabSwitcher,
+    openOrStepTabSwitcher,
+    stepSequentialTab,
+    updateTabSwitcher
+  ])
 
   // Ctrl/Cmd+B toggles the sidebar. Handled here in the CAPTURE phase so it
   // fires before the editor's "bold" keybinding (which would otherwise eat it
@@ -2891,6 +4307,7 @@ export default function App() {
       const priorityPath =
         session.activePath && paths.includes(session.activePath) ? session.activePath : paths[0]
       const pinnedSet = new Set(session.pinnedPaths || [])
+      const previewSet = new Set(session.previewPaths || [])
       const placeholders = paths.map((p) => ({
         id: genId(),
         path: p,
@@ -2901,6 +4318,7 @@ export default function App() {
         reloadNonce: 0,
         heavy: false,
         pinned: pinnedSet.has(p),
+        preview: previewSet.has(p) && !pinnedSet.has(p),
         loading: true // not yet read from disk; filled lazily on activation
       }))
       tabsRef.current = [...tabsRef.current, ...placeholders]
@@ -2947,6 +4365,7 @@ export default function App() {
       sidebarOpen,
       sidebarMode,
       sidebarWidth,
+      closedTabs,
       // openPaths (saved tabs, reopened from disk) + untitled (dirty, non-blank
       // scratch tabs, so the untouched welcome doc / empty new tabs don't keep
       // coming back). Pure + unit-tested — see buildSessionTabs in paths.js.
@@ -2966,7 +4385,20 @@ export default function App() {
     // for a brief pause, then write once. The close path flushes the last edit.
     const id = setTimeout(flushSession, 400)
     return () => clearTimeout(id)
-  }, [workspaces, theme, customTheme, lang, recents, sidebarOpen, sidebarMode, sidebarWidth, tabs, activePath, flushSession])
+  }, [
+    workspaces,
+    theme,
+    customTheme,
+    lang,
+    recents,
+    sidebarOpen,
+    sidebarMode,
+    sidebarWidth,
+    closedTabs,
+    tabs,
+    activePath,
+    flushSession
+  ])
 
   // Flush the pending session snapshot immediately when the window is closing,
   // so the debounce above never drops the user's last few keystrokes.
@@ -3011,8 +4443,10 @@ export default function App() {
       const sticky = typeof d === 'object' && !!d?.sticky
       const duration = typeof d === 'object' ? d?.duration : undefined
       const kind = typeof d === 'object' ? d?.kind : undefined
+      const actionLabel = typeof d === 'object' ? d?.actionLabel : undefined
+      const onAction = typeof d === 'object' ? d?.onAction : undefined
       if (!msg) return
-      setToast({ msg, key: Date.now() + Math.random(), sticky, kind })
+      setToast({ msg, key: Date.now() + Math.random(), sticky, kind, actionLabel, onAction })
       clearTimeout(timer)
       // duration wins; otherwise sticky stays until ✕, plain toasts hide quickly.
       const ms = duration || (sticky ? 0 : 1600)
@@ -3057,30 +4491,54 @@ export default function App() {
   const commands = useMemo(
     () => {
       const caps = window.api.capabilities || {}
+      const mod = window.api.platform === 'darwin' ? '⌘' : 'Ctrl+'
+      const shift = window.api.platform === 'darwin' ? '⇧' : 'Shift+'
       return [
-        { id: 'cmd.new', title: t('cmd.new'), icon: 'file-plus', run: () => handlers.current.new() },
-        { id: 'cmd.open', title: t('cmd.open'), icon: 'file', run: () => handlers.current.open() },
-        { id: 'cmd.openFolder', title: t('cmd.openFolder'), icon: 'folder', run: () => handlers.current.openFolder() },
-        { id: 'cmd.save', title: t('cmd.save'), icon: 'save', run: () => handlers.current.save() },
-        { id: 'cmd.saveAs', title: t('cmd.saveAs'), icon: 'save', run: () => handlers.current.saveAs() },
-        { id: 'cmd.undoKeep', title: t('cmd.undoKeep'), icon: 'undo', run: () => handlers.current.undoKeep() },
-        { id: 'cmd.redoKeep', title: t('cmd.redoKeep'), icon: 'undo', run: () => handlers.current.redoKeep() },
-        { id: 'cmd.navigateBack', title: t('nav.back'), icon: 'chevron-right', run: () => handlers.current.navigateBack() },
-        { id: 'cmd.navigateForward', title: t('nav.forward'), icon: 'chevron-right', run: () => handlers.current.navigateForward() },
+        { id: 'cmd.new', title: t('cmd.new'), icon: 'file-plus', shortcut: `${mod}N`, run: () => handlers.current.new() },
+        { id: 'cmd.open', title: t('cmd.open'), icon: 'file', shortcut: `${mod}O`, run: () => handlers.current.open() },
+        { id: 'cmd.openFolder', title: t('cmd.openFolder'), icon: 'folder', shortcut: `${mod}${shift}O`, run: () => handlers.current.openFolder() },
+        { id: 'cmd.save', title: t('cmd.save'), icon: 'save', shortcut: `${mod}S`, run: () => handlers.current.save() },
+        { id: 'cmd.saveAs', title: t('cmd.saveAs'), icon: 'save', shortcut: `${mod}${shift}S`, run: () => handlers.current.saveAs() },
+        { id: 'cmd.reopenClosedTab', title: t('cmd.reopenClosedTab'), icon: 'file', shortcut: `${mod}${shift}T`, run: () => handlers.current.reopenClosedTab() },
+        { id: 'cmd.previousTab', title: t('cmd.previousTab'), icon: 'chevron-right', shortcut: `${mod}PageUp`, run: () => handlers.current.previousTab() },
+        { id: 'cmd.nextTab', title: t('cmd.nextTab'), icon: 'chevron-right', shortcut: `${mod}PageDown`, run: () => handlers.current.nextTab() },
+        { id: 'cmd.undoKeep', title: t('cmd.undoKeep'), icon: 'undo', shortcut: `${mod}Z`, run: () => handlers.current.undoKeep() },
+        { id: 'cmd.redoKeep', title: t('cmd.redoKeep'), icon: 'undo', shortcut: `${mod}${shift}Z`, run: () => handlers.current.redoKeep() },
+        { id: 'cmd.reviewKeep', title: t('keep.reviewChanges'), icon: 'outline', run: () => handlers.current.reviewKeep() },
+        window.api.capabilities?.localHistory && { id: 'cmd.localHistory', title: t('history.command'), icon: 'history', run: () => handlers.current.localHistory() },
+        { id: 'cmd.tableEdit', title: t('cmd.tableEdit'), icon: 'columns', run: () => handlers.current.tableCommand('edit') },
+        { id: 'cmd.tableFilter', title: t('cmd.tableFilter'), icon: 'filter', run: () => handlers.current.tableCommand('filter') },
+        { id: 'cmd.tableMore', title: t('cmd.tableMore'), icon: 'more', run: () => handlers.current.tableCommand('menu') },
+        { id: 'cmd.tableRowAbove', title: t('cmd.tableRowAbove'), icon: 'plus', run: () => handlers.current.tableCommand('rowAbove') },
+        { id: 'cmd.tableRowBelow', title: t('cmd.tableRowBelow'), icon: 'plus', run: () => handlers.current.tableCommand('rowBelow') },
+        { id: 'cmd.tableRowDelete', title: t('cmd.tableRowDelete'), icon: 'close', run: () => handlers.current.tableCommand('rowDelete') },
+        { id: 'cmd.tableColLeft', title: t('cmd.tableColLeft'), icon: 'columns', run: () => handlers.current.tableCommand('colLeft') },
+        { id: 'cmd.tableColRight', title: t('cmd.tableColRight'), icon: 'columns', run: () => handlers.current.tableCommand('colRight') },
+        { id: 'cmd.tableColDelete', title: t('cmd.tableColDelete'), icon: 'close', run: () => handlers.current.tableCommand('colDelete') },
+        { id: 'cmd.blockInsertAbove', title: t('cmd.blockInsertAbove'), icon: 'plus', run: () => handlers.current.blockCommand('insertAbove') },
+        { id: 'cmd.blockInsertBelow', title: t('cmd.blockInsertBelow'), icon: 'plus', run: () => handlers.current.blockCommand('insertBelow') },
+        { id: 'cmd.blockDuplicate', title: t('cmd.blockDuplicate'), icon: 'file-plus', run: () => handlers.current.blockCommand('duplicate') },
+        { id: 'cmd.blockDelete', title: t('cmd.blockDelete'), icon: 'close', run: () => handlers.current.blockCommand('delete') },
+        { id: 'cmd.navigateBack', title: t('nav.back'), icon: 'chevron-right', shortcut: 'Alt+←', run: () => handlers.current.navigateBack() },
+        { id: 'cmd.navigateForward', title: t('nav.forward'), icon: 'chevron-right', shortcut: 'Alt+→', run: () => handlers.current.navigateForward() },
+        { id: 'cmd.toggleZen', title: t(zenMode ? 'cmd.exitZen' : 'cmd.enterZen'), icon: 'expand', shortcut: `${mod}K Z`, run: () => handlers.current.toggleZen() },
         caps.fileAttachments && { id: 'cmd.attach', title: t('cmd.attach'), icon: 'file-plus', run: () => handlers.current.attach() },
         // Export-to-PDF needs a save dialog / print pipeline that doesn't exist on mobile.
         caps.pdfExport && { id: 'cmd.exportPdf', title: t('cmd.exportPdf'), icon: 'file', run: () => handlers.current.exportPdf() },
         caps.htmlExport && { id: 'cmd.exportHtml', title: t('cmd.exportHtml'), icon: 'file', run: () => handlers.current.exportHtml() },
         caps.print && { id: 'cmd.print', title: t('cmd.print'), icon: 'file', run: () => handlers.current.print() },
-        { id: 'cmd.sidebar', title: t('cmd.sidebar'), icon: 'sidebar', run: () => handlers.current.toggleSidebar() },
+        { id: 'cmd.sidebar', title: t('cmd.sidebar'), icon: 'sidebar', shortcut: `${mod}B`, run: () => handlers.current.toggleSidebar() },
         { id: 'cmd.files', title: t('cmd.files'), icon: 'folder', run: () => handlers.current.toggleFiles() },
-        { id: 'cmd.outline', title: t('cmd.outline'), icon: 'outline', run: () => handlers.current.toggleOutline() },
-        { id: 'cmd.source', title: t('cmd.source'), icon: 'code', run: () => handlers.current.toggleSource() },
+        { id: 'cmd.outline', title: t('cmd.outline'), icon: 'outline', shortcut: `${mod}${shift}L`, run: () => handlers.current.toggleOutline() },
+        { id: 'cmd.source', title: t('cmd.source'), icon: 'code', shortcut: `${mod}/`, run: () => handlers.current.toggleSource() },
         { id: 'cmd.toggleKeep', title: t('cmd.toggleKeep'), icon: 'shield', run: () => handlers.current.toggleEditorMode() },
         { id: 'cmd.theme', title: t('cmd.theme'), icon: 'moon', run: () => handlers.current.toggleTheme() },
-        { id: 'cmd.find', title: t('cmd.find'), icon: 'search', run: () => handlers.current.find() },
-        { id: 'cmd.replace', title: t('cmd.replace'), icon: 'search', run: () => handlers.current.replace() },
-        caps.workspaceSearch && { id: 'cmd.searchWorkspace', title: t('cmd.searchWorkspace'), icon: 'search', run: () => handlers.current.searchWorkspace() },
+        { id: 'cmd.find', title: t('cmd.find'), icon: 'search', shortcut: `${mod}F`, run: () => handlers.current.find() },
+        { id: 'cmd.replace', title: t('cmd.replace'), icon: 'search', shortcut: window.api.platform === 'darwin' ? '⌥⌘F' : `${mod}H`, run: () => handlers.current.replace() },
+        caps.workspaceSearch && { id: 'cmd.searchWorkspace', title: t('cmd.searchWorkspace'), icon: 'search', shortcut: `${mod}${shift}F`, run: () => handlers.current.searchWorkspace() },
+        { id: 'cmd.linkProblems', title: t('links.problems'), icon: 'alert', shortcut: 'F8', run: () => handlers.current.linkProblems() },
+        { id: 'cmd.findReferences', title: t('links.findReferences'), icon: 'search', run: () => handlers.current.findReferences() },
+        { id: 'cmd.renameHeading', title: t('links.renameHeading'), icon: 'outline', shortcut: 'F2', run: () => handlers.current.renameHeading() },
         caps.spellcheck && {
           id: 'cmd.spell',
           title: t(settings.spellcheck ? 'cmd.spellOff' : 'cmd.spellOn'),
@@ -3090,7 +4548,7 @@ export default function App() {
         { id: 'cmd.settings', title: t('cmd.settings'), icon: 'settings', run: () => handlers.current.settings() }
       ].filter(Boolean)
     },
-    [t, settings.spellcheck, updateSettings]
+    [t, settings.spellcheck, updateSettings, zenMode]
   )
 
   // Discriminate the active view: the visible source <textarea> sets sourceRef;
@@ -3789,6 +5247,26 @@ export default function App() {
     }
     attempt()
   }, [])
+  jumpToTabLineRef.current = jumpToTabLine
+
+  const locateReviewChange = useCallback((change) => {
+    if (!changeReview) return
+    const tabId = changeReview.tabId
+    setChangeReview(null)
+    setHome(false)
+    setActiveId(tabId)
+    setTimeout(() => jumpToTabLineRef.current(tabId, change.line, true), 0)
+  }, [changeReview])
+
+  const restoreReviewChange = useCallback((change) => {
+    const review = changeReview
+    if (!review?.allowRestore || !guardKeepDraft(review.tabId)) return
+    editorApis.current[review.tabId]?.replaceLineRange?.(
+      change.currentStart,
+      change.after.length,
+      change.before
+    )
+  }, [changeReview, guardKeepDraft])
 
   // Reveal an anchor (heading slug / explicit id / literal text) in a doc.
   const jumpToAnchor = useCallback((anchor, targetPath) => {
@@ -3812,16 +5290,29 @@ export default function App() {
     },
     [openPaths, jumpToTabLine]
   )
+  const onPaletteOpenWorkspaceHeading = useCallback(
+    (heading) => openSearchResult(heading.path, heading.line),
+    [openSearchResult]
+  )
+  const onPaletteOpenLine = useCallback(
+    (line) => {
+      const id = activeIdRef.current
+      if (id) jumpToTabLine(id, line)
+    },
+    [jumpToTabLine]
+  )
 
   // ── in-app document links ──
   // A keep-mode link like [POL-001](L2_xxx.md#POL-001) opens the target doc as a
   // tab (or reuses it) and jumps to the anchor; a same-file / pure #anchor link
   // just jumps. External http(s)/mailto links are handled in the editors.
   const openDocLink = useCallback(
-    async (relPath, anchor, fromPath) => {
+    async (relPath, anchor, fromPath, { openRight: openInRight = false } = {}) => {
+      const sourceTabId = activeIdRef.current
       const base =
-        fromPath || tabsRef.current.find((t) => t.id === activeIdRef.current)?.path || ''
+        fromPath || tabsRef.current.find((t) => t.id === sourceTabId)?.path || ''
       let targetPath = null
+      let targetTab = tabsRef.current.find((t) => t.id === sourceTabId) || null
       if (relPath) {
         const p = relPath.replace(/\\/g, '/')
         targetPath = isAbsolutePath(p) ? p : resolveRelPath(dirName(base), p)
@@ -3837,14 +5328,31 @@ export default function App() {
         )
         await openPaths([targetPath])
         // openPaths shows its own alert if the file is missing; bail on failure.
-        if (!already && !tabsRef.current.find(
+        targetTab = tabsRef.current.find(
           (t) => (t.path || '').replace(/\\/g, '/') === targetPath.replace(/\\/g, '/')
-        ))
-          return
+        )
+        if (!already && !targetTab) return
+      }
+      if (openInRight && targetTab && targetTab.id !== sourceTabId) {
+        openRight(targetTab.id, sourceTabId)
+        if (anchor) {
+          const line = findAnchorLine(targetTab.content || '', anchor)
+          const rawOffset = line
+            ? lineStartOffset(targetTab.content || '', Math.max(0, line - 1))
+            : 0
+          let tries = 0
+          const reveal = () => {
+            const api = editorApis.current[targetTab.id]
+            if (api?.restoreMarkdownOffset?.(rawOffset, false)) return
+            if (tries++ < 16) setTimeout(reveal, 70)
+          }
+          setTimeout(reveal, 0)
+        }
+        return
       }
       if (anchor) jumpToAnchor(anchor, targetPath)
     },
-    [openPaths, jumpToAnchor]
+    [openPaths, jumpToAnchor, openRight]
   )
 
   const toggleFindMode = useCallback(() => {
@@ -3912,10 +5420,26 @@ export default function App() {
     ({ win32: ' is-win', darwin: ' is-mac', ios: ' is-ios is-mobile', android: ' is-android is-mobile' }[
       window.api.platform
     ] || '')
+  const reviewTab = changeReview
+    ? tabs.find((tab) => tab.id === changeReview.tabId)
+    : null
+  const reviewCurrent = reviewTab?.content ?? ''
+  const localHistoryTab = localHistoryState
+    ? tabs.find((tab) => tab.id === localHistoryState.tabId)
+    : null
+  const localHistoryCanRestore = localHistoryTab
+    ? canRestoreLocalHistory(localHistoryTab.id)
+    : false
+  const tabSwitcherTabs = tabSwitcher
+    ? tabSwitcher.ids
+        .map((id) => tabsMeta.find((tab) => tab.id === id))
+        .filter(Boolean)
+    : []
+  const tabSwitcherSelectedId = tabSwitcher?.ids[tabSwitcher.index] || null
 
   return (
     <I18nProvider lang={lang} setLang={setLang}>
-    <div className={`app${platformClass}${isMobile && sidebarOpen ? ' drawer-open' : ''}`}>
+    <div className={`app${platformClass}${isMobile && sidebarOpen ? ' drawer-open' : ''}${zenMode ? ' zen-mode' : ''}${zenReveal ? ' zen-reveal' : ''}`}>
       <div className="activity-bar">
         <button
           className={`activity-item activity-home${home ? ' active' : ''}`}
@@ -3940,6 +5464,16 @@ export default function App() {
             <Icon name="search" size={20} />
           </button>
         )}
+        <button
+          className={`activity-item${sidebarMode === 'links' ? ' active' : ''}`}
+          title={`${t('links.title')} (F8)`}
+          onClick={() => handlers.current.linkProblems()}
+        >
+          <Icon name="alert" size={20} />
+          {!!linkPanel.problems.length && (
+            <span className="activity-badge">{Math.min(99, linkPanel.problems.length)}</span>
+          )}
+        </button>
         <button
           className={`activity-item${sidebarMode === 'outline' ? ' active' : ''}`}
           title={t('outline.title')}
@@ -3985,6 +5519,7 @@ export default function App() {
           onExportPdf={exportPathToPdf}
           onReorder={reorderTabs}
           onTogglePin={toggleTabPin}
+          onPromotePreview={promotePreviewTab}
         />
         <div className="topbar-spacer" />
         <button className="icon-btn drag-no" title={`${t('welcome.newFile')} (Ctrl+N)`} onClick={newTab}>
@@ -4028,6 +5563,7 @@ export default function App() {
                 onAddFolder={openFolder}
                 onRemoveFolder={removeWorkspace}
                 onReorderFolder={reorderWorkspaces}
+                onRenamePath={onSidebarRenamePath}
                 refreshNonce={refreshNonce}
                 showHiddenFiles={settings.showHiddenFiles}
               />
@@ -4038,6 +5574,24 @@ export default function App() {
                 onAddFolder={openFolder}
                 focusNonce={searchFocusNonce}
                 showHiddenFiles={settings.showHiddenFiles}
+              />
+            ) : sidebarMode === 'links' ? (
+              <LinkIntelligencePanel
+                view={linkPanel.view}
+                onSetView={(view) => setLinkPanel((prev) => ({ ...prev, view }))}
+                docPath={linkPanel.docPath}
+                problems={linkPanel.problems}
+                diagnosing={linkPanel.diagnosing}
+                referenceGroups={linkPanel.referenceGroups}
+                referencesRunning={linkPanel.referencesRunning}
+                referenceLabel={linkPanel.referenceLabel}
+                filesScanned={linkPanel.filesScanned}
+                truncated={linkPanel.truncated}
+                onRefresh={() => diagnoseLinksForTab(
+                  tabsRef.current.find((item) => item.id === activeIdRef.current)
+                )}
+                onFindCurrentReferences={() => findCurrentReferencesRef.current()}
+                onOpenResult={openSearchResult}
               />
             ) : (
               <Outline content={activeTab?.content || ''} activeIndex={activeHeading} onJump={jumpToHeading} />
@@ -4192,29 +5746,30 @@ export default function App() {
               whole on the welcome/home screen so it doesn't fight Welcome for space. */}
           <div
             ref={editorAreaRef}
-            className={`editor-area${split ? ' is-split' : ''}`}
+            className={`editor-area${layoutSplit ? ' is-split' : ''}${sourceSplit ? ' is-source-split' : ''}`}
             style={{ display: home || !activeTab ? 'none' : undefined }}
           >
             {tabs.map((tab) => {
-              // Which pane (if any) this tab occupies. `split` already excludes
-              // home and the case where the two ids are equal.
-              const isLeft = !home && tab.id === activeId
-              const isRight = split && tab.id === splitId
-              const inView = isLeft || isRight
-              // Flex order: left pane (1) · divider (2) · right pane (3).
-              // Irrelevant for hidden tabs (display:none removes them from layout).
-              const order = isRight ? 3 : 1
-              // Mark the focused pane (only meaningful while split) so the user
-              // can see which pane a tab click will load into.
-              const isFocusedPane = split && ((isRight && focusedPane === 'right') || (isLeft && focusedPane === 'left'))
-              const paneClass =
-                (isRight ? ' hm-pane-right' : isLeft ? ' hm-pane-left' : '') + (isFocusedPane ? ' hm-focused' : '')
+              const normalIsLeft = !sourceSplit && !home && tab.id === activeId
+              const normalIsRight = !sourceSplit && split && tab.id === splitId
+              const normalInView = normalIsLeft || normalIsRight
+              const dualSource = sourceSplit && tab.id === activeId
+              const dualPreview = sourceSplit && tab.id === sourcePreviewId
+              const paneClassFor = (side) =>
+                ` hm-pane-${side}${layoutSplit && focusedPane === side ? ' hm-focused' : ''}`
+              const sourceSide = dualSource
+                ? sourceOnLeft ? 'left' : 'right'
+                : normalIsRight ? 'right' : 'left'
+              const previewSide = dualPreview
+                ? sourceOnLeft ? 'right' : 'left'
+                : normalIsRight ? 'right' : 'left'
+              const sourcePaneClass = paneClassFor(sourceSide)
+              const previewPaneClass = paneClassFor(previewSide)
+              const sourcePaneStyle = sourceSide === 'right' ? rightPaneStyle : leftPaneStyle
+              const previewPaneStyle = previewSide === 'right' ? rightPaneStyle : leftPaneStyle
               // Cached per tab id — stable identities so the memoized editors
               // skip re-rendering when an unrelated tab's content changes.
               const h = getTabHandlers(tab.id)
-              // In split view the left pane holds a fixed fraction; the right pane
-              // grows to fill the rest. Outside split, panes fill the row.
-              const paneFlex = split && isLeft ? `0 0 calc(${(splitRatio * 100).toFixed(2)}% - 3px)` : undefined
 
               // Plain-text docs always use the textarea; a Markdown tab can enable
               // its own source pane on the left (the right split pane stays preview).
@@ -4226,45 +5781,50 @@ export default function App() {
               const heavyAsSource =
                 tab.heavy && milkdownForced.has(tab.id) && !richForced.has(tab.id)
               const plainText = isPlainTextDoc(tab)
-              const sourceForActivePreview = sourceMode && isLeft && !plainText && !heavyAsSource
-              const sourceVisible = inView && (plainText || heavyAsSource || sourceForActivePreview)
+              const sourceForActivePreview =
+                !sourceSplit && sourceMode && normalIsLeft && !plainText && !heavyAsSource
+              const sourceVisible =
+                dualSource || (normalInView && (plainText || heavyAsSource || sourceForActivePreview))
               const shouldMountSource = (plainText || heavyAsSource)
-                ? inView
-                : sourceMountedIds.has(tab.id) || sourceForActivePreview
+                ? sourceVisible
+                : sourceMountedIds.has(tab.id) || sourceForActivePreview || dualSource
               const sourceStyle = {
-                ...(isRight ? rightPaneStyle : leftPaneStyle),
+                ...sourcePaneStyle,
                 display: sourceVisible ? undefined : 'none'
               }
               const sourceNode = shouldMountSource ? (
                 <SourceEditorPane
                   key={`source:${tab.id}:${tab.reloadNonce}`}
-                  textareaRef={isLeft && sourceVisible ? sourceRef : undefined}
-                  paneClass={paneClass}
+                  textareaRef={(normalIsLeft || dualSource) && sourceVisible ? sourceRef : undefined}
+                  paneClass={sourcePaneClass}
                   style={sourceStyle}
                   value={tab.content}
                   onChange={h.onSourceChange}
-                  onPaneFocus={h.onPaneFocus}
-                  onPaneMouseDown={h.onPaneFocus}
+                  onViewportChange={h.onSourceViewportChange}
+                  onSelectionChange={h.onSourceSelectionChange}
+                  onPaneFocus={h.onSourcePaneFocus}
+                  onPaneMouseDown={h.onSourcePaneFocus}
                 />
               ) : null
               if (plainText || heavyAsSource) return sourceNode
-              const previewVisible = inView && !sourceForActivePreview
+              const previewVisible = dualPreview || (normalInView && !sourceForActivePreview)
               // `.md` default: the source-backed "keep" editor (zero-diff saves).
               // The user can opt this tab into Milkdown WYSIWYG (milkdownForced).
               // Reaching here means it's a Markdown doc not shown as plain source.
               const usesKeep = !milkdownForced.has(tab.id)
               if (usesKeep) {
-                if (!inView && !mountedIds.has(tab.id) && !sourceNode) return null
+                if (!previewVisible && !mountedIds.has(tab.id) && !sourceNode) return null
                 return [
                   sourceNode,
                   <div
                     // Distinct key prefix from the Milkdown wrapper so toggling
                     // modes fully remounts (no ref/child reconciliation surprises).
                     key={`keep:${tab.id}:${tab.reloadNonce}`}
-                    className={`editor-scroll km-scroll${paneClass}`}
-                    style={{ display: previewVisible ? undefined : 'none', order, flex: paneFlex }}
+                    className={`editor-scroll km-scroll${previewPaneClass}`}
+                    style={{ ...previewPaneStyle, display: previewVisible ? undefined : 'none' }}
                     onFocusCapture={h.onPaneFocus}
                     onMouseDownCapture={h.onPaneFocus}
+                    onScrollCapture={h.onPreviewScroll}
                   >
                     <KeepEditor
                       inView={previewVisible}
@@ -4276,8 +5836,13 @@ export default function App() {
                       onFilterChange={h.onFilterChange}
                       onDraftChange={h.onDraftChange}
                       onHistoryChange={h.onHistoryChange}
+                      onCommit={h.onCommit}
                       onOpenSource={openSourceAtLine}
                       onOpenDocLink={openDocLink}
+                      onFindReferences={onKeepFindReferences}
+                      onRenameHeading={onKeepRenameHeading}
+                      sourceSplitMode={sourceSplit && dualPreview}
+                      onLocateSource={h.onLocateSource}
                     />
                   </div>
                 ]
@@ -4285,7 +5850,7 @@ export default function App() {
               // Lazy mount: don't create a Crepe editor for a tab the user hasn't
               // opened yet (keeps session-restore of many tabs fast). Panes in
               // view always mount; visited tabs stay mounted.
-              if (!inView && !mountedIds.has(tab.id) && !sourceNode) return null
+              if (!previewVisible && !mountedIds.has(tab.id) && !sourceNode) return null
               return [
                 sourceNode,
                 <div
@@ -4293,9 +5858,9 @@ export default function App() {
                   // Crepe editor with the new content (the create effect only
                   // runs on mount). tab switches keep the same key → stay mounted.
                   key={`${tab.id}:${tab.reloadNonce}`}
-                  className={`editor-scroll${paneClass}`}
-                  ref={isLeft && previewVisible ? editorHostRef : undefined}
-                  style={{ display: previewVisible ? undefined : 'none', order, flex: paneFlex }}
+                  className={`editor-scroll${previewPaneClass}`}
+                  ref={(normalIsLeft || (dualPreview && tab.id === activeId)) && previewVisible ? editorHostRef : undefined}
+                  style={{ ...previewPaneStyle, display: previewVisible ? undefined : 'none' }}
                   onFocusCapture={h.onPaneFocus}
                   onMouseDownCapture={h.onPaneFocus}
                 >
@@ -4306,11 +5871,57 @@ export default function App() {
                       docPath={tab.path}
                       onChange={h.onChange}
                       onReady={h.onReady}
+                      onOpenDocLink={openDocLink}
                     />
                   </Suspense>
                 </div>
               ]
             })}
+
+            {sourceSplit && (
+              <div className="hm-source-split-tools" role="toolbar" aria-label={t('sourceSplit.toolbar')}>
+                <span className="hm-source-split-label">
+                  {sourcePreviewPinned
+                    ? t('sourceSplit.pinnedLabel', { name: sourcePreviewTab?.title || '' })
+                    : t('sourceSplit.label')}
+                </span>
+                <button
+                  type="button"
+                  className={sourcePreviewPinned ? 'active' : ''}
+                  title={sourcePreviewPinned ? t('sourceSplit.unpin') : t('sourceSplit.pin')}
+                  aria-pressed={sourcePreviewPinned}
+                  onClick={() => {
+                    setSourcePreviewPinned((pinned) => {
+                      if (pinned) setSourcePreviewId(activeIdRef.current)
+                      return !pinned
+                    })
+                  }}
+                >
+                  <Icon name="pin" size={13} />
+                </button>
+                <button
+                  type="button"
+                  title={t('sourceSplit.swap')}
+                  onClick={() => setSourceOnLeft((left) => !left)}
+                >
+                  <Icon name="swap" size={14} />
+                </button>
+                <button
+                  type="button"
+                  className={sourceScrollSync ? 'active' : ''}
+                  title={
+                    sourcePreviewId === activeId
+                      ? t('sourceSplit.sync')
+                      : t('sourceSplit.syncUnavailable')
+                  }
+                  aria-pressed={sourceScrollSync}
+                  disabled={sourcePreviewId !== activeId}
+                  onClick={() => setSourceScrollSync((enabled) => !enabled)}
+                >
+                  <Icon name="sync" size={14} />
+                </button>
+              </div>
+            )}
 
             {/* Heavy-doc notice: only shown when a Milkdown-bound doc is being
                 displayed as plain source to stay responsive (the keep editor
@@ -4328,7 +5939,7 @@ export default function App() {
               </div>
             )}
 
-            {split && (
+            {layoutSplit && (
               <div
                 className="hm-split-divider"
                 style={{ order: 2 }}
@@ -4337,8 +5948,12 @@ export default function App() {
               />
             )}
 
-            {split && (
-              <button className="hm-split-close" title={t('split.close')} onClick={() => setSplitId(null)}>
+            {layoutSplit && (
+              <button
+                className="hm-split-close"
+                title={t('split.close')}
+                onClick={sourceSplit ? closeSourceSplit : () => setSplitId(null)}
+              >
                 <Icon name="close" size={14} />
               </button>
             )}
@@ -4369,6 +5984,7 @@ export default function App() {
         onSave={onStatusSave}
         onUndoKeep={onStatusUndoKeep}
         onRedoKeep={onStatusRedoKeep}
+        onReviewKeep={onStatusReviewKeep}
         onShare={onStatusShare}
         theme={theme}
         setTheme={pickBuiltinTheme}
@@ -4380,12 +5996,20 @@ export default function App() {
         setLang={setLang}
         sourceMode={sourceMode}
         onToggleSource={toggleSource}
+        viewMode={
+          sourceSplit
+            ? 'richSource'
+            : sourceMode
+              ? 'source'
+              : 'rich'
+        }
+        onSelectViewMode={selectViewMode}
         keepEligible={
           // Heavy docs keep the toggle too: switching one to Milkdown lands in the
           // safe plain-source + "load rich" banner path (heavyAsSource above), never
           // the freeze-prone Crepe render — so there's no reason to hide the button
           // (it just vanishing on big files / big-table docs was confusing).
-          !!activeTab && !isPlainTextDoc(activeTab) && !sourceMode
+          !!activeTab && !isPlainTextDoc(activeTab)
         }
         keepMode={!!activeTab && !milkdownForced.has(activeTab.id)}
         onToggleKeep={onToggleKeep}
@@ -4402,6 +6026,21 @@ export default function App() {
         onOpenSettings={() => setSettingsOpen(true)}
       />
 
+      {zenMode && (
+        <button
+          type="button"
+          className="hm-zen-exit"
+          title={`${t('zen.exit')} (${window.api.platform === 'darwin' ? '⌘' : 'Ctrl+'}K Z)`}
+          aria-label={t('zen.exit')}
+          onClick={() => {
+            setZenMode(false)
+            setZenReveal(false)
+          }}
+        >
+          <Icon name="close" size={14} />
+        </button>
+      )}
+
       <Settings
         open={settingsOpen}
         onClose={() => setSettingsOpen(false)}
@@ -4415,6 +6054,7 @@ export default function App() {
         onRefreshThemes={refreshThemes}
         onOpenThemesFolder={onOpenThemesFolder}
         onGetMoreThemes={onGetMoreThemes}
+        onClearLocalHistory={clearAllLocalHistory}
         typographyProps={{
           fontSize: settings.fontSize,
           onSetFontSize,
@@ -4440,12 +6080,31 @@ export default function App() {
         commands={commands}
         files={files}
         headings={paletteHeadings}
+        recentFiles={recents}
+        lineCount={paletteLineCount}
+        loadWorkspaceHeadings={loadPaletteWorkspaceHeadings}
         onOpenFile={onPaletteOpenFile}
         onOpenHeading={onPaletteOpenHeading}
+        onOpenWorkspaceHeading={onPaletteOpenWorkspaceHeading}
+        onOpenLine={onPaletteOpenLine}
       />
 
+      {tabSwitcher && (
+        <TabSwitcher
+          tabs={tabSwitcherTabs}
+          selectedId={tabSwitcherSelectedId}
+          onSelect={selectTabSwitcherId}
+          onCommit={commitTabSwitcher}
+          onCancel={cancelTabSwitcher}
+        />
+      )}
+
       {toast && (
-        <div className={`hm-toast${toast.sticky ? ' sticky' : ''}`} role="status" key={toast.key}>
+        <div
+          className={`hm-toast${toast.sticky ? ' sticky' : ''}${toast.onAction ? ' actionable' : ''}`}
+          role="status"
+          key={toast.key}
+        >
           {toast.kind === 'progress' && <span className="hm-toast-spin" />}
           {toast.kind === 'success' && (
             <span className="hm-toast-ico ok">
@@ -4458,6 +6117,19 @@ export default function App() {
             </span>
           )}
           <span className="hm-toast-msg">{toast.msg}</span>
+          {toast.onAction && (
+            <button
+              type="button"
+              className="hm-toast-action"
+              onClick={() => {
+                const action = toast.onAction
+                setToast(null)
+                action()
+              }}
+            >
+              {toast.actionLabel}
+            </button>
+          )}
           {toast.sticky && (
             <button className="hm-toast-close" onClick={() => setToast(null)} aria-label="Close">
               <Icon name="close" size={15} />
@@ -4475,6 +6147,12 @@ export default function App() {
             </div>
           </div>
           <div className="hm-conflict-actions">
+            <button
+              className="hm-conflict-btn"
+              onClick={() => reviewConflictChanges(activeTab.id)}
+            >
+              {t('review.open')}
+            </button>
             <button
               className="hm-conflict-btn"
               onClick={() => resolveConflict(activeTab.id, 'keep')}
@@ -4500,6 +6178,28 @@ export default function App() {
         />
       )}
 
+      {headingRenameState && (
+        <RenameModal
+          t={t}
+          title={t('links.renameHeading')}
+          initial={headingRenameState.value}
+          onConfirm={commitHeadingRename}
+          onCancel={() => setHeadingRenameState(null)}
+        />
+      )}
+
+      {linkUpdateState && (
+        <LinkUpdateDialog
+          t={t}
+          state={linkUpdateState}
+          onApply={() => applyLinkUpdate(true)}
+          onRenameOnly={() => applyLinkUpdate(false)}
+          onClose={() => {
+            if (!linkUpdateState.busy) setLinkUpdateState(null)
+          }}
+        />
+      )}
+
       {modeSwitchState && (
         <ModeSwitchDialog
           t={t}
@@ -4507,7 +6207,37 @@ export default function App() {
           busy={modeSwitchSaving}
           onSaveAndSwitch={saveAndContinueModeSwitch}
           onSwitch={continueModeSwitch}
+          onReview={reviewModeSwitchChanges}
           onCancel={cancelModeSwitch}
+        />
+      )}
+
+      {changeReview && reviewTab && (
+        <KeepChangeReview
+          t={t}
+          title={t(changeReview.titleKey)}
+          description={t(changeReview.descriptionKey)}
+          baseline={changeReview.baseline}
+          current={reviewCurrent}
+          allowRestore={changeReview.allowRestore}
+          onLocate={locateReviewChange}
+          onRestore={restoreReviewChange}
+          onClose={() => setChangeReview(null)}
+        />
+      )}
+
+      {localHistoryState && localHistoryTab && (
+        <LocalHistoryDialog
+          t={t}
+          lang={lang}
+          documentTitle={localHistoryTab.title}
+          entries={localHistoryState.entries}
+          canRestore={localHistoryCanRestore}
+          onCompare={compareLocalHistory}
+          onRestore={restoreLocalHistory}
+          onDelete={deleteLocalHistoryEntry}
+          onClearDocument={clearDocumentLocalHistory}
+          onClose={() => setLocalHistoryState(null)}
         />
       )}
 

@@ -135,6 +135,75 @@ function AboutControl() {
   )
 }
 
+function EditorEngineControl({
+  keepMode,
+  onToggleKeep,
+  showModeHint,
+  onDismissModeHint
+}) {
+  const { t } = useI18n()
+  const mode = keepMode ? 'keep' : 'milkdown'
+  return (
+    <span className="mode-switch-wrap">
+      <button
+        type="button"
+        className={`status-btn active hm-engine-mode is-${mode}`}
+        onClick={onToggleKeep}
+        title={t('tip.toggleKeep')}
+      >
+        <Icon name={keepMode ? 'shield' : 'sparkle'} size={14} />
+        {t(keepMode ? 'mode.keep' : 'mode.rich')}
+      </button>
+      {showModeHint && (
+        <div className="mode-hint" role="dialog">
+          <button
+            className="mode-hint-close"
+            onClick={onDismissModeHint}
+            aria-label={t('hint.gotIt')}
+          >
+            ✕
+          </button>
+          <div className="mode-hint-title">{t('hint.modeTitle')}</div>
+          <p className="mode-hint-line">{boldMd(t('hint.modeKeep'))}</p>
+          <p className="mode-hint-line">{boldMd(t('hint.modeRich'))}</p>
+          <div className="mode-hint-actions">
+            <button className="mode-hint-ok" onClick={onDismissModeHint}>
+              {t('hint.gotIt')}
+            </button>
+          </div>
+          <span className="mode-hint-arrow" />
+        </div>
+      )}
+    </span>
+  )
+}
+
+function ViewModeControl({ mode, keepMode, onSelect }) {
+  const { t } = useI18n()
+  const modes = [
+    ['rich', 'sparkle', 'status.rich'],
+    ['source', 'code', 'status.source'],
+    ...(keepMode ? [['richSource', 'columns', 'mode.richSource']] : [])
+  ]
+  const currentIndex = Math.max(0, modes.findIndex(([id]) => id === mode))
+  const [currentMode, currentIcon, currentLabel] = modes[currentIndex]
+  const nextMode = modes[(currentIndex + 1) % modes.length][0]
+  return (
+    <span className="hm-view-mode-control">
+      <button
+        type="button"
+        className="status-btn hm-view-mode-btn"
+        data-mode={currentMode}
+        title={t(keepMode ? 'tip.cycleViewModeKeep' : 'tip.cycleViewModeRich')}
+        onClick={() => onSelect?.(nextMode)}
+      >
+        <Icon name={currentIcon} size={14} />
+        <span>{t(currentLabel)}</span>
+      </button>
+    </span>
+  )
+}
+
 // Mobile: a single "•••" popover that folds together the controls that crowd
 // the bottom bar on a phone — word counts, source toggle, theme, language,
 // GitHub — so the bar itself stays to just the block type + this one button.
@@ -146,6 +215,7 @@ function MobileMore({
   hasDraft,
   onUndoKeep,
   onRedoKeep,
+  onReviewKeep,
   sourceMode,
   onToggleSource,
   theme,
@@ -174,6 +244,7 @@ function MobileMore({
   const historyBlocked = !!hasDraft
   const undoTitle = historyBlocked ? t('keep.finishDraft') : t('keep.undoTitle')
   const redoTitle = historyBlocked ? t('keep.finishDraft') : t('keep.redoTitle')
+  const reviewTitle = historyBlocked ? t('keep.finishDraft') : t('keep.reviewChanges')
   return (
     <div className="block-switch" ref={ref}>
       <button className="status-btn hm-more-btn" onClick={toggle} title={t('status.more')}>
@@ -195,6 +266,18 @@ function MobileMore({
           </button>
           {showKeepHistory && (
             <div className="hm-sheet-history" aria-label={t('keep.historyActions')}>
+              <button
+                className="block-menu-item"
+                title={reviewTitle}
+                disabled={historyBlocked || !dirty}
+                onClick={() => {
+                  onReviewKeep?.()
+                  setOpen(false)
+                }}
+              >
+                <Icon name="outline" size={15} />
+                <span className="block-menu-name">{t('keep.reviewChanges')}</span>
+              </button>
               <button
                 className="block-menu-item"
                 title={undoTitle}
@@ -336,6 +419,7 @@ function StatusBar({
   onSave,
   onUndoKeep,
   onRedoKeep,
+  onReviewKeep,
   onShare,
   theme,
   setTheme,
@@ -343,6 +427,8 @@ function StatusBar({
   setLang,
   sourceMode,
   onToggleSource,
+  viewMode = 'rich',
+  onSelectViewMode,
   keepEligible,
   keepMode,
   onToggleKeep,
@@ -367,10 +453,11 @@ function StatusBar({
   const deferredContent = useDeferredValue(tab?.content)
   const s = useMemo(() => stats(deferredContent), [deferredContent])
   const dirty = !!tab && (tab.content !== tab.savedContent || hasDraft)
-  const showKeepHistory = !!tab && keepEligible && keepMode && !sourceMode
+  const showKeepHistory = !!tab && keepEligible && keepMode && viewMode === 'rich'
   const historyBlocked = !!hasDraft
   const undoTitle = historyBlocked ? t('keep.finishDraft') : t('keep.undoTitle')
   const redoTitle = historyBlocked ? t('keep.finishDraft') : t('keep.redoTitle')
+  const reviewTitle = historyBlocked ? t('keep.finishDraft') : t('keep.reviewChanges')
   return (
     <div className="statusbar">
       <div className="status-left">
@@ -394,6 +481,16 @@ function StatusBar({
                 </span>
                 {showKeepHistory && (
                   <span className="status-history" aria-label={t('keep.historyActions')}>
+                    <button
+                      type="button"
+                      className="status-history-btn review"
+                      title={reviewTitle}
+                      aria-label={reviewTitle}
+                      disabled={historyBlocked || tab.content === tab.savedContent}
+                      onClick={onReviewKeep}
+                    >
+                      <Icon name="outline" size={14} />
+                    </button>
                     <button
                       type="button"
                       className="status-history-btn undo"
@@ -468,6 +565,7 @@ function StatusBar({
                 hasDraft={hasDraft}
                 onUndoKeep={onUndoKeep}
                 onRedoKeep={onRedoKeep}
+                onReviewKeep={onReviewKeep}
                 sourceMode={sourceMode}
                 onToggleSource={onToggleSource}
                 theme={theme}
@@ -489,39 +587,20 @@ function StatusBar({
           <>
             {tab && <StatsControl stats={s} />}
             {keepEligible && (
-              <span className="mode-switch-wrap">
-                <button
-                  className={`status-btn${keepMode ? ' active' : ''}`}
-                  onClick={onToggleKeep}
-                  title={t('tip.toggleKeep')}
-                >
-                  <Icon name="shield" size={14} /> {keepMode ? t('mode.keep') : t('mode.rich')}
-                </button>
-                {showModeHint && (
-                  <div className="mode-hint" role="dialog">
-                    <button
-                      className="mode-hint-close"
-                      onClick={onDismissModeHint}
-                      aria-label={t('hint.gotIt')}
-                    >
-                      ✕
-                    </button>
-                    <div className="mode-hint-title">{t('hint.modeTitle')}</div>
-                    <p className="mode-hint-line">{boldMd(t('hint.modeKeep'))}</p>
-                    <p className="mode-hint-line">{boldMd(t('hint.modeRich'))}</p>
-                    <div className="mode-hint-actions">
-                      <button className="mode-hint-ok" onClick={onDismissModeHint}>
-                        {t('hint.gotIt')}
-                      </button>
-                    </div>
-                    <span className="mode-hint-arrow" />
-                  </div>
-                )}
-              </span>
+              <>
+                <EditorEngineControl
+                  keepMode={keepMode}
+                  onToggleKeep={onToggleKeep}
+                  showModeHint={showModeHint}
+                  onDismissModeHint={onDismissModeHint}
+                />
+                <ViewModeControl
+                  mode={viewMode}
+                  keepMode={keepMode}
+                  onSelect={onSelectViewMode}
+                />
+              </>
             )}
-            <button className="status-btn" onClick={onToggleSource} title={t('tip.toggleSource')}>
-              <Icon name="code" size={14} /> {sourceMode ? t('status.source') : t('status.rich')}
-            </button>
             {onOpenSettings && (
               <button className="status-btn" onClick={onOpenSettings} title={t('settings.title')}>
                 <Icon name="settings" size={14} />

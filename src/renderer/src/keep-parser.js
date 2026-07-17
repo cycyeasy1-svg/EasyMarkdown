@@ -599,6 +599,53 @@ export function replaceBlockLines(rawLines, start, end, newText) {
   return out
 }
 
+// Toggle only the GFM task marker on one raw source line. The list marker,
+// indentation, task text, and original LF/CRLF convention remain untouched.
+// A non-task line is returned verbatim so stale DOM coordinates cannot corrupt
+// the document after another structural edit.
+export function toggleTaskLine(rawLine, checked) {
+  const raw = String(rawLine ?? '')
+  const eol = raw.endsWith('\r') ? '\r' : ''
+  const line = eol ? raw.slice(0, -1) : raw
+  const next = line.replace(
+    /^(\s*(?:[-*+]|\d+[.)])\s+)\[[ xX]\](?=\s|$)/,
+    `$1[${checked ? 'x' : ' '}]`
+  )
+  return next === line ? raw : next + eol
+}
+
+// Prepare the exact lines inserted for a new or duplicated Markdown block.
+// Only missing block-boundary blank lines are added; existing surrounding blank
+// lines are never collapsed or normalized. String input inherits the closest
+// source line's EOL style, while array input (used by duplicate) is kept byte for
+// byte. The returned lines are suitable for createKeepHistoryPatch/applyRawPatch.
+export function prepareBlockInsertion(rawLines, at, content) {
+  const source = Array.isArray(rawLines) ? rawLines : []
+  const index = Math.max(0, Math.min(Number.isFinite(at) ? at : source.length, source.length))
+  const reference = source[index] ?? source[index - 1] ?? ''
+  const eol = String(reference).endsWith('\r') ? '\r' : ''
+  const inserted = Array.isArray(content)
+    ? content.map((line) => String(line))
+    : String(content ?? '')
+        .split('\n')
+        .map((line) => (line.endsWith('\r') ? line.slice(0, -1) : line) + eol)
+  if (!inserted.length || (inserted.length === 1 && inserted[0] === eol)) return []
+
+  const isBlank = (line) => String(line ?? '').replace(/\r$/, '').trim() === ''
+  const blankFor = (...lines) =>
+    lines.some((line) => typeof line === 'string' && line.endsWith('\r')) ? '\r' : ''
+  const result = inserted.slice()
+  const before = source[index - 1]
+  const after = source[index]
+  if (before != null && !isBlank(before) && !isBlank(result[0])) {
+    result.unshift(blankFor(before, result[0]))
+  }
+  if (after != null && !isBlank(after) && !isBlank(result.at(-1))) {
+    result.push(blankFor(result.at(-1), after))
+  }
+  return result
+}
+
 // ── render helpers (return HTML strings; pure) ──
 function renderList(b, viewLines, baseDir, opts = {}) {
   const lines = viewLines.slice(b.start, b.end + 1)
@@ -656,9 +703,9 @@ function renderList(b, viewLines, baseDir, opts = {}) {
     blankRun = 0
   }
   // A task item's checkbox is a REAL <input> carrying its source line. It's only
-  // interactive where a click handler exists to write the toggle back (the VSCode
-  // webview passes opts.interactiveTasks); elsewhere (desktop keep mode, PDF
-  // export) it renders disabled — an enabled box with no handler would toggle
+  // interactive where a click handler exists to write the toggle back (desktop
+  // Keep and the VSCode webview pass opts.interactiveTasks); elsewhere (notably
+  // PDF export) it renders disabled — an enabled box with no handler would toggle
   // visually and silently revert on the next re-render, which is worse.
   const taskBox = (it) =>
     it.task
@@ -666,6 +713,9 @@ function renderList(b, viewLines, baseDir, opts = {}) {
         it.line +
         '"' +
         (it.checked ? ' checked' : '') +
+        (opts.taskToggleLabel
+          ? ' aria-label="' + escapeAttr(opts.taskToggleLabel) + '"'
+          : '') +
         (opts.interactiveTasks ? '' : ' disabled') +
         '>'
       : ''
@@ -722,11 +772,15 @@ export function renderTableRows(b, from = 0, to = b.dataRows.length, baseDir) {
   const end = Math.min(b.dataRows.length, Math.max(start, Number(to) || 0))
   for (let ri = start; ri < end; ri++) {
     const r = b.dataRows[ri]
-    html += '<tr data-ri="' + ri + '">'
+    html += '<tr data-ri="' + ri + '" role="row" aria-rowindex="' + (ri + 2) + '">'
     for (let ci = 0; ci < b.headers.length; ci++) {
       const raw = ci < r.cells.length ? r.cells[ci] : ''
       html +=
-        '<td data-line="' +
+        '<td role="gridcell" tabindex="-1" aria-colindex="' +
+        (ci + 1) +
+        '" aria-rowindex="' +
+        (ri + 2) +
+        '" data-line="' +
         r.lineIdx +
         '" data-ci="' +
         ci +
@@ -741,7 +795,15 @@ export function renderTableRows(b, from = 0, to = b.dataRows.length, baseDir) {
   return html
 }
 
-function renderTable(b, tableIdx, filterState, forExport, baseDir, tableInitialRows) {
+function renderTable(
+  b,
+  tableIdx,
+  filterState,
+  forExport,
+  baseDir,
+  tableInitialRows,
+  filterLabel
+) {
   const headers = b.headers
   const colWidths = estimateTableColumnWidths(headers, b.dataRows)
   const tableWidth = Math.ceil(colWidths.reduce((sum, width) => sum + width, 0))
@@ -752,7 +814,11 @@ function renderTable(b, tableIdx, filterState, forExport, baseDir, tableInitialR
       ? totalRows
       : Math.min(totalRows, Math.max(1, Math.floor(requestedRows)))
   let html =
-    '<div class="km-table-wrap"><table class="km-table" data-ti="' +
+    '<div class="km-table-wrap"><table class="km-table" role="grid" tabindex="0" aria-rowcount="' +
+    (totalRows + 1) +
+    '" aria-colcount="' +
+    headers.length +
+    '" data-ti="' +
     tableIdx +
     '" style="--km-table-min-width:' +
     tableWidth +
@@ -760,7 +826,7 @@ function renderTable(b, tableIdx, filterState, forExport, baseDir, tableInitialR
   colWidths.forEach((width) => {
     html += '<col style="width:' + width + 'em">'
   })
-  html += '</colgroup><thead><tr>'
+  html += '</colgroup><thead><tr role="row" aria-rowindex="1">'
   headers.forEach((h, ci) => {
     const active =
       !forExport && filterState[tableIdx] && filterState[tableIdx][ci] && filterState[tableIdx][ci].size > 0
@@ -772,9 +838,15 @@ function renderTable(b, tableIdx, filterState, forExport, baseDir, tableInitialR
         tableIdx +
         '" data-ci="' +
         ci +
-        '" type="button" title="筛选">&#9660;</button>'
+        '" type="button" tabindex="-1" title="' +
+        escapeAttr(filterLabel || 'Filter') +
+        '" aria-label="' +
+        escapeAttr(filterLabel || 'Filter') +
+        '">&#9660;</button>'
     html +=
-      '<th data-line="' +
+      '<th role="columnheader" tabindex="-1" aria-colindex="' +
+      (ci + 1) +
+      '" aria-rowindex="1" data-line="' +
       b.headerLine +
       '" data-ci="' +
       ci +
@@ -866,7 +938,15 @@ export function renderBlockInner(b, bi, viewLines, opts = {}) {
       blankLineSpacing: !!opts.blankLineSpacing
     })
   } else if (b.type === 'table') {
-    inner = renderTable(b, tableIdx, filterState, forExport, baseDir, opts.tableInitialRows)
+    inner = renderTable(
+      b,
+      tableIdx,
+      filterState,
+      forExport,
+      baseDir,
+      opts.tableInitialRows,
+      opts.filterLabel
+    )
   } else if (b.type === 'frontmatter') {
     // Metadata card, mirroring the rich editor's frontmatter node view
     // (editor-frontmatter.js buildCard): flat `key: value` lines → a definition

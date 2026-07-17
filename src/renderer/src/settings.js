@@ -114,6 +114,9 @@ export const DEFAULT_SETTINGS = {
   // habitually leave two blank lines before a heading would see their documents
   // suddenly loosen. Purely visual: the source bytes never change.
   blankLineSpacing: false,
+  // Saved-file snapshots are opt-in because they retain document content outside
+  // the original folder. Desktop stores a bounded 30-day history in userData.
+  localHistory: false,
   showHiddenFiles: false
 }
 
@@ -173,6 +176,7 @@ export function loadSettings() {
       autosave: raw.autosave === true,
       defaultEditorMode: raw.defaultEditorMode === 'rich' ? 'rich' : 'keep',
       blankLineSpacing: raw.blankLineSpacing === true,
+      localHistory: raw.localHistory === true,
       showHiddenFiles: raw.showHiddenFiles === true
     }
   } catch {

@@ -48,6 +48,7 @@ describe('loadSettings / saveSettings', () => {
       autosave: true,
       defaultEditorMode: 'rich',
       blankLineSpacing: true,
+      localHistory: true,
       showHiddenFiles: true
     }
     saveSettings(saved)
@@ -86,18 +87,21 @@ describe('loadSettings / saveSettings', () => {
       autosave: false,
       defaultEditorMode: 'keep',
       blankLineSpacing: false,
+      localHistory: false,
       showHiddenFiles: false
     })
   })
   it('coerces the boolean flags strictly', () => {
-    saveSettings({ spellcheck: 'yes', autosave: 1, blankLineSpacing: 'on' })
+    saveSettings({ spellcheck: 'yes', autosave: 1, blankLineSpacing: 'on', localHistory: 1 })
     expect(loadSettings().spellcheck).toBe(false)
     expect(loadSettings().autosave).toBe(false)
     expect(loadSettings().blankLineSpacing).toBe(false)
-    saveSettings({ spellcheck: true, autosave: true, blankLineSpacing: true })
+    expect(loadSettings().localHistory).toBe(false)
+    saveSettings({ spellcheck: true, autosave: true, blankLineSpacing: true, localHistory: true })
     expect(loadSettings().spellcheck).toBe(true)
     expect(loadSettings().autosave).toBe(true)
     expect(loadSettings().blankLineSpacing).toBe(true)
+    expect(loadSettings().localHistory).toBe(true)
   })
   it('normalizes defaultEditorMode to keep|rich', () => {
     saveSettings({ defaultEditorMode: 'weird' })

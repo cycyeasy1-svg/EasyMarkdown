@@ -5,7 +5,18 @@ const entrySize = (before, after) =>
   before.reduce((sum, line) => sum + line.length + 1, 0) +
   after.reduce((sum, line) => sum + line.length + 1, 0)
 
-export function createKeepHistoryPatch(lines, start, deleteCount, insertedLines = []) {
+const normalizeMeta = (meta) => {
+  if (!meta) return null
+  return {
+    kind: meta.kind || 'edit',
+    target: meta.target || null,
+    summaryKey: meta.summaryKey || 'keep.changeEdit',
+    summaryVars: meta.summaryVars || null,
+    createdAt: Number(meta.createdAt) || Date.now()
+  }
+}
+
+export function createKeepHistoryPatch(lines, start, deleteCount, insertedLines = [], meta = null) {
   const source = Array.isArray(lines) ? lines : []
   const at = Math.min(source.length, Math.max(0, Number(start) || 0))
   const count = Math.min(source.length - at, Math.max(0, Number(deleteCount) || 0))
@@ -14,7 +25,7 @@ export function createKeepHistoryPatch(lines, start, deleteCount, insertedLines 
   if (before.length === after.length && before.every((line, index) => line === after[index])) {
     return null
   }
-  return { start: at, before, after, size: entrySize(before, after) }
+  return { start: at, before, after, size: entrySize(before, after), meta: normalizeMeta(meta) }
 }
 
 /**
@@ -23,7 +34,7 @@ export function createKeepHistoryPatch(lines, start, deleteCount, insertedLines 
  * single cell in a very large table does not duplicate the whole document in
  * memory for every undo step.
  */
-export function createKeepHistoryEntry(beforeLines, afterLines) {
+export function createKeepHistoryEntry(beforeLines, afterLines, meta = null) {
   const before = Array.isArray(beforeLines) ? beforeLines : []
   const after = Array.isArray(afterLines) ? afterLines : []
   let start = 0
@@ -48,7 +59,8 @@ export function createKeepHistoryEntry(beforeLines, afterLines) {
     start,
     before: removed,
     after: inserted,
-    size: entrySize(removed, inserted)
+    size: entrySize(removed, inserted),
+    meta: normalizeMeta(meta)
   }
 }
 

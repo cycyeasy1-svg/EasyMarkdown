@@ -87,6 +87,11 @@ docs/                  architecture / features / implementation-notes / developm
   session-restore fast (restoring N tabs spins up one editor, not N). Code that
   needs a tab's editor API (`editorApis[id]`) must activate the tab first — see
   `exportPathToPdf`, which opens/activates then waits for `getDocHTML`.
+- **Preview tabs**: a file-tree single click uses the one replaceable preview
+  slot; double-click / Enter opens permanently. Editing, pinning, dragging,
+  splitting, or changing editor mode promotes the preview before the action.
+  Session state stores `previewPaths`, but preview tabs never enter closed-tab
+  history. Keep these transitions centralized in `paths.js`.
 - **Raw HTML rendering**: Milkdown's `html` node shows markup as escaped text;
   we add a ProseMirror node view (`renderHtmlNodeView` in `Editor.jsx`) that
   renders recognized block HTML (e.g. `<table>`) as real, sanitized DOM.
@@ -169,6 +174,12 @@ docs/                  architecture / features / implementation-notes / developm
   `localStorage["easymarkdown.onboarded.v1"]`; dismissed update notice is
   `localStorage["easymarkdown.update.dismissed"]`. Themes are `body` classes
   (`light|dark` + optional `theme-*`), with custom themes as an injected `<style>`.
+- **Persistent local history is opt-in and desktop-only.** Successful saves
+  snapshot the previous saved content through `history:*` IPC into
+  `userData/local-history`, separate from session Undo/Redo. Limits are 30
+  snapshots / document, 30 days, 2 MB / snapshot, and 64 MB total; autosaves
+  coalesce within 10 minutes. Restore through Keep's line-replacement transaction
+  so it stays undoable, and never write history beside the user's document.
 - **Find**: in-document find uses the **CSS Custom Highlight API**
   (`CSS.highlights` + `Highlight`), not `window.find` — it searches only the
   editor body (rich `view.dom` / source `<textarea>`), never UI text, and paints
@@ -213,7 +224,9 @@ docs/                  architecture / features / implementation-notes / developm
   `npm run test:watch`). Tests live in `test/`; config is `vitest.config.mjs`.
   They're written as **characterization tests** (lock current behavior, since
   there's no design spec) over `keep-parser`, `paths`, `editor-images`,
-  `main/helpers`, `settings`, `find`, `blocks`, `sourceFold`, `editor-math`. Default env is `node`; a test
+  `main/helpers`, `main/markdown-links`, `main/local-history`, `tab-history`,
+  `link-navigation`, `sidebar-tree`, `settings`, `find`,
+  `blocks`, `sourceFold`, `editor-math`. Default env is `node`; a test
   needing `localStorage`/`document` opts into happy-dom via a
   `// @vitest-environment happy-dom` first line. **Main-process pure functions
   live in `src/main/helpers.js`** (not `index.js`, which imports `electron` and
@@ -231,10 +244,24 @@ docs/                  architecture / features / implementation-notes / developm
   `keep-parser.js`) while the onboarding doc is **Milkdown** (`.ProseMirror`) — so
   assert by role/text, and activate a fixture's tab before asserting. Covers smoke
   (boot, render, keep-mode relative image → `file://`) + interactions (keep-mode
-  block "edit source" and table-cell edits; Milkdown Ctrl+2 and right-click block
-  menu after the status-bar "切换编辑模式" toggle). Crepe's on-selection bubble
+  block "edit source" and table-cell edits; Markdown link diagnostics, references,
+  and rename updates; closed-tab restoration and the MRU switcher; file-tree
+  keyboard navigation, ARIA, creation/move/rename/delete; preview-tab
+  replacement/promotion; internal-link right-pane navigation; Zen mode; persistent
+  local-history restart/compare/restore; Milkdown Ctrl+2 and right-click
+  block menu after the status-bar "切换编辑模式" toggle). Crepe's
+  on-selection bubble
   toolbar isn't asserted — it doesn't surface reliably under automation and its
   conversion path is already covered.
+- **Status-bar editing controls stay separated.** Keep/Milkdown is one direct
+  engine-toggle button. Beside it, keep one view-toggle button: it cycles
+  Rich → Source → Rich+Source in Keep, and Rich ⇄ Source in Milkdown. Do not
+  expand these states into a segmented button group or a duplicate dropdown.
+- **Keep table actions avoid duplicate floating UI.** `.km-table-tools` is the
+  in-flow toolbar inside `.km-table-frame` and scrolls with its table. Do not
+  reintroduce the removed body-level `.km-cell-tools`: edit is available by
+  double-click/Enter, filtering from the header/Alt+Down, and the full menu by
+  right-click/Shift+F10.
 - **Legacy CDP scripts** in `scripts/` (manual `--remote-debugging-port=9222`) still
   exist and are being superseded by the above — see [`docs/development.md`](./docs/development.md).
   On macOS, `osascript "tell application \"Electron\""` can launch the generic

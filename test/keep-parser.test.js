@@ -19,7 +19,9 @@ import {
   renderTableRows,
   renderDoc,
   estimateTableColumnWidths,
-  detectDocLang
+  detectDocLang,
+  toggleTaskLine,
+  prepareBlockInsertion
 } from '../src/renderer/src/keep-parser.js'
 
 describe('detectDocLang', () => {
@@ -324,7 +326,7 @@ describe('table column width hints', () => {
     expect(html).toContain('data-km-rendered-rows="2"')
     expect(html).toContain('data-km-total-rows="4"')
     expect(html).not.toContain('data-km-render-complete="true"')
-    expect(renderTableRows(table, 2, 4)).toContain('<tr data-ri="3">')
+    expect(renderTableRows(table, 2, 4)).toContain('<tr data-ri="3"')
   })
 
   it('always renders every table row for export', () => {
@@ -430,6 +432,37 @@ describe('loose list rendering', () => {
     const html = renderBlockInner(parseDoc(lines)[0], 0, lines, { blankLineSpacing: true })
     expect(html).not.toContain('km-loose')
     expect(html).toContain('<li data-list-gap data-gap="0" style="--km-gap:0">b')
+  })
+})
+
+describe('Keep task and block structural helpers', () => {
+  it('toggles only the task marker while preserving marker style, text and CRLF', () => {
+    expect(toggleTaskLine('  * [ ] nested task\r', true)).toBe('  * [x] nested task\r')
+    expect(toggleTaskLine('12) [X] numbered\r', false)).toBe('12) [ ] numbered\r')
+    expect(toggleTaskLine('- [ ]not-a-task\r', true)).toBe('- [ ]not-a-task\r')
+    expect(toggleTaskLine('plain text\r', true)).toBe('plain text\r')
+  })
+
+  it('adds only missing block boundaries and preserves CRLF for inserted text', () => {
+    expect(prepareBlockInsertion(['before\r', 'target\r'], 1, 'new\nblock')).toEqual([
+      '\r',
+      'new\r',
+      'block\r',
+      '\r'
+    ])
+    expect(prepareBlockInsertion(['before\r', '\r', 'target\r'], 2, 'new')).toEqual([
+      'new\r',
+      '\r'
+    ])
+  })
+
+  it('duplicates a nested block byte-for-byte without normalizing surrounding gaps', () => {
+    const raw = ['- parent\r', '  - child\r', '\r', '> quote\r']
+    expect(prepareBlockInsertion(raw, 2, raw.slice(0, 2))).toEqual([
+      '\r',
+      '- parent\r',
+      '  - child\r'
+    ])
   })
 })
 
