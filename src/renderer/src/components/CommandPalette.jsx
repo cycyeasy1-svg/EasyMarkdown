@@ -12,6 +12,15 @@ const MODE_BY_PREFIX = {
   ':': 'line',
   '?': 'help'
 }
+const PALETTE_MODES = ['files', 'commands', 'headings', 'workspaceHeadings', 'line', 'help']
+const MODE_ICONS = {
+  files: 'file',
+  commands: 'command',
+  headings: 'outline',
+  workspaceHeadings: 'hash',
+  line: 'hash',
+  help: 'info'
+}
 
 export function paletteQueryMode(query) {
   const prefix = PREFIXES.has(String(query || '')[0]) ? query[0] : ''
@@ -87,6 +96,7 @@ function CommandPalette({
 }) {
   const { t } = useI18n()
   const [query, setQuery] = useState('')
+  const [mode, setMode] = useState('files')
   const deferredQuery = useDeferredValue(query)
   const [sel, setSel] = useState(0)
   const [mru, setMru] = useState(EMPTY_ITEMS)
@@ -95,11 +105,12 @@ function CommandPalette({
   const [workspaceError, setWorkspaceError] = useState(false)
   const workspaceRequestRef = useRef(0)
   const inputRef = useRef(null)
-  const parsed = paletteQueryMode(deferredQuery)
+  const parsed = { mode, term: deferredQuery.trim() }
 
   useEffect(() => {
     if (!open) return
     setQuery('')
+    setMode('files')
     setSel(0)
     setMru(readMru())
     setWorkspaceIndex(null)
@@ -212,7 +223,7 @@ function CommandPalette({
         title: `${prefix || '·'}  ${t(titleKey)}`,
         hint: t(hintKey),
         icon: mode === 'files' ? 'file' : mode.includes('Heading') || mode === 'headings' ? 'outline' : 'command',
-        fill: prefix
+        fill: mode
       }))
     }
     const candidates = new Map()
@@ -255,12 +266,19 @@ function CommandPalette({
 
   if (!open) return null
 
+  const switchMode = (nextMode) => {
+    if (!PALETTE_MODES.includes(nextMode)) return
+    setMode(nextMode)
+    setQuery('')
+    setSel(0)
+    setWorkspaceError(false)
+    requestAnimationFrame(() => inputRef.current?.focus())
+  }
+
   const choose = (item) => {
     if (!item) return
     if (Object.hasOwn(item, 'fill')) {
-      setQuery(item.fill)
-      setSel(0)
-      requestAnimationFrame(() => inputRef.current?.focus())
+      switchMode(item.fill)
       return
     }
     const nextMru = [item.id, ...mru.filter((id) => id !== item.id)].slice(0, 30)
@@ -276,18 +294,44 @@ function CommandPalette({
       : parsed.mode === 'workspaceHeadings' && workspaceError
         ? t('palette.indexFailed')
         : t('palette.emptyMode')
+  const inputPlaceholder =
+    mode === 'line'
+      ? t('palette.placeholder.line', { n: lineCount })
+      : t(`palette.placeholder.${mode}`)
 
   return (
     <div className="palette-overlay" onMouseDown={onClose}>
       <div className="palette" onMouseDown={(event) => event.stopPropagation()}>
         <div className="palette-input">
-          <span className="palette-mode-badge">{t(`palette.mode.${parsed.mode}`)}</span>
+          <div className="palette-mode-control">
+            <Icon name={MODE_ICONS[mode]} size={15} className="palette-mode-icon" />
+            <select
+              value={mode}
+              aria-label={t('palette.searchScope')}
+              title={t('palette.searchScope')}
+              onChange={(event) => switchMode(event.target.value)}
+            >
+              {PALETTE_MODES.map((itemMode) => (
+                <option key={itemMode} value={itemMode}>
+                  {t(`palette.mode.${itemMode}`)}
+                </option>
+              ))}
+            </select>
+            <Icon name="chevron-down" size={12} className="palette-mode-chevron" />
+          </div>
           <input
             ref={inputRef}
             value={query}
-            placeholder={t('palette.placeholderModes')}
+            placeholder={inputPlaceholder}
             onChange={(event) => {
-              setQuery(event.target.value)
+              const value = event.target.value
+              const shortcut = paletteQueryMode(value)
+              if (shortcut.prefix) {
+                setMode(shortcut.mode)
+                setQuery(shortcut.term)
+              } else {
+                setQuery(value)
+              }
               setSel(0)
             }}
             onKeyDown={(event) => {
@@ -311,7 +355,7 @@ function CommandPalette({
             <div className="palette-empty">
               <span>{emptyMessage}</span>
               {!workspaceLoading && (
-                <button type="button" onClick={() => setQuery('?')}>
+                <button type="button" onClick={() => switchMode('help')}>
                   {t('palette.showModes')}
                 </button>
               )}
@@ -333,7 +377,8 @@ function CommandPalette({
                       ? 'hash'
                       : item.icon || 'command'
                 }
-                size={15}
+                size={16}
+                className="palette-item-icon"
               />
               <span className="pi-title">{item.title}</span>
               {item.hint && <span className="pi-hint">{item.hint}</span>}

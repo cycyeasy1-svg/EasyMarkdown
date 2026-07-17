@@ -3731,21 +3731,61 @@ body.hm-full-width .source-editor-wrap {
   border-bottom: 1px solid var(--border-soft);
   color: var(--muted);
 }
-.palette-mode-badge {
+.palette-mode-control {
+  position: relative;
+  display: flex;
+  align-items: center;
+  height: 32px;
   flex: 0 0 auto;
-  max-width: 150px;
-  overflow: hidden;
-  padding: 3px 7px;
   border: 1px solid var(--border-soft);
-  border-radius: 999px;
+  border-radius: 8px;
   color: var(--accent-strong);
   background: var(--accent-soft);
-  font-size: 11px;
+  transition:
+    border-color 0.12s var(--ease-out),
+    background 0.12s var(--ease-out),
+    box-shadow 0.12s var(--ease-out);
+}
+.palette-mode-control:hover {
+  border-color: var(--border);
+  background: var(--active);
+}
+.palette-mode-control:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 24%, transparent);
+}
+.palette-mode-control select {
+  height: 100%;
+  max-width: min(168px, 34vw);
+  padding: 0 24px 0 5px;
+  overflow: hidden;
+  appearance: none;
+  color: inherit;
+  background: transparent;
+  border: 0;
+  outline: 0;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
   font-weight: 650;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.palette-mode-icon {
+  width: 15px;
+  height: 15px;
+  flex: 0 0 15px;
+  margin-left: 8px;
+}
+.palette-mode-chevron {
+  position: absolute;
+  right: 7px;
+  width: 12px;
+  height: 12px;
+  pointer-events: none;
+}
 .palette-input input {
+  min-width: 0;
   flex: 1;
   background: transparent;
   border: none;
@@ -3800,6 +3840,11 @@ body.hm-full-width .source-editor-wrap {
   color: var(--accent-strong);
 }
 .palette-item.sel svg { color: var(--accent); }
+.palette-item > .palette-item-icon {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
+}
 .palette-item .pi-title {
   min-width: 0;
   flex: 0 1 auto;
@@ -3835,6 +3880,11 @@ body.hm-full-width .source-editor-wrap {
   color: var(--faint);
   font-size: 11px;
   text-align: center;
+}
+@media (pointer: coarse) {
+  .palette-mode-control {
+    height: 44px;
+  }
 }
 
 /* MRU tab switcher (Ctrl/Cmd+Tab). It previews selection in a compact overlay

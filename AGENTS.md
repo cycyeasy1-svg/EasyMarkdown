@@ -257,6 +257,11 @@ docs/                  architecture / features / implementation-notes / developm
   engine-toggle button. Beside it, keep one view-toggle button: it cycles
   Rich → Source → Rich+Source in Keep, and Rich ⇄ Source in Milkdown. Do not
   expand these states into a segmented button group or a duplicate dropdown.
+- **Command-palette modes stay visibly selectable.** The current search scope
+  is a real dropdown, while `>` / `@` / `#` / `:` / `?` remain accelerator
+  prefixes. Keep scope and query as separate UI state so selecting a scope does
+  not inject syntax into the input. Result icons use a fixed flex basis; long
+  file names and paths must never shrink individual icons.
 - **Keep table actions avoid duplicate floating UI.** `.km-table-tools` is the
   in-flow toolbar inside `.km-table-frame` and scrolls with its table. Do not
   reintroduce the removed body-level `.km-cell-tools`: edit is available by

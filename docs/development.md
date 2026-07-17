@@ -111,7 +111,7 @@ npm run test:e2e   # 先 electron-vite build，再 playwright test
   - **`navigation-context.spec.js`** —— 导航返回时恢复 Keep 的表格筛选、横向位置、选中格、标题折叠，以及源码视图的完整选区。
   - **`source-keep-split.spec.js`** —— Keep 下状态栏维持单个视图按钮，并按「富文本 → 源码 → 富文本 + 源码」循环；同时覆盖同一文档源码 + Keep 的节点保持、双向内容/滚动/定位同步、左右互换，以及固定预览后切换源码标签。
   - **`source-mode-upgrade.spec.js`** —— Milkdown 下同一个视图按钮仍只在「富文本 ↔ 源码」之间切换，不进入 Keep 专用的同步分栏状态。
-  - **`command-palette-modes.spec.js`** —— 无前缀文件、`>` 命令、`@` 当前标题、`#` 工作区标题、`:` 行号、`?` 帮助，以及 MRU 与快捷键显示。
+  - **`command-palette-modes.spec.js`** —— 可见的搜索范围下拉选择、各范围独立提示、`>` / `@` / `#` / `:` / `?` 快捷切换、MRU 与快捷键显示，以及长路径下结果图标仍保持统一尺寸。
 - **选区浮动工具栏没港**:它是 Crepe 自带气泡(`.milkdown-toolbar`,app 往里注入了 `.hm-heading-item` 标题按钮),只在**真实指针拖选**时出现,且在自动化下不可靠地布局/可点(etv 旧的 `.block-selbar` 已不存在);它的块转换走的是和 Ctrl+2/右键菜单同一条路径(Editor.jsx),已被覆盖,故有意不测。选区若要测,用**真实鼠标拖选**(`page.mouse.down/move/up`,trusted 事件能驱动 ProseMirror 选区;合成 CDP 拖拽不行)。
 - keep 模式相对图片→`file://` 已修并有 E2E(`images.md`),见下方"图片支持"。
 
