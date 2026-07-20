@@ -68,6 +68,31 @@ describe('VSCode Keep webview interactions', () => {
     expect(widths).toEqual(['6em', '6em'])
   })
 
+  it('renders and navigates to an explicit empty anchor inside a table cell', async () => {
+    send({
+      type: 'init',
+      text: [
+        '| Event | ID |',
+        '| --- | --- |',
+        '| Init | <a id="def-bhv-099"></a>[BHV-099](#def-bhv-099) |'
+      ].join('\n'),
+      lang: 'en',
+      langPref: 'en',
+      theme: 'auto'
+    })
+    await waitForPaint()
+
+    const anchor = document.querySelector('tbody td a#def-bhv-099')
+    expect(anchor).not.toBeNull()
+    expect(anchor.textContent).toBe('')
+    expect(anchor.parentElement.textContent).toBe('BHV-099')
+    expect(anchor.parentElement.innerHTML).not.toContain('&lt;a')
+
+    const scroll = vi.spyOn(anchor, 'scrollIntoView').mockImplementation(() => {})
+    send({ type: 'scrollToAnchor', slug: 'def-bhv-099' })
+    expect(scroll).toHaveBeenCalledWith({ behavior: 'smooth', block: 'start' })
+  })
+
   it('shows candidate counts within the other columns\' filter context', async () => {
     send({
       type: 'init',

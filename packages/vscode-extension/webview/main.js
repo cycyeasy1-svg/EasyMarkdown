@@ -2823,7 +2823,20 @@ function headingSlugs() {
   })
 }
 function scrollToAnchor(slug) {
-  const dec = safeDecode(String(slug || '')).toLowerCase()
+  const decoded = safeDecode(String(slug || ''))
+  // Empty raw-HTML anchors are rendered by the shared inline parser. Match their
+  // id/name values without building a CSS selector from document-controlled text.
+  // They may sit inside a collapsed section, so reveal the containing block first.
+  const explicit = [...host.querySelectorAll('a[id], a[name]')].find(
+    (el) => el.getAttribute('id') === decoded || el.getAttribute('name') === decoded
+  )
+  if (explicit) {
+    const block = explicit.closest('.km-block')
+    if (block) expandAncestors(block)
+    explicit.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    return
+  }
+  const dec = decoded.toLowerCase()
   const list = headingSlugs()
   // Exact slug match first; then tolerate a raw-heading-text fragment.
   const hit = list.find((h) => h.slug === dec) || list.find((h) => h.slug === slugifyHeading(dec))

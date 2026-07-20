@@ -91,12 +91,13 @@ function safeImgSrc(rawSrc, baseDir) {
 //
 // Every option below is load-bearing:
 //   html: false    keep mode paints with innerHTML, so raw HTML in the document must
-//                  never reach the DOM. Two fragments are still honored, explicitly:
+//                  never reach the DOM. Three fragments are still honored, explicitly:
 //                  a literal `<br>` (how a GFM table cell encodes a line break — see
 //                  editor-tablebreak.js) is split off before parsing, and
 //                  `<mark class="hm-hl-…">` (how the rich editor stringifies a red or
-//                  blue highlight — editor-highlight.js) is claimed by the inline rule
-//                  below. Nothing else gets through.
+//                  blue highlight — editor-highlight.js), plus an empty `<a id|name>`
+//                  document anchor. The latter accepts no other attributes, so event
+//                  handlers / hrefs still remain escaped text. Nothing else gets through.
 //   linkify        GFM autolinks a bare `https://…`. fuzzyLink stays OFF: it also
 //                  linkifies any bare `word.tld`, and `.md` is a real ccTLD, so every
 //                  `README.md` mentioned in prose turned into a hyperlink.
@@ -107,6 +108,32 @@ const md = new MarkdownIt({ html: false, linkify: true, breaks: false, typograph
 md.normalizeLink = (url) => url
 md.normalizeLinkText = (text) => text
 md.linkify.set({ fuzzyLink: false, fuzzyEmail: false, fuzzyIP: false })
+
+// Explicit document anchors are common in generated design docs, including inside
+// GFM table cells: `<a id="def-bhv-001"></a>[BHV-001](…#def-bhv-001)`.
+// With html:false markdown-it correctly escapes arbitrary raw HTML, but that also
+// made this safe, invisible anchor appear as literal source. Claim only the exact
+// empty-anchor form with one id/name attribute. A bespoke token lets the renderer
+// escape the attribute value again and keeps all wider raw-HTML support disabled.
+const EMPTY_ANCHOR_HTML_RE =
+  /<a\s+(id|name)\s*=\s*(?:"([^"]+)"|'([^']+)'|([^\s"'=<>`]+))\s*>\s*<\/a\s*>/iy
+md.inline.ruler.before('html_inline', 'hm_empty_anchor', (state, silent) => {
+  if (state.src.charCodeAt(state.pos) !== 0x3c /* < */) return false
+  EMPTY_ANCHOR_HTML_RE.lastIndex = state.pos
+  const match = EMPTY_ANCHOR_HTML_RE.exec(state.src)
+  if (!match) return false
+  if (!silent) {
+    const token = state.push('hm_empty_anchor', 'a', 0)
+    token.attrSet(match[1].toLowerCase(), match[2] ?? match[3] ?? match[4])
+  }
+  state.pos += match[0].length
+  return true
+})
+md.renderer.rules.hm_empty_anchor = (tokens, idx) => {
+  const token = tokens[idx]
+  const attr = token.attrGet('id') != null ? 'id' : 'name'
+  return '<a ' + attr + '="' + escapeAttr(token.attrGet(attr) || '') + '"></a>'
+}
 
 // `==highlight==` and its colored `<mark class="hm-hl-…">` form. Registered as an
 // inline RULE, not a pre-pass on the raw string: markdown-it runs the `backticks`

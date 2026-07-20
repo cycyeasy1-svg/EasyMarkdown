@@ -81,6 +81,24 @@ describe('inline', () => {
     // construct stays inert source text — strictly safer than the old empty href.
     expect(inline('[x](javascript:void)')).toBe('[x](javascript:void)')
   })
+  it('renders safe empty document anchors without exposing general raw HTML', () => {
+    expect(inline('<a id="def-bhv-099"></a>[BHV-099](#def-bhv-099)')).toBe(
+      '<a id="def-bhv-099"></a><a href="#def-bhv-099" target="_blank" rel="noopener">BHV-099</a>'
+    )
+    expect(inline("<a name='legacy-anchor'></a>target")).toBe(
+      '<a name="legacy-anchor"></a>target'
+    )
+    expect(inline('<a id=plain-anchor></a>target')).toBe(
+      '<a id="plain-anchor"></a>target'
+    )
+    expect(inline('`<a id="code-anchor"></a>`')).toBe(
+      '<code>&lt;a id=&quot;code-anchor&quot;&gt;&lt;/a&gt;</code>'
+    )
+    expect(inline('<a id="x" onclick="alert(1)"></a>')).toBe(
+      '&lt;a id=&quot;x&quot; onclick=&quot;alert(1)&quot;&gt;&lt;/a&gt;'
+    )
+    expect(inline('<a href="#x"></a>')).toBe('&lt;a href=&quot;#x&quot;&gt;&lt;/a&gt;')
+  })
   it('keeps a link title and a URL containing parentheses', () => {
     expect(inline('[a](http://x "t")')).toBe(
       '<a href="http://x" title="t" target="_blank" rel="noopener">a</a>'
