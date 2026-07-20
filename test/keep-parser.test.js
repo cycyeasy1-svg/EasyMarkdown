@@ -298,6 +298,14 @@ describe('table cell/column edits (raw-line, byte-preserving)', () => {
 })
 
 describe('table column width hints', () => {
+  it('reserves the full long header width even when body cells are short', () => {
+    const header = '表示条件与活动范围及计算方法和必要步骤与最终结果'
+    const [width] = estimateTableColumnWidths([header], [{ cells: ['-'] }])
+
+    expect(width).toBeGreaterThan(22)
+    expect(width).toBeGreaterThanOrEqual(Array.from(header).length + 5)
+  })
+
   it('sizes links from their rendered labels instead of hidden Markdown destinations', () => {
     const plain = estimateTableColumnWidths(['Column'], [{ cells: ['短'] }])[0]
     const nestedDestination = estimateTableColumnWidths(

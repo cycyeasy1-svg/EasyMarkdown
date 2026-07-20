@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Icon } from './icons.jsx'
 import { useI18n, LANGS } from '../i18n.jsx'
 import { THEMES } from '../themes.js'
-import { TypographyGroups } from './TypographyControls.jsx'
 import { fireToast } from '../ui.js'
 import { resolveDefaultFontName } from '../../../shared/fonts.js'
 
@@ -64,9 +63,9 @@ function FontRow({ id, label, desc, value, defaultValue, fonts, resetLabel, onLo
   )
 }
 
-// Unified settings modal — the single home for every preference (typography,
-// theme, language, editing). The status bar keeps only the everyday controls
-// (stats, keep/rich, source toggle) plus the gear button that opens this.
+// Unified settings modal for durable preferences. Frequently adjusted layout
+// controls live in the status bar; font-family choices stay here because they
+// change far less often.
 export default function Settings({
   open,
   onClose,
@@ -81,7 +80,7 @@ export default function Settings({
   onOpenThemesFolder,
   onGetMoreThemes,
   onClearLocalHistory,
-  typographyProps
+  onOpenHelp
 }) {
   const { lang, t, setLang } = useI18n()
   const caps = window.api.capabilities || {}
@@ -229,10 +228,10 @@ export default function Settings({
             )}
           </div>
 
-          {/* ── Typography (same controls as the status-bar Layout popover) ── */}
-          <div className="hm-set-section">
-            <div className="hm-set-section-title">{t('settings.sectionTypography')}</div>
-            {caps.nativeMenus && (
+          {/* ── Fonts ── */}
+          {caps.nativeMenus && (
+            <div className="hm-set-section">
+              <div className="hm-set-section-title">{t('settings.sectionFonts')}</div>
               <div className="hm-font-pickers">
                 <FontRow
                   id="en"
@@ -283,15 +282,8 @@ export default function Settings({
                   onReset={() => updateSettings({ fontMono: '' })}
                 />
               </div>
-            )}
-            <TypographyGroups {...typographyProps} />
-            <SwitchRow
-              label={t('settings.blankLineSpacing')}
-              desc={t('settings.blankLineSpacingDesc')}
-              checked={settings.blankLineSpacing}
-              onChange={(v) => updateSettings({ blankLineSpacing: v })}
-            />
-          </div>
+            </div>
+          )}
 
           {/* ── Appearance ── */}
           <div className="hm-set-section">
@@ -373,6 +365,22 @@ export default function Settings({
                 </button>
               ))}
             </div>
+          </div>
+
+          <div className="hm-settings-help">
+            <span>
+              <strong>{t('help.settingsLabel')}</strong>
+              <small>{t('help.settingsDesc')}</small>
+            </span>
+            <button
+              type="button"
+              onClick={() => {
+                onClose()
+                onOpenHelp?.('start')
+              }}
+            >
+              <Icon name="help" size={14} /> {t('help.guide')}
+            </button>
           </div>
         </div>
       </div>

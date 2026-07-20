@@ -29,10 +29,10 @@ test('paragraph-spacing preset changes the keep-mode block spacing', async () =>
     const marginOf = () => para.evaluate((el) => getComputedStyle(el).marginTop)
     const before = await marginOf()
 
-    // Open the Settings modal (status-bar gear) and pick a paragraph-spacing
-    // preset other than the active one, so the value is guaranteed to change.
-    await page.locator('.statusbar button[title="设置"]').click()
-    const group = page.locator('.hm-adjust-group', {
+    // Open the status-bar Layout popover and pick a paragraph-spacing preset
+    // other than the active one, so the value is guaranteed to change.
+    await page.locator('.statusbar button[title="排版"]').click()
+    const group = page.locator('.hm-layout-pop .hm-adjust-group', {
       has: page.locator('.hm-pop-title', { hasText: '段落间距' })
     })
     await expect(group).toBeVisible()
@@ -292,6 +292,41 @@ test('keep table columns use rendered link labels instead of hidden destinations
     await expect(headers).toHaveCount(2)
     const widths = await headers.evaluateAll((cells) => cells.map((cell) => cell.offsetWidth))
     expect(Math.abs(widths[0] - widths[1])).toBeLessThanOrEqual(2)
+  } finally {
+    await cleanup()
+    try {
+      rmSync(dir, { recursive: true, force: true })
+    } catch {
+      /* best effort */
+    }
+  }
+})
+
+test('keep table automatic widths keep long CJK headers fully visible', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'em-table-header-width-'))
+  const file = join(dir, 'table-header-width.md')
+  const longHeader = '表示条件与活动范围及计算方法和必要步骤与最终结果'
+  const headers = [longHeader, ...Array.from({ length: 10 }, (_, index) => `C${index + 1}`)]
+  writeFileSync(
+    file,
+    [
+      '| ' + headers.join(' | ') + ' |',
+      '| ' + headers.map(() => '---').join(' | ') + ' |',
+      '| ' + headers.map(() => '-').join(' | ') + ' |'
+    ].join('\n'),
+    'utf8'
+  )
+
+  const { page, cleanup } = await launchApp([file])
+  try {
+    await page.locator('.tab', { hasText: 'table-header-width.md' }).click()
+    const content = page.locator('.km-doc table.km-table th[data-ci="0"] .km-th-content')
+    await expect(content).toHaveText(longHeader)
+    const metrics = await content.evaluate((element) => ({
+      clientWidth: element.clientWidth,
+      scrollWidth: element.scrollWidth
+    }))
+    expect(metrics.scrollWidth).toBeLessThanOrEqual(metrics.clientWidth + 1)
   } finally {
     await cleanup()
     try {

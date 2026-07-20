@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { dirname, join, relative } from 'node:path'
 import { tmpdir } from 'node:os'
 import { launchApp, selectStatusViewMode } from './helpers.js'
 
@@ -94,5 +94,47 @@ test('link problems, F8 navigation, references, heading rename, and file rename 
   } finally {
     await cleanup()
     rmSync(workspace, { recursive: true, force: true })
+  }
+})
+
+test('reference lookup stays inside the target workspace and links remain last in the activity tools', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'em-links-scope-'))
+  const projectA = join(root, 'project-a')
+  const projectB = join(root, 'project-b')
+  mkdirSync(projectA)
+  mkdirSync(projectB)
+
+  const targetPath = join(projectA, 'guide.md')
+  const localReferencePath = join(projectA, 'index.md')
+  const crossProjectReferencePath = join(projectB, 'index.md')
+  const crossProjectTarget = relative(dirname(crossProjectReferencePath), targetPath).replace(/\\/g, '/')
+  writeFileSync(targetPath, '# Guide\n\n## Install\n')
+  writeFileSync(localReferencePath, '[Local guide](guide.md#install)\n')
+  writeFileSync(crossProjectReferencePath, `[Cross-project guide](${encodeURI(crossProjectTarget)}#install)\n`)
+
+  const { app, page, cleanup } = await launchApp([targetPath])
+  try {
+    await app.evaluate(({ BrowserWindow }, roots) => {
+      const win = BrowserWindow.getAllWindows()[0]
+      for (const workspaceRoot of roots) win.webContents.send('open-folder', workspaceRoot)
+    }, [projectA, projectB])
+    await expect(page.locator('.tree-root')).toHaveCount(2)
+
+    const outlineButton = page.locator('button[title="大纲"]')
+    const linksButton = page.locator('button[title^="Markdown 链接"]')
+    const linksHandle = await linksButton.elementHandle()
+    expect(await outlineButton.evaluate((element, links) =>
+      !!(element.compareDocumentPosition(links) & Node.DOCUMENT_POSITION_FOLLOWING), linksHandle
+    )).toBe(true)
+
+    const installHeading = page.locator('.km-heading', { hasText: 'Install' })
+    await installHeading.click({ button: 'right' })
+    await page.locator('.km-table-menu button', { hasText: '查找所有引用' }).click()
+    await expect(page.locator('.hm-search-item')).toHaveCount(1)
+    await expect(page.locator('.hm-search-item')).toContainText('Local guide')
+    await expect(page.locator('.hm-search-item')).not.toContainText('Cross-project guide')
+  } finally {
+    await cleanup()
+    rmSync(root, { recursive: true, force: true })
   }
 })

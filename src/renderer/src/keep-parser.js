@@ -199,8 +199,12 @@ export function inline(text, baseDir) {
 }
 
 const TABLE_COL_MIN_EM = 6
-const TABLE_COL_HEADER_MAX_EM = 22
 const TABLE_COL_MAX_EM = 44
+// Header width includes more than its label: cell padding, the flex gap, the
+// filter control, and the always-laid-out hide-column control added after paint.
+// Keep this budget separate from body padding so auto-fit never ellipsizes a
+// header merely because every body cell in the column is short.
+const TABLE_COL_HEADER_CHROME_EM = 5
 const WIDE_CHAR_RE =
   /[\u1100-\u115f\u2329\u232a\u2e80-\u303f\u3040-\u30ff\u3100-\u312f\u3130-\u318f\u31a0-\u31ff\u3400-\u9fff\uf900-\ufaff\uff01-\uff60\uffe0-\uffe6]/
 
@@ -233,7 +237,11 @@ function measureTextEm(text) {
 
 export function estimateTableColumnWidths(headers, dataRows = []) {
   const widths = headers.map((h) =>
-    clamp(Math.ceil(measureTextEm(h) + 4), TABLE_COL_MIN_EM, TABLE_COL_HEADER_MAX_EM)
+    clamp(
+      Math.ceil(measureTextEm(h) + TABLE_COL_HEADER_CHROME_EM),
+      TABLE_COL_MIN_EM,
+      TABLE_COL_MAX_EM
+    )
   )
 
   dataRows.forEach((row) => {

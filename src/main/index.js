@@ -1660,6 +1660,9 @@ const MENU_STRINGS = {
     zoomIn: 'Zoom In',
     zoomOut: 'Zoom Out',
     zoomReset: 'Reset Zoom',
+    help: 'Help',
+    userGuide: 'User Guide',
+    keyboardShortcuts: 'Keyboard Shortcuts',
     addToDictionary: 'Add to Dictionary'
   },
   zh: {
@@ -1700,6 +1703,9 @@ const MENU_STRINGS = {
     fullscreen: '切换全屏',
     devTools: '开发者工具',
     window: '窗口',
+    help: '帮助',
+    userGuide: '使用指南',
+    keyboardShortcuts: '键盘快捷键',
     addToDictionary: '添加到词典'
   },
   ja: {
@@ -1740,6 +1746,9 @@ const MENU_STRINGS = {
     fullscreen: 'フルスクリーンの切替',
     devTools: '開発者ツール',
     window: 'ウィンドウ',
+    help: 'ヘルプ',
+    userGuide: '使い方ガイド',
+    keyboardShortcuts: 'キーボードショートカット',
     addToDictionary: '辞書に追加'
   }
 }
@@ -1838,7 +1847,20 @@ function buildMenu() {
         roleItem('toggleDevTools', L.devTools)
       ]
     },
-    roleItem('windowMenu', L.window)
+    roleItem('windowMenu', L.window),
+    {
+      role: 'help',
+      label: L.help,
+      submenu: [
+        {
+          label: L.userGuide,
+          accelerator: 'F1',
+          registerAccelerator: false,
+          click: menuCmd('help')
+        },
+        { label: L.keyboardShortcuts, click: menuCmd('shortcuts') }
+      ]
+    }
   ]
   Menu.setApplicationMenu(Menu.buildFromTemplate(template))
 }

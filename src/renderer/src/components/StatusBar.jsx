@@ -5,6 +5,7 @@ import { useI18n } from '../i18n.jsx'
 import { THEMES } from '../themes.js'
 import { LANGS } from '../i18n.jsx'
 import { FONT_SIZE_MIN, FONT_SIZE_MAX, ZOOM_MIN, ZOOM_MAX, ZOOM_STEP } from '../settings.js'
+import { TypographyGroups } from './TypographyControls.jsx'
 
 const zoomPct = (z) => Math.round(z * 100) + '%'
 
@@ -70,6 +71,50 @@ function usePopover() {
   return { open, setOpen, ref }
 }
 
+// One compact status-bar entry for the layout preferences people tune while
+// reading and writing. Font-family choices intentionally remain in Settings.
+function LayoutControl({ blankLineSpacing, onSetBlankLineSpacing, ...typographyProps }) {
+  const { t } = useI18n()
+  const { open, setOpen, ref } = usePopover()
+  return (
+    <div className="block-switch hm-layout" ref={ref}>
+      <button
+        type="button"
+        className={`status-btn${open ? ' active' : ''}`}
+        onClick={() => setOpen((value) => !value)}
+        title={t('settings.sectionTypography')}
+        aria-label={t('settings.sectionTypography')}
+        aria-expanded={open}
+        aria-haspopup="dialog"
+      >
+        <Icon name="sliders" size={14} />
+      </button>
+      {open && (
+        <div className="hm-pop hm-layout-pop" role="dialog" aria-label={t('settings.sectionTypography')}>
+          <TypographyGroups {...typographyProps} />
+          <div className="hm-pop-sep" />
+          <div className="hm-layout-option">
+            <div className="hm-layout-option-text">
+              <span className="hm-pop-title">{t('settings.blankLineSpacing')}</span>
+              <span className="hm-layout-option-desc">{t('settings.blankLineSpacingDesc')}</span>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={blankLineSpacing}
+              aria-label={t('settings.blankLineSpacing')}
+              className={`hm-switch${blankLineSpacing ? ' on' : ''}`}
+              onClick={() => onSetBlankLineSpacing(!blankLineSpacing)}
+            >
+              <span className="hm-switch-knob" />
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 // Document stats: one status-bar button showing the character count → popover
 // with the full breakdown (words, characters, characters w/o spaces, read time).
 function StatsControl({ stats }) {
@@ -101,34 +146,75 @@ function StatsControl({ stats }) {
   )
 }
 
-// About: keep product ownership primary while preserving the MIT attribution.
-function AboutControl() {
+// Help is the discoverable home for learning and support. Product attribution
+// remains available at the bottom instead of occupying a separate status item.
+function HelpControl({ onOpenHelp }) {
   const { t } = useI18n()
   const { open, setOpen, ref } = usePopover()
+  const openTopic = (topic) => {
+    setOpen(false)
+    onOpenHelp?.(topic)
+  }
   return (
-    <div className="block-switch hm-about" ref={ref}>
-      <button className="status-btn" onClick={() => setOpen((v) => !v)} title={t('about.title')}>
-        <Icon name="info" size={14} />
+    <div className="block-switch hm-help-control" ref={ref}>
+      <button
+        type="button"
+        className={`status-btn${open ? ' active' : ''}`}
+        onClick={() => setOpen((v) => !v)}
+        title={`${t('help.title')} (F1)`}
+        aria-expanded={open}
+        aria-haspopup="dialog"
+      >
+        <Icon name="help" size={14} />
       </button>
       {open && (
-        <div className="hm-pop hm-about-pop">
-          <div className="hm-about-head">
-            <img className="hm-about-logo" src={logoUrl} alt="EasyMarkdown" />
-            <div className="hm-about-name-ver">
-              <span className="hm-about-brand">
-                <span className="brand-easy">Easy</span>
-                <span className="brand-md">Markdown</span>
-              </span>
-              {APP_VERSION && <span className="hm-about-ver">v{APP_VERSION}</span>}
+        <div className="hm-pop hm-help-pop" role="dialog" aria-label={t('help.title')}>
+          <div className="hm-help-pop-title">{t('help.title')}</div>
+          <button type="button" className="hm-help-pop-item primary" onClick={() => openTopic('start')}>
+            <Icon name="sparkle" size={15} />
+            <span><strong>{t('help.quickStart')}</strong><small>{t('help.guide')}</small></span>
+            <kbd>F1</kbd>
+          </button>
+          <button type="button" className="hm-help-pop-item" onClick={() => openTopic('shortcuts')}>
+            <Icon name="command" size={15} />
+            <span>{t('help.shortcuts')}</span>
+          </button>
+          <button type="button" className="hm-help-pop-item" onClick={() => openTopic('whats-new')}>
+            <Icon name="sparkle" size={15} />
+            <span>{t('help.whatsNew')}</span>
+          </button>
+          <button
+            type="button"
+            className="hm-help-pop-item"
+            onClick={() => {
+              setOpen(false)
+              window.api.openExternal?.('https://github.com/cycyeasy1-svg/EasyMarkdown/issues')
+            }}
+          >
+            <Icon name="github" size={15} />
+            <span>{t('help.reportIssue')}</span>
+          </button>
+          <div className="hm-pop-sep" />
+          <details className="hm-help-about">
+            <summary>{t('about.title')}</summary>
+            <div className="hm-about-head">
+              <img className="hm-about-logo" src={logoUrl} alt="EasyMarkdown" />
+              <div className="hm-about-name-ver">
+                <span className="hm-about-brand">
+                  <span className="brand-easy">Easy</span>
+                  <span className="brand-md">Markdown</span>
+                </span>
+                {APP_VERSION && <span className="hm-about-ver">v{APP_VERSION}</span>}
+              </div>
             </div>
-          </div>
-          <p className="hm-about-text">
-            {richLine(t('about.intro'), { author: PRODUCT_AUTHOR })}
-          </p>
-          <p className="hm-about-text">
-            {richLine(t('about.thanks'), { project: ORIGINAL_PROJECT, author: ORIGINAL_AUTHOR })}
-          </p>
-          <div className="hm-about-license">{t('about.license')}</div>
+            <p className="hm-about-text">
+              {richLine(t('about.intro'), { author: PRODUCT_AUTHOR })}
+            </p>
+            <p className="hm-about-text">
+              {richLine(t('about.thanks'), { project: ORIGINAL_PROJECT, author: ORIGINAL_AUTHOR })}
+            </p>
+            <div className="hm-about-license">{t('about.license')}</div>
+          </details>
         </div>
       )}
     </div>
@@ -226,6 +312,7 @@ function MobileMore({
   customTheme,
   onPickCustom,
   onRefreshThemes,
+  onOpenHelp,
   fontSize,
   onSetFontSize,
   zoom,
@@ -395,6 +482,29 @@ function MobileMore({
           </div>
 
           <div className="theme-menu-sep" />
+          <div className="theme-menu-label">{t('help.title')}</div>
+          <button
+            className="block-menu-item"
+            onClick={() => {
+              setOpen(false)
+              onOpenHelp?.('start')
+            }}
+          >
+            <Icon name="help" size={15} />
+            <span className="block-menu-name">{t('help.guide')}</span>
+          </button>
+          <button
+            className="block-menu-item"
+            onClick={() => {
+              setOpen(false)
+              onOpenHelp?.('shortcuts')
+            }}
+          >
+            <Icon name="command" size={15} />
+            <span className="block-menu-name">{t('help.shortcuts')}</span>
+          </button>
+
+          <div className="theme-menu-sep" />
           <div className="theme-menu-label">{t('about.title')}</div>
           <div className="hm-about-sheet">
             <p className="hm-about-text">
@@ -434,17 +544,26 @@ function StatusBar({
   onToggleKeep,
   showModeHint,
   onDismissModeHint,
+  pageWidth,
+  onSetPageWidth,
   fontSize,
   onSetFontSize,
   zoom,
   onSetZoom,
+  lineHeight,
+  onSetLineHeight,
+  paragraphSpacing,
+  onSetParagraphSpacing,
+  blankLineSpacing,
+  onSetBlankLineSpacing,
   customThemes,
   customTheme,
   onPickCustom,
   onRefreshThemes,
   filterInfo,
   onClearFilters,
-  onOpenSettings
+  onOpenSettings,
+  onOpenHelp
 }) {
   const { t } = useI18n()
   // Word/char/reading-time stats run 3 whole-document regex passes; computing
@@ -576,6 +695,7 @@ function StatusBar({
                 customTheme={customTheme}
                 onPickCustom={onPickCustom}
                 onRefreshThemes={onRefreshThemes}
+                onOpenHelp={onOpenHelp}
                 fontSize={fontSize}
                 onSetFontSize={onSetFontSize}
                 zoom={zoom}
@@ -601,12 +721,26 @@ function StatusBar({
                 />
               </>
             )}
+            <LayoutControl
+              fontSize={fontSize}
+              onSetFontSize={onSetFontSize}
+              pageWidth={pageWidth}
+              onSetPageWidth={onSetPageWidth}
+              zoom={zoom}
+              onSetZoom={onSetZoom}
+              lineHeight={lineHeight}
+              onSetLineHeight={onSetLineHeight}
+              paragraphSpacing={paragraphSpacing}
+              onSetParagraphSpacing={onSetParagraphSpacing}
+              blankLineSpacing={blankLineSpacing}
+              onSetBlankLineSpacing={onSetBlankLineSpacing}
+            />
             {onOpenSettings && (
               <button className="status-btn" onClick={onOpenSettings} title={t('settings.title')}>
                 <Icon name="settings" size={14} />
               </button>
             )}
-            <AboutControl />
+            <HelpControl onOpenHelp={onOpenHelp} />
           </>
         )}
       </div>

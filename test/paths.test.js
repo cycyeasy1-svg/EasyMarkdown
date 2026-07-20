@@ -11,6 +11,7 @@ import {
   dirName,
   joinPath,
   pathInWorkspace,
+  workspaceRootForPath,
   isMarkdownName,
   isPlainTextDoc,
   isValidName,
@@ -116,6 +117,22 @@ describe('pathInWorkspace', () => {
   it('accepts the persisted string-root shape used in older session tests', () => {
     expect(pathInWorkspace('/work/a.md', ['/work'])).toBe(true)
     expect(pathInWorkspace('/other/a.md', ['/work'])).toBe(false)
+  })
+
+  it('returns the most specific workspace root for project-scoped operations', () => {
+    const workspaces = [
+      { rootPath: '/work', rootName: 'work' },
+      { rootPath: '/work/project-a', rootName: 'project-a' },
+      { rootPath: '/other', rootName: 'other' }
+    ]
+    expect(workspaceRootForPath('/work/project-a/docs/guide.md', workspaces)).toBe('/work/project-a')
+    expect(workspaceRootForPath('/work/shared.md', workspaces)).toBe('/work')
+    expect(workspaceRootForPath('/outside/notes.md', workspaces)).toBe(null)
+  })
+
+  it('returns the original Windows root while matching case-insensitively', () => {
+    const workspaces = [{ rootPath: 'C:\\Users\\me\\Notes', rootName: 'Notes' }]
+    expect(workspaceRootForPath('c:/users/me/notes/today.md', workspaces)).toBe('C:\\Users\\me\\Notes')
   })
 })
 

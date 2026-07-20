@@ -360,9 +360,9 @@ Windows/Linux 下不再用系统原生的标题栏覆盖层，改由渲染层自
 
 ## 26. 自定义页面宽度
 
-设置面板「排版」区的**页面宽度**:分段预设(窄 / 中 / 宽 / 全宽,选中胶囊滑动)+ 「微调」滑块(像素级)。
+状态栏「排版」弹层里的**编辑区宽度**：分段预设（窄 / 中 / 宽 / 全宽，选中胶囊滑动）+「微调」滑块（像素级）。同一入口还集中字号、缩放、行间距、段落间距与连续空行显示等高频排版选项；低频的字体族选择仍留在设置面板的独立「字体」区域。
 
-**实现**：`TypographyControls.jsx` 的宽度调节组(经 `Settings.jsx` 挂载);CSS 变量 `--editor-max-width` 驱动 `.editor-host` / `.source-editor` / 骨架屏宽度,「全宽」用 `body.hm-full-width` 类(源码模式靠 calc 居中,变量无法单独表达"无上限")。值存 settings.js。
+**实现**：`TypographyControls.jsx` 的宽度调节组经 `StatusBar.jsx` 的 `LayoutControl` 挂载；CSS 变量 `--editor-max-width` 驱动 `.editor-host` / `.source-editor` / 骨架屏宽度，「全宽」用 `body.hm-full-width` 类（源码模式靠 calc 居中，变量无法单独表达“无上限”）。值存 `settings.js`。
 
 ## 27. Mermaid 图表 + LaTeX 公式
 

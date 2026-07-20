@@ -56,8 +56,10 @@ test('settings modal opens, autosave toggle flips and persists in settings stora
     const modal = page.locator('.hm-settings')
     await expect(modal).toBeVisible()
 
-    // The typography section reuses the shared adjuster groups.
-    await expect(modal.locator('.hm-adjust-group').first()).toBeVisible()
+    // Frequently changed layout controls have moved out; font families remain
+    // as their own durable Settings section.
+    await expect(modal.locator('.hm-adjust-group')).toHaveCount(0)
+    await expect(modal.locator('.hm-set-section-title', { hasText: '字体' })).toBeVisible()
 
     // Flip autosave on.
     const autosaveSwitch = modal
@@ -77,6 +79,25 @@ test('settings modal opens, autosave toggle flips and persists in settings stora
     // Esc closes the modal.
     await page.keyboard.press('Escape')
     await expect(modal).toHaveCount(0)
+
+    // The five high-frequency adjusters and the blank-line display option now
+    // live together behind the status-bar Layout button.
+    const layoutButton = page.locator('.statusbar button[title="排版"]')
+    await expect(layoutButton).toHaveText('')
+    await expect(layoutButton.locator('svg')).toBeVisible()
+    await layoutButton.click()
+    const layout = page.locator('.hm-layout-pop')
+    await expect(layout.locator('.hm-adjust-group')).toHaveCount(5)
+    const blankLines = layout.getByRole('switch', { name: '保留连续空行' })
+    await expect(blankLines).toHaveAttribute('aria-checked', 'false')
+    await blankLines.click()
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () => JSON.parse(localStorage.getItem('easymarkdown.settings.v1') || '{}').blankLineSpacing
+        )
+      )
+      .toBe(true)
   } finally {
     await cleanup()
   }

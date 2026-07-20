@@ -21,8 +21,8 @@ import {
 const zoomPct = (z) => Math.round(z * 100) + '%'
 const round1 = (n) => Math.round(n * 10) / 10
 
-// One small reusable "presets + fine-tune slider" block. Shared by the
-// status-bar Layout popover and the Settings modal's typography section.
+// One small reusable "presets + fine-tune slider" block used by the status-bar
+// Layout popover.
 export function AdjustGroup({ title, valueLabel, presets, activeIndex, onPick, pct, fromX, onSet }) {
   const { t } = useI18n()
   const trackRef = useRef(null)
@@ -69,8 +69,8 @@ export function AdjustGroup({ title, valueLabel, presets, activeIndex, onPick, p
   )
 }
 
-// The five typography adjusters (font size · width · zoom · line height ·
-// paragraph spacing) with separators, wired to the shared settings setters.
+// The five frequently adjusted typography controls (font size · width · zoom ·
+// line height · paragraph spacing), wired to the shared settings setters.
 export function TypographyGroups({
   fontSize,
   onSetFontSize,

@@ -56,6 +56,7 @@ Keep mode renders headings, paragraphs, lists, tables, ordinary code blocks, quo
 
 | Action | Shortcut |
 | --- | --- |
+| Help center | \`F1\` |
 | New file | \`Ctrl+N\` |
 | Open file / folder | \`Ctrl+O\` / \`Ctrl+Shift+O\` |
 | Save / Save As | \`Ctrl+S\` / \`Ctrl+Shift+S\` |
@@ -71,7 +72,7 @@ Keep mode renders headings, paragraphs, lists, tables, ordinary code blocks, quo
 | Print | \`Ctrl+Alt+P\` |
 | Toggle sidebar / outline | \`Ctrl+B\` / \`Ctrl+Shift+L\` |
 | Toggle source view | \`Ctrl+/\` |
-| Cycle theme | \`Ctrl+Shift+T\` |
+| Reopen closed tab | \`Ctrl+Shift+T\` |
 
 > On macOS most \`Ctrl\` shortcuts use \`⌘\`. Tab cycling remains \`Ctrl+Tab\`, navigation history uses \`⌥+←/→\`, and Replace is \`⌥⌘F\`.
 
@@ -127,6 +128,7 @@ const ZH = `# EasyMarkdown 使用说明 📝
 
 | 操作 | 快捷键 |
 | --- | --- |
+| 帮助中心 | \`F1\` |
 | 新建文件 | \`Ctrl+N\` |
 | 打开文件 / 文件夹 | \`Ctrl+O\` / \`Ctrl+Shift+O\` |
 | 保存 / 另存为 | \`Ctrl+S\` / \`Ctrl+Shift+S\` |
@@ -142,7 +144,7 @@ const ZH = `# EasyMarkdown 使用说明 📝
 | 打印 | \`Ctrl+Alt+P\` |
 | 切换侧边栏 / 大纲 | \`Ctrl+B\` / \`Ctrl+Shift+L\` |
 | 切换源码视图 | \`Ctrl+/\` |
-| 切换主题 | \`Ctrl+Shift+T\` |
+| 恢复最近关闭的标签 | \`Ctrl+Shift+T\` |
 
 > macOS 上多数 \`Ctrl\` 快捷键换成 \`⌘\`；标签循环仍用 \`Ctrl+Tab\`，跳转历史用 \`⌥+←/→\`，「替换」为 \`⌥⌘F\`。
 
@@ -198,6 +200,7 @@ const JA = `# EasyMarkdown 使い方ガイド 📝
 
 | 操作 | ショートカット |
 | --- | --- |
+| ヘルプセンター | \`F1\` |
 | 新規ファイル | \`Ctrl+N\` |
 | ファイル / フォルダを開く | \`Ctrl+O\` / \`Ctrl+Shift+O\` |
 | タブを閉じる | \`Ctrl+W\` |
@@ -213,7 +216,7 @@ const JA = `# EasyMarkdown 使い方ガイド 📝
 | 印刷 | \`Ctrl+Alt+P\` |
 | サイドバー / アウトライン切り替え | \`Ctrl+B\` / \`Ctrl+Shift+L\` |
 | ソース表示切り替え | \`Ctrl+/\` |
-| テーマ切り替え | \`Ctrl+Shift+T\` |
+| 閉じたタブを復元 | \`Ctrl+Shift+T\` |
 
 > macOS では多くの \`Ctrl\` ショートカットを \`⌘\` に読み替えます。タブ切替は \`Ctrl+Tab\` のまま、移動履歴は \`⌥+←/→\`、置換は \`⌥⌘F\` です。
 

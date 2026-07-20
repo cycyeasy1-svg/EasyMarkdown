@@ -36,7 +36,8 @@ export default function Welcome({
   onOpenRecent,
   onRemoveRecent,
   onClearRecents,
-  onTogglePinRecent
+  onTogglePinRecent,
+  onOpenHelp
 }) {
   return (
     <div className="welcome">
@@ -126,6 +127,11 @@ export default function Welcome({
           <span><kbd>Ctrl</kbd><kbd>N</kbd> {t('hint.new')}</span>
           <span><kbd>Ctrl</kbd><kbd>S</kbd> {t('hint.save')}</span>
         </div>
+        <button type="button" className="welcome-help" onClick={() => onOpenHelp?.('start')}>
+          <Icon name="help" size={14} />
+          {t('help.welcomeLink')}
+          <span className="welcome-help-key">F1</span>
+        </button>
       </div>
     </div>
   )

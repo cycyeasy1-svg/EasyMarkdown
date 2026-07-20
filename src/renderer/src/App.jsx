@@ -4,6 +4,7 @@ import { memo, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMem
 // `.md` default is the lightweight source-backed KeepEditor. Loading it lazily
 // keeps that heavy code (and its memory) out of startup for the common case.
 const Editor = lazy(() => import('./components/Editor.jsx'))
+const HelpCenter = lazy(() => import('./components/HelpCenter.jsx'))
 import KeepEditor from './components/KeepEditor.jsx'
 import Sidebar from './components/Sidebar.jsx'
 import Tabs from './components/Tabs.jsx'
@@ -67,7 +68,7 @@ import {
   sessionSnapshotEqual, MD_DOC_RE,
   rememberRecent, removeRecentPath, clearUnpinnedRecents, toggleRecentPinned,
   reorderTabsList, openPreviewTabInList, promotePreviewTabInList,
-  toggleTabPinnedInList, pathInWorkspace
+  toggleTabPinnedInList, pathInWorkspace, workspaceRootForPath
 } from './paths.js'
 import {
   countSourceLines,
@@ -780,10 +781,11 @@ export default function App() {
   const findCurrentReferencesRef = useRef(() => {})
   const beginHeadingRenameRef = useRef(() => {})
   const stepProblemRef = useRef(() => {})
-  // "Home" shows the welcome/landing page while keeping open tabs mounted (so
-  // returning to a document doesn't re-create its editor). Cleared whenever a
-  // tab is activated or a file is opened.
+  // Internal surfaces replace the center pane while keeping open tabs mounted,
+  // so returning to a document never re-creates its editor. `false` means the
+  // active document; "home" is Welcome; "help" is the searchable guide.
   const [home, setHome] = useState(false)
+  const [helpRequest, setHelpRequest] = useState({ topic: 'start', nonce: 0 })
   // Split view: id of the tab shown in the right pane (null = no split). The left
   // pane always shows the active tab; the right pane shows this one. A second,
   // independent editor — both panes are fully editable. Driven by the tab
@@ -1331,9 +1333,20 @@ export default function App() {
     fireToast(tRef.current('keep.finishDraft'), { sticky: true })
     return false
   }, [])
-  const openMarkdownOverrides = useCallback(() =>
+  const markdownLinkRootsForPath = useCallback((path) => {
+    const workspaceRoot = workspaceRootForPath(path, workspacesRef.current)
+    const fallbackRoot = dirName(path)
+    return [workspaceRoot || fallbackRoot].filter(Boolean)
+  }, [])
+
+  const openMarkdownOverrides = useCallback((roots = []) =>
     tabsRef.current
-      .filter((tab) => tab.path && MD_DOC_RE.test(tab.path) && !tab.loading)
+      .filter((tab) =>
+        tab.path &&
+        MD_DOC_RE.test(tab.path) &&
+        !tab.loading &&
+        (!roots.length || pathInWorkspace(tab.path, roots))
+      )
       .map((tab) => ({ path: tab.path, content: tab.content })), [])
 
   const diagnoseLinksForTab = useCallback(async (tab) => {
@@ -1439,11 +1452,12 @@ export default function App() {
       truncated: false
     }))
     try {
+      const roots = markdownLinkRootsForPath(target.targetPath)
       const result = await window.api.findMarkdownReferences?.({
-        roots: workspacesRef.current.map((workspace) => workspace.rootPath),
+        roots,
         targetPath: target.targetPath,
         anchor: target.anchor,
-        overrides: openMarkdownOverrides(),
+        overrides: openMarkdownOverrides(roots),
         showHidden: settings.showHiddenFiles
       })
       if (generation !== linkReferenceGenerationRef.current) return
@@ -1463,7 +1477,7 @@ export default function App() {
         sticky: true
       })
     }
-  }, [currentReferenceContext, openMarkdownOverrides, settings.showHiddenFiles])
+  }, [currentReferenceContext, markdownLinkRootsForPath, openMarkdownOverrides, settings.showHiddenFiles])
   findCurrentReferencesRef.current = findMarkdownReferencesForContext
 
   const beginHeadingRename = useCallback((context = null) => {
@@ -1535,7 +1549,7 @@ export default function App() {
     if (!state || !newHeading || newHeading === state.value) return
     try {
       const plan = await window.api.planHeadingRename?.({
-        roots: workspacesRef.current.map((workspace) => workspace.rootPath),
+        roots: markdownLinkRootsForPath(state.path),
         targetPath: state.path,
         line: state.line,
         newHeading,
@@ -1554,7 +1568,7 @@ export default function App() {
         sticky: true
       })
     }
-  }, [dirtyPlanPaths, headingRenameState, settings.showHiddenFiles])
+  }, [dirtyPlanPaths, headingRenameState, markdownLinkRootsForPath, settings.showHiddenFiles])
 
   const stepMarkdownProblem = useCallback(async (previous = false) => {
     const tab = tabsRef.current.find((item) => item.id === activeIdRef.current)
@@ -2501,7 +2515,7 @@ export default function App() {
     name = baseName(newPath)
   }) => {
     const plan = await window.api.planFileRename?.({
-      roots: workspacesRef.current.map((workspace) => workspace.rootPath),
+      roots: markdownLinkRootsForPath(oldPath),
       oldPath,
       newPath,
       showHidden: settings.showHiddenFiles
@@ -2520,7 +2534,7 @@ export default function App() {
     await window.api.rename(oldPath, newPath)
     finishTabFileRename(id, oldPath, newPath, name)
     return true
-  }, [dirtyPlanPaths, finishTabFileRename, settings.showHiddenFiles])
+  }, [dirtyPlanPaths, finishTabFileRename, markdownLinkRootsForPath, settings.showHiddenFiles])
 
   // Commit a tab-file rename from the dialog.
   const commitTabRename = useCallback(async (id, rawName) => {
@@ -3854,12 +3868,25 @@ export default function App() {
     }
   }, [zenMode, zenReveal, sidebarOpen, sidebarWidth])
 
+  const openHelp = useCallback((topic = 'start') => {
+    setHelpRequest((previous) => ({ topic, nonce: previous.nonce + 1 }))
+    setHome('help')
+    setPaletteOpen(false)
+    setSettingsOpen(false)
+    if (isMobile) setSidebarOpen(false)
+  }, [isMobile])
+  const closeHelp = useCallback(() => {
+    setHome(activeIdRef.current ? false : 'home')
+  }, [])
+
   const handlers = useRef({})
   handlers.current = {
     home: () => {
-      setHome(true)
+      setHome('home')
       if (isMobile) setSidebarOpen(false) // jump straight to Home, don't leave the drawer over it
     },
+    help: () => openHelp('start'),
+    shortcuts: () => openHelp('shortcuts'),
     new: newTab,
     open: async () => openPaths(await window.api.openFiles(), false, { followSidebar: true }),
     openFolder,
@@ -4007,6 +4034,20 @@ export default function App() {
     settings: () => setSettingsOpen(true)
   }
 
+  // F1 is intentionally handled in the renderer capture phase so it also works
+  // while an editor or input owns focus. The native Help menu displays the same
+  // shortcut without registering a second accelerator.
+  useEffect(() => {
+    const onKey = (event) => {
+      if (event.key !== 'F1' || event.shiftKey || event.ctrlKey || event.metaKey || event.altKey) return
+      event.preventDefault()
+      event.stopPropagation()
+      openHelp('start')
+    }
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
+  }, [openHelp])
+
   // Stable callbacks for the memoized status bar / save FAB: they read live
   // state through refs (handlers, tabsRef, activeIdRef) so their identity never
   // changes and typing doesn't force those components to re-render.
@@ -4044,6 +4085,10 @@ export default function App() {
   const onSetLineHeight = useCallback((v) => updateSettings({ lineHeight: v }), [updateSettings])
   const onSetParagraphSpacing = useCallback(
     (v) => updateSettings({ paragraphSpacing: v }),
+    [updateSettings]
+  )
+  const onSetBlankLineSpacing = useCallback(
+    (blankLineSpacing) => updateSettings({ blankLineSpacing }),
     [updateSettings]
   )
   const onPaletteClose = useCallback(() => setPaletteOpen(false), [])
@@ -4545,7 +4590,9 @@ export default function App() {
           icon: 'check',
           run: () => updateSettings({ spellcheck: !settings.spellcheck })
         },
-        { id: 'cmd.settings', title: t('cmd.settings'), icon: 'settings', run: () => handlers.current.settings() }
+        { id: 'cmd.settings', title: t('cmd.settings'), icon: 'settings', run: () => handlers.current.settings() },
+        { id: 'cmd.helpGuide', title: t('cmd.helpGuide'), icon: 'help', shortcut: 'F1', run: () => handlers.current.help() },
+        { id: 'cmd.helpShortcuts', title: t('cmd.helpShortcuts'), icon: 'command', run: () => handlers.current.shortcuts() }
       ].filter(Boolean)
     },
     [t, settings.spellcheck, updateSettings, zenMode]
@@ -5436,13 +5483,14 @@ export default function App() {
         .filter(Boolean)
     : []
   const tabSwitcherSelectedId = tabSwitcher?.ids[tabSwitcher.index] || null
+  const helpOpen = home === 'help'
 
   return (
     <I18nProvider lang={lang} setLang={setLang}>
     <div className={`app${platformClass}${isMobile && sidebarOpen ? ' drawer-open' : ''}${zenMode ? ' zen-mode' : ''}${zenReveal ? ' zen-reveal' : ''}`}>
       <div className="activity-bar">
         <button
-          className={`activity-item activity-home${home ? ' active' : ''}`}
+          className={`activity-item activity-home${home === 'home' ? ' active' : ''}`}
           title={t('nav.home')}
           onClick={() => handlers.current.home()}
         >
@@ -5465,21 +5513,21 @@ export default function App() {
           </button>
         )}
         <button
-          className={`activity-item${sidebarMode === 'links' ? ' active' : ''}`}
-          title={`${t('links.title')} (F8)`}
-          onClick={() => handlers.current.linkProblems()}
-        >
-          <Icon name="alert" size={20} />
-          {!!linkPanel.problems.length && (
-            <span className="activity-badge">{Math.min(99, linkPanel.problems.length)}</span>
-          )}
-        </button>
-        <button
           className={`activity-item${sidebarMode === 'outline' ? ' active' : ''}`}
           title={t('outline.title')}
           onClick={() => handlers.current.toggleOutline()}
         >
           <Icon name="outline" size={20} />
+        </button>
+        <button
+          className={`activity-item${sidebarMode === 'links' ? ' active' : ''}`}
+          title={`${t('links.title')} (F8)`}
+          onClick={() => handlers.current.linkProblems()}
+        >
+          <Icon name="link" size={20} />
+          {!!linkPanel.problems.length && (
+            <span className="activity-badge">{Math.min(99, linkPanel.problems.length)}</span>
+          )}
         </button>
         <div className="activity-spacer" />
         <button
@@ -5603,8 +5651,8 @@ export default function App() {
           <div className="hm-sidebar-divider" onMouseDown={startSidebarDrag} title={t('side.dragResize')} />
         )}
 
-        <main className="pane-center">
-          {find.open && (
+        <main className={`pane-center${helpOpen ? ' has-help' : ''}`}>
+          {!home && find.open && (
             <div className={`findbar${find.error ? ' has-error' : ''}`}>
               <div className="findbar-row">
               {find.mode === 'text' && (
@@ -5959,7 +6007,19 @@ export default function App() {
             )}
           </div>
 
-          {(home || !activeTab) && (
+          {helpOpen && (
+            <Suspense fallback={<div className="hm-help-loading">{t('help.title')}…</div>}>
+              <HelpCenter
+                request={helpRequest}
+                onClose={closeHelp}
+                onNew={newTab}
+                onOpen={() => handlers.current.open()}
+                onOpenSettings={() => setSettingsOpen(true)}
+              />
+            </Suspense>
+          )}
+
+          {!helpOpen && (home || !activeTab) && (
             <Welcome
               t={t}
               lang={lang}
@@ -5971,6 +6031,7 @@ export default function App() {
               onRemoveRecent={(p) => setRecents((prev) => removeRecentPath(prev, p))}
               onClearRecents={() => setRecents((prev) => clearUnpinnedRecents(prev))}
               onTogglePinRecent={(p) => setRecents((prev) => toggleRecentPinned(prev, p))}
+              onOpenHelp={openHelp}
             />
           )}
         </main>
@@ -6009,21 +6070,30 @@ export default function App() {
           // safe plain-source + "load rich" banner path (heavyAsSource above), never
           // the freeze-prone Crepe render — so there's no reason to hide the button
           // (it just vanishing on big files / big-table docs was confusing).
-          !!activeTab && !isPlainTextDoc(activeTab)
+          !home && !!activeTab && !isPlainTextDoc(activeTab)
         }
         keepMode={!!activeTab && !milkdownForced.has(activeTab.id)}
         onToggleKeep={onToggleKeep}
-        showModeHint={showModeHint}
+        showModeHint={!home && showModeHint}
         onDismissModeHint={dismissModeHint}
+        pageWidth={settings.pageWidth}
+        onSetPageWidth={onSetPageWidth}
         fontSize={settings.fontSize}
         onSetFontSize={onSetFontSize}
         zoom={settings.zoom}
         onSetZoom={onSetZoom}
+        lineHeight={settings.lineHeight}
+        onSetLineHeight={onSetLineHeight}
+        paragraphSpacing={settings.paragraphSpacing}
+        onSetParagraphSpacing={onSetParagraphSpacing}
+        blankLineSpacing={settings.blankLineSpacing}
+        onSetBlankLineSpacing={onSetBlankLineSpacing}
         filterInfo={activeTab ? keepFilters[activeTab.id] : null}
         onClearFilters={() => {
           if (activeTab) editorApis.current[activeTab.id]?.clearAllFilters?.()
         }}
         onOpenSettings={() => setSettingsOpen(true)}
+        onOpenHelp={openHelp}
       />
 
       {zenMode && (
@@ -6055,18 +6125,7 @@ export default function App() {
         onOpenThemesFolder={onOpenThemesFolder}
         onGetMoreThemes={onGetMoreThemes}
         onClearLocalHistory={clearAllLocalHistory}
-        typographyProps={{
-          fontSize: settings.fontSize,
-          onSetFontSize,
-          pageWidth: settings.pageWidth,
-          onSetPageWidth,
-          zoom: settings.zoom,
-          onSetZoom,
-          lineHeight: settings.lineHeight,
-          onSetLineHeight,
-          paragraphSpacing: settings.paragraphSpacing,
-          onSetParagraphSpacing
-        }}
+        onOpenHelp={openHelp}
       />
 
       <SaveFab

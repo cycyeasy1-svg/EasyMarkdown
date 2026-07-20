@@ -50,6 +50,22 @@ function paste(target, text) {
 }
 
 describe('VSCode Keep webview interactions', () => {
+  it('keeps long table headers wider than short body content', async () => {
+    const header = '表示条件与活动范围及计算方法和必要步骤与最终结果'
+    send({
+      type: 'init',
+      text: [`| ${header} |`, '| --- |', '| - |'].join('\n'),
+      lang: 'zh',
+      langPref: 'zh',
+      theme: 'auto'
+    })
+    await waitForPaint()
+
+    const width = parseFloat(document.querySelector('table.km-table col')?.style.width || '0')
+    expect(width).toBeGreaterThan(22)
+    expect(width).toBeGreaterThanOrEqual(Array.from(header).length + 5)
+  })
+
   it('uses rendered link labels for automatic table column widths', async () => {
     send({
       type: 'init',

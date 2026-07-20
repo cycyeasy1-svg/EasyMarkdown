@@ -42,10 +42,12 @@ export const dirName = (p) => (p ? p.replace(/[\\/][^\\/]*$/, '') : '')
 export const joinPath = (dir, name) => `${dir.replace(/[\\/]+$/, '')}/${name}`
 const isWindowsPath = (p) => /^[a-zA-Z]:\//.test(p) || p.startsWith('//')
 
-export function pathInWorkspace(path, workspaces) {
-  if (!path) return false
+export function workspaceRootForPath(path, workspaces) {
+  if (!path) return null
   const rawPath = normPath(path).replace(/\/+$/, '')
-  if (!rawPath) return false
+  if (!rawPath) return null
+  let match = null
+  let matchLength = -1
   for (const ws of workspaces || []) {
     const rootPath = typeof ws === 'string' ? ws : ws?.rootPath
     if (!rootPath) continue
@@ -53,12 +55,16 @@ export function pathInWorkspace(path, workspaces) {
     const caseInsensitive = isWindowsPath(rawPath) || isWindowsPath(rawRoot)
     const file = caseInsensitive ? rawPath.toLowerCase() : rawPath
     const root = caseInsensitive ? rawRoot.toLowerCase() : rawRoot
-    if (root === '/' ? file.startsWith('/') : file === root || file.startsWith(root + '/')) {
-      return true
+    const contains = root === '/' ? file.startsWith('/') : file === root || file.startsWith(root + '/')
+    if (contains && root.length > matchLength) {
+      match = rootPath
+      matchLength = root.length
     }
   }
-  return false
+  return match
 }
+
+export const pathInWorkspace = (path, workspaces) => !!workspaceRootForPath(path, workspaces)
 
 // Files that open in the rich Markdown editor. Anything else with a path (e.g.
 // .txt) is treated as plain text and opened in the fast textarea — feeding plain
