@@ -1,5 +1,31 @@
 # Changelog
 
+## 1.4.0
+<!-- head: fcc772d -->
+
+- **Draft-safe Keep editing** — unfinished cell, block, and insertion drafts
+  survive tab hiding and webview restoration; saving or switching to source
+  confirms pending work, and unsafe external-edit conflicts keep the draft
+  available for recovery.
+- **Faster table and block workflows** — navigate selected table cells from the
+  keyboard, paste rectangular TSV data from spreadsheets, see occurrence counts
+  beside filter values, and insert, duplicate, or delete Markdown blocks from
+  the Keep context menu.
+- **Attach files without leaving the editor** — the new `Attach Files…` command
+  copies selected files into the document's `assets/` folder and inserts
+  relative Markdown links in either Keep or source mode.
+- **Better VSCode navigation** — Keep surfaces Markdown diagnostic counts,
+  Alt/Option+Click opens relative links to the side, and command-driven Search,
+  Problems, and file:line jumps stay in source mode so native selections and
+  highlights remain precise.
+- **Live find results while editing** — active match counts and highlights
+  refresh after content changes without moving the current result or viewport.
+- **More capable embedded content** — KaTeX formulas now share the zoom and pan
+  lightbox used by Mermaid, while safe empty `<a id>` / `<a name>` anchors render
+  invisibly and remain reachable even inside folded sections.
+- **Safer external links** — only HTTP, HTTPS, and mailto URLs can be handed to
+  the operating system from untrusted Markdown content.
+
 ## 1.3.4
 <!-- head: a10639f -->
 

@@ -31,6 +31,9 @@ minimal line-range edit, so VSCode owns dirty state, undo/redo and save.
   editable like any other block.
 - **Image paste & drop** — paste a screenshot (or drop an image file) to save it
   into `./assets/` next to the document and insert a relative link, Typora-style.
+- **File attachments** — run **EasyMarkdown: Attach Files…** to copy one or more
+  files into `./assets/` and insert relative Markdown links at the current Keep
+  block or source selection.
 - **Links** — `#anchors` jump within the document; relative `.md`/file links open
   in VSCode (`file.md#section` opens *and* scrolls). Alt/Option+Click opens a
   relative target to the side.
@@ -65,6 +68,8 @@ the Explorer, quick open, links, …) lands directly in the rendered keep view.
   `Ctrl+Shift+M`). Turn the memory off with `easymarkdown.keep.rememberMode`.
 - **Open Keep View to the Side** (right-click / title bar) splits keep beside
   the source; both bind to the same document and stay scroll- and edit-synced.
+- **Attach Files…** is available from the editor title, context menu, and Command
+  Palette in both Keep and source mode.
 
 Inside the keep editor, the top-right buttons are **Source** (back to text),
 **Outline**, and **Settings** (theme / language / layout). Press `Ctrl+F`

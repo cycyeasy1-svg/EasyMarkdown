@@ -2,7 +2,7 @@
   "name": "easymarkdown",
   "displayName": "EasyMarkdown",
   "description": "Source-backed live preview + inline editing for Markdown (tables, column filters, heading fold, outline) with a zero-diff result. A VSCode edition of EasyMarkdown's keep mode.",
-  "version": "1.3.4",
+  "version": "1.4.0",
   "publisher": "easy-chen",
   "author": {
     "name": "Easy Chen"
@@ -44,8 +44,12 @@
         "viewType": "easymarkdown.keep",
         "displayName": "EasyMarkdown Keep",
         "selector": [
-          { "filenamePattern": "*.md" },
-          { "filenamePattern": "*.markdown" }
+          {
+            "filenamePattern": "*.md"
+          },
+          {
+            "filenamePattern": "*.markdown"
+          }
         ],
         "priority": "option"
       }
@@ -55,7 +59,12 @@
       "properties": {
         "easymarkdown.keep.language": {
           "type": "string",
-          "enum": ["auto", "en", "zh", "ja"],
+          "enum": [
+            "auto",
+            "en",
+            "zh",
+            "ja"
+          ],
           "default": "auto",
           "description": "UI language for the keep editor (auto follows VSCode's display language)."
         },
