@@ -5,7 +5,7 @@
 - **官网**：https://cycyeasy1-svg.github.io/EasyMarkdown/
 - **GitHub**：https://github.com/cycyeasy1-svg/EasyMarkdown
 - **下载**：https://github.com/cycyeasy1-svg/EasyMarkdown/releases/latest
-- **版本**：桌面 v1.2.0 · VSCode 扩展 v1.3.4（2026-07）· **协议**：MIT · **价格**：免费
+- **版本**：桌面 v1.2.1 · VSCode 扩展 v1.4.0（2026-07）· **协议**：MIT · **价格**：免费
 - **维护者**：Easy Chen（GitHub @cycyeasy1-svg）
 
 ---

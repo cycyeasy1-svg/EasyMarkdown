@@ -2,7 +2,7 @@
 title: EasyMarkdown — 像操作 Excel 一样操作 Markdown
 description: 免费开源的桌面 Markdown 编辑器：保持模式零差分保存，表格可按列筛选，标签页 + 文件树工作区，Windows / macOS + VSCode 扩展，MIT 协议
 url: https://cycyeasy1-svg.github.io/EasyMarkdown/
-version: v1.2.0
+version: v1.2.1
 license: MIT
 author: Easy Chen (@cycyeasy1-svg)
 ---
