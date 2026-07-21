@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, dialog, Menu, MenuItem, shell, net, nativeTheme, session } from 'electron'
+import { app, BrowserWindow, ipcMain, dialog, Menu, MenuItem, shell, net, nativeTheme, session, clipboard } from 'electron'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { dirname, join, basename, extname, resolve, relative, sep } from 'node:path'
 import fs from 'node:fs/promises'
@@ -1325,6 +1325,12 @@ ipcMain.handle('shell:openExternal', async (event, url) => {
     return { ok: false, error: 'Untrusted renderer.' }
   }
   return openExternalUrl(url)
+})
+
+ipcMain.handle('clipboard:writeText', (event, text) => {
+  if (!mainWindow || event.sender.id !== mainWindow.webContents.id) return false
+  clipboard.writeText(String(text ?? ''))
+  return true
 })
 
 ipcMain.handle('permissions:allowLocalFonts', (event) => {

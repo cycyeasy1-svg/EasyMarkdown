@@ -95,6 +95,7 @@ const api = {
   // shell
   openExternal: (url) => ipcRenderer.invoke('shell:openExternal', url),
   showInFolder: (path) => ipcRenderer.invoke('shell:showInFolder', path),
+  copyText: (text) => ipcRenderer.invoke('clipboard:writeText', text),
 
   // save a pasted/dropped image into the document's assets/ folder; returns
   // { ok, path } with a relative path to insert into Markdown.

@@ -25,9 +25,23 @@ export const fireToast = (msg, opts) =>
     })
   )
 
-// Copy text to the clipboard and toast `doneMsg` on success (errors swallowed).
-export const copyToClipboard = (text, doneMsg) =>
-  navigator.clipboard
-    ?.writeText(text || '')
-    .then(() => fireToast(doneMsg))
-    .catch(() => {})
+// Copy text to the clipboard and toast `doneMsg` on success. Desktop writes via
+// Electron's main process because navigator.clipboard can be denied for a
+// packaged file:// renderer; mobile/web builds fall back to the Web API.
+export const copyToClipboard = async (text, doneMsg) => {
+  try {
+    const value = text || ''
+    if (window.api?.copyText) {
+      const copied = await window.api.copyText(value)
+      if (!copied) return false
+    } else if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(value)
+    } else {
+      return false
+    }
+    fireToast(doneMsg)
+    return true
+  } catch {
+    return false
+  }
+}
