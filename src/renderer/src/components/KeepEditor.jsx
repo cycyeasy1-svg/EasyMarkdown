@@ -1485,7 +1485,9 @@ function KeepEditor({
       )
       cell.tabIndex = 0
       if (focus) cell.focus({ preventScroll: true })
-      if (scroll) cell.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+      if (scroll && !tableScrollRef.current?.revealCell(cell)) {
+        cell.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+      }
       return true
     }
     const restoreSelectedCell = () => {

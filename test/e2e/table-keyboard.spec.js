@@ -51,6 +51,45 @@ test('Keep table supports keyboard navigation, editing, filtering and context ac
   }
 })
 
+test('Keep table keyboard navigation reveals cells below the floating header', async () => {
+  const { page, cleanup } = await openTableFixture()
+  try {
+    // Exercise CSS zoom too because the live table and its fixed clone sit in
+    // different zoom/positioning contexts.
+    await page.evaluate(() => document.documentElement.style.setProperty('--editor-zoom', '1.25'))
+    const table = page.locator('.km-doc table.km-table[data-ti="0"]')
+    const target = table.locator('tbody tr[data-ri="2"] td[data-ci="0"]')
+    const current = table.locator('tbody tr[data-ri="3"] td[data-ci="0"]')
+    await current.click()
+
+    // Put the previous row just inside the editor viewport. Native
+    // scrollIntoView considers this visible even though the fixed header covers it.
+    await target.evaluate((cell) => {
+      const scroller = cell.closest('.editor-scroll')
+      const gap = cell.getBoundingClientRect().top - scroller.getBoundingClientRect().top
+      scroller.scrollTop += gap - 2
+      scroller.dispatchEvent(new Event('scroll'))
+    })
+    await expect(page.locator('.km-float-header.km-visible')).toBeVisible()
+
+    await page.keyboard.press('ArrowUp')
+    await expect(target).toHaveClass(/km-cell-selected/)
+    const gapBelowHeader = () =>
+      target.evaluate((cell) => {
+        const pane = cell.closest('.pane-center')
+        const header = pane?.querySelector('.km-float-header.km-visible')
+        if (!header) return -Infinity
+        return cell.getBoundingClientRect().top - header.getBoundingClientRect().bottom
+      })
+    await expect
+      .poll(gapBelowHeader)
+      .toBeGreaterThanOrEqual(0)
+    await expect.poll(gapBelowHeader).toBeLessThanOrEqual(4)
+  } finally {
+    await cleanup()
+  }
+})
+
 test('Keep table pastes a TSV rectangle as one undo transaction and exposes commands', async () => {
   const { page, cleanup } = await openTableFixture()
   try {

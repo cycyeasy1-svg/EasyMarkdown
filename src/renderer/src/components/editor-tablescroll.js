@@ -52,6 +52,9 @@ export function enhanceKeepTables(
     autoFitColumn() {},
     autoFitTable() {},
     hideColumn() {},
+    revealCell() {
+      return false
+    },
     canHideColumn() {
       return false
     }
@@ -491,7 +494,8 @@ export function enhanceKeepTables(
       refreshLabels,
       update: () => updateFloat(),
       hide: () => {},
-      syncContent: () => {}
+      syncContent: () => {},
+      revealCell: () => false
     }
     controllers.set(stateKey, controller)
 
@@ -626,9 +630,32 @@ export function enhanceKeepTables(
       }
     }
 
+    // `scrollIntoView({ block: 'nearest' })` only knows about the editor's
+    // scrollport. The fixed cloned header is an overlay, so a body cell can be
+    // geometrically inside the scrollport while still sitting underneath it.
+    // Keep the native horizontal/vertical nearest behavior, then compensate for
+    // the overlay when this table's floating header remains active.
+    const revealCell = (cell) => {
+      if (!cell || !table.contains(cell)) return false
+      cell.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+      updateFloat()
+      if (!scroller || !floatEl.classList.contains('km-visible')) return true
+
+      const cellRect = cell.getBoundingClientRect()
+      const scrollerRect = scroller.getBoundingClientRect()
+      const floatRect = floatEl.getBoundingClientRect()
+      const visibleTop = Math.max(scrollerRect.top, floatRect.bottom) + 2
+      if (cellRect.top < visibleTop && cellRect.bottom > scrollerRect.top) {
+        scroller.scrollTop -= visibleTop - cellRect.top
+        updateFloat()
+      }
+      return true
+    }
+
     controller.hide = hideFloat
     controller.update = updateFloat
     controller.syncContent = syncContent
+    controller.revealCell = revealCell
 
     wireHeaderControls(thead)
     wireHeaderControls(cloneThead)
@@ -661,6 +688,11 @@ export function enhanceKeepTables(
     autoFitColumn: (tableIdx, colIdx) => controllers.get(String(tableIdx))?.autoFitColumn(colIdx),
     autoFitTable: (tableIdx) => controllers.get(String(tableIdx))?.autoFitTable(),
     hideColumn: (tableIdx, colIdx) => controllers.get(String(tableIdx))?.hideColumn(colIdx),
+    revealCell: (cell) => {
+      const tableIdx = cell?.closest?.('table.km-table')?.getAttribute('data-ti')
+      if (tableIdx == null) return false
+      return controllers.get(String(tableIdx))?.revealCell(cell) || false
+    },
     canHideColumn: (tableIdx, colIdx) =>
       controllers.get(String(tableIdx))?.canHideColumn(colIdx) || false,
     destroy: () => {
