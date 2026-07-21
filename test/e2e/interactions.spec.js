@@ -392,6 +392,37 @@ test('keep mode: outline jump flushes a far heading and keeps it selected while 
   }
 })
 
+test('keep mode: outline follows document scrolling and reveals the active heading', async () => {
+  const { page, cleanup } = await launchApp([fixture('outline-scrollspy.md')])
+  try {
+    await page.locator('.tab', { hasText: 'outline-scrollspy.md' }).click()
+    await expect(page.locator('.km-doc')).toBeVisible()
+    await page.locator('button[title="大纲"]').click()
+
+    const scroller = page.locator('.editor-scroll.km-scroll.hm-pane-left')
+    const outlineList = page.locator('.outline-list')
+    const finalItem = page.locator('.outline-item[title="Final Section"]')
+    await expect(finalItem).toBeAttached()
+    await expect.poll(() => outlineList.evaluate((el) => el.scrollHeight > el.clientHeight)).toBe(true)
+
+    await scroller.evaluate((el) => {
+      el.scrollTop = el.scrollHeight
+      el.dispatchEvent(new Event('scroll'))
+    })
+
+    await expect(finalItem).toHaveClass(/active/)
+    await expect.poll(async () => {
+      const [itemRect, listRect] = await Promise.all([
+        finalItem.evaluate((el) => el.getBoundingClientRect()),
+        outlineList.evaluate((el) => el.getBoundingClientRect())
+      ])
+      return itemRect.top >= listRect.top && itemRect.bottom <= listRect.bottom
+    }).toBe(true)
+  } finally {
+    await cleanup()
+  }
+})
+
 test('milkdown mode: slash language alias inserts a preconfigured code block', async () => {
   const { page, cleanup } = await openWelcome()
   try {

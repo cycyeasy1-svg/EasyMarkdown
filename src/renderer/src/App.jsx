@@ -105,6 +105,20 @@ const ONBOARDED_KEY = 'easymarkdown.onboarded.v1'
 const MODEHINT_KEY = 'easymarkdown.modehint.v1'
 const UPDATE_DISMISS_KEY = 'easymarkdown.update.dismissed'
 const EMPTY_PALETTE_HEADINGS = []
+const OUTLINE_HEADING_SELECTOR = [
+  '.ProseMirror h1',
+  '.ProseMirror h2',
+  '.ProseMirror h3',
+  '.ProseMirror h4',
+  '.ProseMirror h5',
+  '.ProseMirror h6',
+  '.km-doc h1',
+  '.km-doc h2',
+  '.km-doc h3',
+  '.km-doc h4',
+  '.km-doc h5',
+  '.km-doc h6'
+].join(', ')
 
 // Resolve a relative link path against a base directory (handles ./ and ../).
 function resolveRelPath(dir, rel) {
@@ -3439,14 +3453,12 @@ export default function App() {
 
       let scroller = editorHostRef.current
       let headings = scroller && scroller.offsetParent !== null
-        ? scroller.querySelectorAll(
-            '.ProseMirror h1, .ProseMirror h2, .ProseMirror h3, .ProseMirror h4, .ProseMirror h5, .ProseMirror h6'
-          )
+        ? scroller.querySelectorAll(OUTLINE_HEADING_SELECTOR)
         : []
       if (!headings.length) {
         const candidates = editorAreaRef.current?.querySelectorAll('.editor-scroll.km-scroll.hm-pane-left') || []
         scroller = [...candidates].find((el) => el.offsetParent !== null) || null
-        headings = scroller?.querySelectorAll('.km-doc h1, .km-doc h2, .km-doc h3, .km-doc h4, .km-doc h5, .km-doc h6') || []
+        headings = scroller?.querySelectorAll(OUTLINE_HEADING_SELECTOR) || []
       }
       const el = headings[index]
       if (!scroller || !el) {
@@ -3541,9 +3553,7 @@ export default function App() {
     let tries = 0
 
     const build = () => {
-      const els = scroller.querySelectorAll(
-        '.ProseMirror h1, .ProseMirror h2, .ProseMirror h3, .ProseMirror h4, .ProseMirror h5, .ProseMirror h6'
-      )
+      const els = scroller.querySelectorAll(OUTLINE_HEADING_SELECTOR)
       if (!els.length) {
         tops = null
         return
@@ -5869,6 +5879,7 @@ export default function App() {
                     // modes fully remounts (no ref/child reconciliation surprises).
                     key={`keep:${tab.id}:${tab.reloadNonce}`}
                     className={`editor-scroll km-scroll${previewPaneClass}`}
+                    ref={(normalIsLeft || (dualPreview && tab.id === activeId)) && previewVisible ? editorHostRef : undefined}
                     style={{ ...previewPaneStyle, display: previewVisible ? undefined : 'none' }}
                     onFocusCapture={h.onPaneFocus}
                     onMouseDownCapture={h.onPaneFocus}
