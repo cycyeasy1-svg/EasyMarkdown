@@ -732,6 +732,11 @@ export default function App() {
   // writing surface front-and-center (desktop keeps its previous default).
   const [sidebarOpen, setSidebarOpen] = useState(session.sidebarOpen ?? !isMobile)
   const [sidebarMode, setSidebarMode] = useState(session.sidebarMode || 'files') // 'files' or 'outline'
+  // Forces the outline scrollspy to re-bind after an editor finishes mounting or
+  // when the outline is explicitly opened. This covers lazy session restores,
+  // where activeId is already stable while an empty placeholder is replaced by
+  // the real editor.
+  const [outlineSyncNonce, setOutlineSyncNonce] = useState(0)
   // Desktop sidebar width (px), dragged via the divider on its right edge and
   // persisted across sessions. Ignored on mobile (the sidebar overlays).
   const [sidebarWidth, setSidebarWidth] = useState(() =>
@@ -2293,6 +2298,7 @@ export default function App() {
         },
         onReady: (api) => {
           editorApis.current[id] = api
+          if (id === activeIdRef.current) setOutlineSyncNonce((nonce) => nonce + 1)
         },
         onFilterChange: (info) =>
           setKeepFilters((m) => {
@@ -3518,7 +3524,7 @@ export default function App() {
       source.removeEventListener('scroll', schedule)
       source.removeEventListener('input', schedule)
     }
-  }, [activeId, home, sidebarMode, sidebarOpen, sourceMode])
+  }, [activeId, home, outlineSyncNonce, sidebarMode, sidebarOpen, sourceMode])
 
   // Outline scrollspy: highlight the heading you're currently viewing (the last
   // one scrolled past the top), mirroring how the file tree marks the open file.
@@ -3611,7 +3617,7 @@ export default function App() {
       scroller.removeEventListener('scroll', schedule)
       window.removeEventListener('resize', invalidate)
     }
-  }, [home, sidebarOpen, sidebarMode, sourceMode, activeId])
+  }, [home, sidebarOpen, sidebarMode, sourceMode, activeId, outlineSyncNonce])
 
   // ------------------------- menu / shortcuts ----------------------
   // In split view, target the pane you're actually editing (last focused), as
@@ -4014,6 +4020,7 @@ export default function App() {
     toggleOutline: () => {
       setSidebarMode('outline')
       setSidebarOpen(true)
+      setOutlineSyncNonce((nonce) => nonce + 1)
     },
     toggleFiles: () => {
       setSidebarMode('files')

@@ -146,7 +146,7 @@ export default function Outline({ content, activeIndex = -1, onJump }) {
       activeRef.current.scrollIntoView({ block: 'nearest' })
       lastScrolledRef.current = effectiveActive
     }
-  }, [effectiveActive])
+  }, [effectiveActive, headings.length])
 
   return (
     <div className="outline">

@@ -423,6 +423,50 @@ test('keep mode: outline follows document scrolling and reveals the active headi
   }
 })
 
+test('keep mode: outline syncs after session restore and when switching sidebar modes', async () => {
+  const { page, cleanup } = await launchApp([fixture('outline-scrollspy.md')])
+  try {
+    await page.locator('.tab', { hasText: 'outline-scrollspy.md' }).click()
+    await expect(page.locator('.km-doc')).toBeVisible()
+
+    // Persist a session whose sidebar is already showing the outline, then reload
+    // into the lazy placeholder -> real-editor restore path.
+    await page.locator('button[title="大纲"]').click()
+    await expect
+      .poll(() => page.evaluate(() => JSON.parse(localStorage.getItem('easymarkdown.session.v1') || '{}').sidebarMode))
+      .toBe('outline')
+    await page.reload()
+    await page.waitForSelector('#root .app')
+    await expect(page.locator('.km-doc')).toBeVisible()
+
+    const firstItem = page.locator('.outline-item[title="Section 01"]')
+    await expect(firstItem).toHaveClass(/active/)
+
+    // Move the document while another sidebar is visible. Opening the outline
+    // must immediately inspect the existing viewport; no extra editor scroll is
+    // needed to trigger the highlight.
+    await page.locator('button[title="显示文件浏览器"]').click()
+    const scroller = page.locator('.editor-scroll.km-scroll.hm-pane-left')
+    await scroller.evaluate((el) => {
+      el.scrollTop = el.scrollHeight
+    })
+    await page.locator('button[title="大纲"]').click()
+
+    const outlineList = page.locator('.outline-list')
+    const finalItem = page.locator('.outline-item[title="Final Section"]')
+    await expect(finalItem).toHaveClass(/active/)
+    await expect.poll(async () => {
+      const [itemRect, listRect] = await Promise.all([
+        finalItem.evaluate((el) => el.getBoundingClientRect()),
+        outlineList.evaluate((el) => el.getBoundingClientRect())
+      ])
+      return itemRect.top >= listRect.top && itemRect.bottom <= listRect.bottom
+    }).toBe(true)
+  } finally {
+    await cleanup()
+  }
+})
+
 test('milkdown mode: slash language alias inserts a preconfigured code block', async () => {
   const { page, cleanup } = await openWelcome()
   try {
