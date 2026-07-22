@@ -152,6 +152,10 @@ export function findRangesInEl(root, query, options = {}, scopeRange = null) {
   while ((node = walker.nextNode())) {
     const val = node.nodeValue
     if (!val) continue
+    // Keep-mode table filters leave excluded rows in the DOM and hide them with
+    // CSS. Do not count their text as find results: a Range inside such a row
+    // has no rendered box, so next/previous navigation could never reveal it.
+    if (node.parentElement?.closest?.('.km-filtered')) continue
     if (scopeRange) {
       let intersects = false
       try {
