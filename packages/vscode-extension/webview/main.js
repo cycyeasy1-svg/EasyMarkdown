@@ -110,7 +110,9 @@ let langPref = 'auto' // 'auto' | 'en' | 'zh' | 'ja' — the raw picker choice
 const collapsed = new Set() // collapsed heading-section keys ("level:text"), survives re-render
 let tableScroll = null // wide-table top-scrollbar + floating-header handle (editor-tablescroll)
 let selectedCell = null // logical table coordinate; survives structural re-renders
-let pendingDraftRestore = vscode.getState()?.draft || null
+const initialWebviewState = vscode.getState() || {}
+let pendingDraftRestore = initialWebviewState.draft || null
+let pendingScrollRestore = initialWebviewState.scroll || null
 let editRequestSeq = 0
 const pendingEditDrafts = new Map()
 
@@ -136,8 +138,13 @@ window.addEventListener('message', (e) => {
     ensureOutlineButton()
     ensureSettingsButton()
     updateProblemsButton(msg.diagnostics?.count || 0)
+    if (msg.scroll && !pendingScrollRestore) pendingScrollRestore = msg.scroll
     if (msg.anchor) pendingAnchor = msg.anchor // consumed by finishRender
     if (msg.reveal) pendingSearchReveal = msg.reveal // consumed by finishRender
+    // Explicit navigation always wins over a viewport restored from webview
+    // state. Otherwise the delayed scroll restoration would undo the anchor or
+    // Search/Problems target immediately after first paint.
+    if (msg.anchor || msg.reveal) pendingScrollRestore = null
     setText(msg.text || '')
   } else if (msg.type === 'scrollToAnchor') {
     scrollToAnchor(msg.slug)
@@ -305,6 +312,7 @@ function finishRender() {
   })
   restoreSelectedCell()
   restorePendingDraft()
+  restorePendingScroll()
   // A re-render replaces the DOM, invalidating any painted find ranges. Refresh
   // the count/highlights against the fresh nodes, but preserve the current
   // result and viewport while the user is editing.
@@ -632,14 +640,61 @@ let activePopBtn = null
 let activeMenu = null
 let conflictedDraft = null
 let draftPersistTimer = 0
+let scrollPersistTimer = 0
+let lastScrollPersistAt = 0
+
+function updateStoredState(update) {
+  const state = { ...(vscode.getState() || {}) }
+  update(state)
+  vscode.setState(state)
+}
 
 function setStoredDraft(draft) {
   clearTimeout(draftPersistTimer)
   draftPersistTimer = 0
-  const state = { ...(vscode.getState() || {}) }
-  if (draft) state.draft = draft
-  else delete state.draft
-  vscode.setState(state)
+  updateStoredState((state) => {
+    if (draft) state.draft = draft
+    else delete state.draft
+  })
+}
+
+function writeStoredScroll() {
+  clearTimeout(scrollPersistTimer)
+  scrollPersistTimer = 0
+  lastScrollPersistAt = Date.now()
+  const scroller = host.closest('.editor-scroll')
+  if (!scroller) return
+  const scroll = {
+    top: Math.max(0, scroller.scrollTop || 0),
+    line: topVisibleLine()
+  }
+  updateStoredState((state) => {
+    state.scroll = scroll
+  })
+  vscode.postMessage({ type: 'viewport', scroll })
+}
+
+function persistScrollState(immediate = false) {
+  clearTimeout(scrollPersistTimer)
+  const wait = Math.max(0, 120 - (Date.now() - lastScrollPersistAt))
+  if (immediate || wait === 0) writeStoredScroll()
+  else scrollPersistTimer = setTimeout(writeStoredScroll, wait)
+}
+
+function restorePendingScroll() {
+  const saved = pendingScrollRestore
+  if (!saved) return
+  pendingScrollRestore = null
+  requestAnimationFrame(() => {
+    const scroller = host.closest('.editor-scroll')
+    if (!scroller) return
+    syncSuppressUntil = Date.now() + 250
+    if (Number.isFinite(saved.top)) {
+      scroller.scrollTop = Math.max(0, saved.top)
+    } else if (Number.isFinite(saved.line)) {
+      scrollToSourceLine(saved.line)
+    }
+  })
 }
 
 function activeDraftSnapshot() {
@@ -3298,6 +3353,7 @@ function onScroll(e) {
   const tg = e && e.target
   if (!tg || tg === document || (tg.classList && tg.classList.contains('editor-scroll'))) {
     emitScrollSync()
+    persistScrollState()
   }
 }
 function onResize() {
@@ -3334,8 +3390,12 @@ document.addEventListener('keydown', (e) => {
 })
 window.addEventListener('scroll', onScroll, true)
 window.addEventListener('resize', onResize)
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) persistScrollState(true)
+})
 window.addEventListener('beforeunload', () => {
   if (!pendingEditDrafts.size) persistActiveDraft(true)
+  persistScrollState(true)
 })
 
 // Tell the host we're ready to receive the initial document.

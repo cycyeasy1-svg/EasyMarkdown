@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import openMode from '../packages/vscode-extension/src/openMode.js'
 
-const { navigationTargetFromSelection, isRecentNavigationTarget } = openMode
+const {
+  navigationTargetFromSelection,
+  isRecentNavigationTarget,
+  shouldPreserveSourceForNavigation
+} = openMode
 const commandKind = 3
 
 function selection(startLine, startCharacter, endLine, endCharacter) {
@@ -50,5 +54,26 @@ describe('VSCode Markdown open-mode navigation signals', () => {
     expect(isRecentNavigationTarget(target, 1600)).toBe(true)
     expect(isRecentNavigationTarget(target, 1601)).toBe(false)
     expect(isRecentNavigationTarget(target, 99)).toBe(false)
+  })
+
+  it('does not mistake an ordinary line-zero command cursor restore for navigation', () => {
+    expect(
+      shouldPreserveSourceForNavigation(
+        { line: 0, character: 0, text: '', at: 100 },
+        200
+      )
+    ).toBe(false)
+    expect(
+      shouldPreserveSourceForNavigation(
+        { line: 0, character: 0, text: 'SearchMatch', at: 100 },
+        200
+      )
+    ).toBe(true)
+    expect(
+      shouldPreserveSourceForNavigation(
+        { line: 10, character: 0, text: '', at: 100 },
+        200
+      )
+    ).toBe(true)
   })
 })

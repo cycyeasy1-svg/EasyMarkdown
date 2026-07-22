@@ -1,4 +1,5 @@
 const vscode = require('vscode')
+const { isSplitScrollPeer } = require('./scrollSync')
 // Pure filename sanitizer shared with the desktop app's image:save IPC — same
 // naming convention for pasted images on both sides.
 const {
@@ -33,6 +34,7 @@ class KeepEditorProvider {
     this.pendingAnchor = new Map() // uriString -> #fragment to apply once the editor opens
     this.pendingReveal = new Map() // uriString -> short-lived source selection from VSCode search
     this.readyPanels = new Set() // uriString values whose webview has sent `ready`
+    this.viewports = new Map() // uriString -> recent Keep scroll position, survives preview replacement
     this.registration = null
   }
 
@@ -76,6 +78,21 @@ class KeepEditorProvider {
     const target = this.pendingReveal.get(docKey)
     this.pendingReveal.delete(docKey)
     return target && target.expiresAt >= Date.now() ? target : null
+  }
+
+  rememberViewport(docKey, scroll) {
+    if (!scroll || (!Number.isFinite(scroll.top) && !Number.isFinite(scroll.line))) return
+    const viewport = {
+      top: Number.isFinite(scroll.top) ? Math.max(0, scroll.top) : undefined,
+      line: Number.isFinite(scroll.line) ? Math.max(0, scroll.line | 0) : undefined
+    }
+    // Refresh insertion order and keep the session cache bounded. This is only
+    // a viewport convenience cache; document content never lives here.
+    this.viewports.delete(docKey)
+    this.viewports.set(docKey, viewport)
+    while (this.viewports.size > 100) {
+      this.viewports.delete(this.viewports.keys().next().value)
+    }
   }
 
   resolveCustomTextEditor(document, webviewPanel) {
@@ -131,6 +148,47 @@ class KeepEditorProvider {
     let suppressEditorScrollUntil = 0
     let editorScrollTimer = null
 
+    // Scroll sync is only meaningful while Keep and a native source editor for
+    // this document are simultaneously visible in different editor groups.
+    // During an automatic source -> Keep handoff VS Code briefly exposes a text
+    // editor in the SAME group. Treating that transient editor as a split peer
+    // sends line 0 into the hidden Keep webview and destroys its saved viewport.
+    const visibleSourcePeers = () => {
+      if (!webviewPanel.visible || webviewPanel.viewColumn == null) return []
+      return vscode.window.visibleTextEditors.filter(
+        (editor) =>
+          isSplitScrollPeer({
+            documentKey: docKey,
+            editorDocumentKey: editor.document.uri.toString(),
+            keepVisible: webviewPanel.visible,
+            keepColumn: webviewPanel.viewColumn,
+            sourceColumn: editor.viewColumn
+          })
+      )
+    }
+    const isVisibleSourcePeer = (editor) =>
+      visibleSourcePeers().some(
+        (peer) =>
+          peer === editor ||
+          (peer.viewColumn === editor.viewColumn &&
+            peer.document.uri.toString() === editor.document.uri.toString())
+      )
+    const cancelEditorScroll = () => {
+      clearTimeout(editorScrollTimer)
+      editorScrollTimer = null
+    }
+    const scheduleSourceToKeepScroll = (editor) => {
+      if (!scrollSyncOn() || !isVisibleSourcePeer(editor)) return
+      const first = editor.visibleRanges[0]
+      if (!first) return
+      cancelEditorScroll()
+      editorScrollTimer = setTimeout(() => {
+        editorScrollTimer = null
+        if (!scrollSyncOn() || !isVisibleSourcePeer(editor)) return
+        webview.postMessage({ type: 'scrollToLine', line: first.start.line })
+      }, 100)
+    }
+
     const baseUri = webview.asWebviewUri(docDir).toString()
     webview.html = this.getHtml(webview)
 
@@ -154,6 +212,7 @@ class KeepEditorProvider {
         theme: this.context.globalState.get(THEME_KEY) || 'auto',
         layout: this.context.globalState.get(LAYOUT_KEY) || null,
         diagnostics: { count: vscode.languages.getDiagnostics(document.uri).length },
+        scroll: this.viewports.get(docKey) || null,
         anchor,
         reveal
       })
@@ -234,13 +293,15 @@ class KeepEditorProvider {
       } else if (msg.type === 'visibleLine') {
         // Webview scrolled → align every visible text editor of the same file.
         if (!scrollSyncOn()) return
+        const peers = visibleSourcePeers()
+        if (!peers.length) return
         suppressEditorScrollUntil = Date.now() + 250
         const line = Math.max(0, Math.min(msg.line | 0, document.lineCount - 1))
-        for (const ed of vscode.window.visibleTextEditors) {
-          if (ed.document.uri.toString() === docKey) {
-            ed.revealRange(new vscode.Range(line, 0, line, 0), vscode.TextEditorRevealType.AtTop)
-          }
+        for (const ed of peers) {
+          ed.revealRange(new vscode.Range(line, 0, line, 0), vscode.TextEditorRevealType.AtTop)
         }
+      } else if (msg.type === 'viewport') {
+        this.rememberViewport(docKey, msg.scroll)
       } else if (msg.type === 'layout') {
         // Persist layout prefs globally (mirrors the app's single localStorage
         // prefs object), so every keep editor shares the same layout.
@@ -269,14 +330,16 @@ class KeepEditorProvider {
     // Source editor scrolled → tell the webview to align to its top line.
     const scrollSub = vscode.window.onDidChangeTextEditorVisibleRanges((e) => {
       if (e.textEditor.document.uri.toString() !== docKey) return
-      if (!scrollSyncOn()) return
       if (Date.now() < suppressEditorScrollUntil) return // echo of our own reveal
-      const first = e.visibleRanges[0]
-      if (!first) return
-      clearTimeout(editorScrollTimer)
-      editorScrollTimer = setTimeout(() => {
-        webview.postMessage({ type: 'scrollToLine', line: first.start.line })
-      }, 100)
+      scheduleSourceToKeepScroll(e.textEditor)
+    })
+
+    const viewStateSub = webviewPanel.onDidChangeViewState(() => {
+      // A timer queued by a source editor that was visible during an editor-kind
+      // transition must not fire after Keep has been hidden or moved.
+      cancelEditorScroll()
+      const peer = visibleSourcePeers()[0]
+      if (peer) scheduleSourceToKeepScroll(peer)
     })
 
     webviewPanel.onDidDispose(() => {
@@ -284,7 +347,8 @@ class KeepEditorProvider {
       diagnosticSub.dispose()
       msgSub.dispose()
       scrollSub.dispose()
-      clearTimeout(editorScrollTimer)
+      viewStateSub.dispose()
+      cancelEditorScroll()
       editAckWaiters.forEach(({ resolve, timer }) => {
         clearTimeout(timer)
         resolve()

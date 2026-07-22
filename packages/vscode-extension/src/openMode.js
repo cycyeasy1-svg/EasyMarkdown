@@ -30,8 +30,19 @@ function isRecentNavigationTarget(target, now = Date.now()) {
   return !!target && now >= target.at && now - target.at <= NAVIGATION_MAX_AGE_MS
 }
 
+// A Command-kind selection event is not, by itself, proof that the user opened
+// a navigation target. VS Code also emits command-owned cursor restoration for
+// some ordinary preview/reopen paths. Preserve source mode only when the target
+// carries useful location information; line 0 / column 0 with no selected text
+// is indistinguishable from a normal file open and should follow Keep preference.
+function shouldPreserveSourceForNavigation(target, now = Date.now()) {
+  if (!isRecentNavigationTarget(target, now)) return false
+  return !!target.text || target.line > 0 || target.character > 0
+}
+
 module.exports = {
   NAVIGATION_MAX_AGE_MS,
   navigationTargetFromSelection,
-  isRecentNavigationTarget
+  isRecentNavigationTarget,
+  shouldPreserveSourceForNavigation
 }

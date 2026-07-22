@@ -1,9 +1,14 @@
 const vscode = require('vscode')
 const { KeepEditorProvider, MODE_KEY } = require('./keepEditorProvider')
-const { navigationTargetFromSelection, isRecentNavigationTarget } = require('./openMode')
+const {
+  navigationTargetFromSelection,
+  shouldPreserveSourceForNavigation
+} = require('./openMode')
 
 const KEEP_VIEW_TYPE = 'easymarkdown.keep'
 const MD_RE = /\.(md|markdown)$/i
+const OPEN_SELECTION_GRACE_MS = 60
+const OPEN_VERIFY_DELAY_MS = 80
 
 function isMarkdownFileUri(uri) {
   return uri instanceof vscode.Uri && uri.scheme === 'file' && MD_RE.test(uri.path)
@@ -82,13 +87,14 @@ const keepCodeLensProvider = {
 // tab in `lastKind`). `suppressed` (shared with the commands) keeps the watcher
 // away from a uri we're acting on ourselves — e.g. "Open Keep to the Side"
 // while the preferred mode is source must not be instantly reverted.
-function watchTabsForKeep(context, suppressed, keepProvider) {
+function watchTabsForKeep(context, suppressed, keepProvider, manualEpoch) {
   const rememberOn = () =>
     vscode.workspace.getConfiguration('easymarkdown.keep').get('rememberMode', true)
   const lastKind = new Map() // "uri|viewColumn" -> 'keep' | 'text'
   const recentNavigation = new Map() // uriString -> command-driven selection/cursor target
   const switchingToKeep = new Set() // uriString values currently crossing openWith
   const pendingKeepChecks = new Map() // Tab -> short delay that lets VSCode apply an open selection
+  const lastTabState = new WeakMap() // catches preview-slot reuse when a Tab changes resource
 
   const navigationFromSelectionEvent = (event) => {
     const editor = event?.textEditor
@@ -146,16 +152,24 @@ function watchTabsForKeep(context, suppressed, keepProvider) {
     const c = classify(tab)
     if (!c) return
     const key = keyOf(tab, c)
+    const uriKey = c.uri.toString()
+    const tabState = lastTabState.get(tab)
+    const reusedPreviewSlot = !!tabState && tabState.uriKey !== uriKey
+    lastTabState.set(tab, { uriKey, kind: c.kind, key })
+    if (reusedPreviewSlot) {
+      const pending = pendingKeepChecks.get(tab)
+      if (pending) clearTimeout(pending)
+      pendingKeepChecks.delete(tab)
+    }
     const prev = lastKind.get(key)
     lastKind.set(key, c.kind)
-    // A changed event is an editor swap only when the kind VISIBLY flipped.
-    // Unknown prev (e.g. a session-restored tab whose first event is a dirty
-    // change) is not a swap — just record it.
-    if (!isOpen && (prev === undefined || prev === c.kind)) return
+    // A changed event is actionable when the editor kind visibly flipped or a
+    // preview Tab was reused for another resource. Unknown prev (for example a
+    // session-restored tab's first dirty change) is still just recorded.
+    if (!isOpen && !reusedPreviewSlot && (prev === undefined || prev === c.kind)) return
     const pref = rememberOn() ? context.globalState.get(MODE_KEY) || 'keep' : 'keep'
     const want = pref === 'source' ? 'text' : 'keep'
     if (c.kind === want) return
-    const uriKey = c.uri.toString()
     if (suppressed.has(uriKey)) return
 
     // Navigation-owned opens stay in source mode so VSCode keeps the precise
@@ -166,7 +180,7 @@ function watchTabsForKeep(context, suppressed, keepProvider) {
     if (
       want === 'keep' &&
       c.kind === 'text' &&
-      isRecentNavigationTarget(navigation)
+      shouldPreserveSourceForNavigation(navigation)
     ) {
       recentNavigation.delete(uriKey)
       return
@@ -182,7 +196,7 @@ function watchTabsForKeep(context, suppressed, keepProvider) {
           pendingKeepChecks.delete(tab)
           const stillOpen = vscode.window.tabGroups.all.some((group) => group.tabs.includes(tab))
           if (stillOpen) handle(tab, true, false)
-        }, 120)
+        }, OPEN_SELECTION_GRACE_MS)
         pendingKeepChecks.set(tab, timer)
       }
       return
@@ -200,40 +214,76 @@ function watchTabsForKeep(context, suppressed, keepProvider) {
     // editor isn't hijacked, which means the source text always opens first;
     // this preview reuse is what hides that transition.)
     const wasPreview = !!tab.isPreview
+    const targetColumn = tab.group?.viewColumn
+    const startManualEpoch = manualEpoch.get(uriKey) || 0
     const release = () =>
       setTimeout(() => {
         suppressed.delete(uriKey)
         switchingToKeep.delete(uriKey)
         recentNavigation.delete(uriKey)
       }, 500)
-    vscode.commands
-      .executeCommand('vscode.openWith', c.uri, want === 'keep' ? KEEP_VIEW_TYPE : 'default', {
-        viewColumn: tab.group?.viewColumn,
-        preview: wasPreview,
-        // This is an automatic editor-kind swap, not an explicit request to
-        // start editing. Preserve Explorer/Search focus so commands such as F2
-        // still act on the selected file after opening it.
-        preserveFocus: true
-      })
-      .then(
-        () => {
-          // Preview slot was reused — nothing to clean up (closing `original`
-          // here would close the freshly-swapped-in editor, same slot).
-          if (wasPreview) return
-          // A permanent (double-clicked / pinned) tab has no shared slot, so
-          // `openWith` ADDS a tab: text + keep coexist for one uri, and both
-          // collide on the single `lastKind` key (uri|viewColumn) — closing one
-          // then makes the watcher re-open it forever. Close the now-redundant
-          // original so exactly one tab of the wanted kind survives. If openWith
-          // replaced in place, `original` already reflects `want` and we skip.
+    const openOptions = (candidate) => ({
+      viewColumn: candidate?.group?.viewColumn ?? targetColumn,
+      preview: candidate ? !!candidate.isPreview : wasPreview,
+      // This is an automatic editor-kind swap, not an explicit request to
+      // start editing. Preserve Explorer/Search focus so commands such as F2
+      // still act on the selected file after opening it.
+      preserveFocus: true
+    })
+    const preferredKind = () => {
+      const pref = rememberOn() ? context.globalState.get(MODE_KEY) || 'keep' : 'keep'
+      return pref === 'source' ? 'text' : 'keep'
+    }
+    const activeTarget = () => {
+      const group = vscode.window.tabGroups.all.find((g) => g.viewColumn === targetColumn)
+      const active = group?.activeTab
+      const activeClass = classify(active)
+      return activeClass?.uri.toString() === uriKey ? { tab: active, c: activeClass } : null
+    }
+    const runSwitch = async () => {
+      let candidate = tab
+      let opened = false
+      for (let attempt = 0; attempt < 2; attempt++) {
+        try {
+          await vscode.commands.executeCommand(
+            'vscode.openWith',
+            c.uri,
+            want === 'keep' ? KEEP_VIEW_TYPE : 'default',
+            openOptions(candidate)
+          )
+          opened = true
+        } catch (error) {
+          console.warn('EasyMarkdown: automatic editor switch failed', error)
+        }
+
+        if (opened && attempt === 0 && !wasPreview) {
+          // A permanent tab may coexist with the newly opened editor. Close the
+          // redundant original only when VS Code did not replace it in place.
           const oc = classify(original)
           if (oc && oc.kind !== want) {
-            return Promise.resolve(vscode.window.tabGroups.close(original)).catch(() => {})
+            await Promise.resolve(vscode.window.tabGroups.close(original)).catch(() => {})
           }
-        },
-        () => {}
-      )
-      .then(release, release)
+        }
+
+        await new Promise((resolve) => setTimeout(resolve, OPEN_VERIFY_DELAY_MS))
+        const current = activeTarget()
+        if (!current || current.c.kind === want) return
+        // Do not fight a newer explicit mode command or preference change. One
+        // retry is enough to recover a cancelled preview-slot openWith without
+        // turning rapid user navigation into an editor-switch loop.
+        if (
+          attempt > 0 ||
+          preferredKind() !== want ||
+          (manualEpoch.get(uriKey) || 0) !== startManualEpoch
+        ) {
+          console.warn('EasyMarkdown: automatic editor switch did not reach the requested mode')
+          return
+        }
+        candidate = current.tab
+        opened = false
+      }
+    }
+    runSwitch().then(release, release)
   }
 
   const syncOpenTabs = () => {
@@ -249,9 +299,17 @@ function watchTabsForKeep(context, suppressed, keepProvider) {
       pendingKeepChecks.delete(tab)
       const c = classify(tab)
       if (c) {
-        lastKind.delete(keyOf(tab, c))
+        const key = keyOf(tab, c)
+        const sameKindStillOpen = vscode.window.tabGroups.all.some((group) =>
+          group.tabs.some((other) => {
+            const otherClass = other !== tab ? classify(other) : null
+            return otherClass && keyOf(other, otherClass) === key
+          })
+        )
+        if (!sameKindStillOpen) lastKind.delete(key)
         recentNavigation.delete(c.uri.toString())
       }
+      lastTabState.delete(tab)
     })
     e.opened.forEach((t) => handle(t, true))
     e.changed.forEach((t) => handle(t, false))
@@ -271,8 +329,10 @@ function activate(context) {
   // Uris the extension itself is currently switching — the tab watcher must not
   // "correct" them. Shared with watchTabsForKeep.
   const suppressed = new Set()
+  const manualEpoch = new Map()
   const holdSuppress = (uri, ms = 1500) => {
     const key = uri.toString()
+    manualEpoch.set(key, (manualEpoch.get(key) || 0) + 1)
     suppressed.add(key)
     setTimeout(() => suppressed.delete(key), ms)
   }
@@ -281,7 +341,7 @@ function activate(context) {
 
   context.subscriptions.push(
     keepProvider,
-    watchTabsForKeep(context, suppressed, keepProvider),
+    watchTabsForKeep(context, suppressed, keepProvider, manualEpoch),
     vscode.commands.registerCommand('easymarkdown.openWithKeep', async (uriArg) => {
       const uri = activeResourceUri(uriArg)
       if (isMarkdownFileUri(uri)) {

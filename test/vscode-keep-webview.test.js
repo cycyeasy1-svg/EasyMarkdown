@@ -109,6 +109,22 @@ describe('VSCode Keep webview interactions', () => {
     expect(scroll).toHaveBeenCalledWith({ behavior: 'smooth', block: 'start' })
   })
 
+  it('persists the Keep viewport without dropping an unfinished draft', async () => {
+    state.draft = { version: 1, kind: 'block', value: 'unfinished' }
+    const scroller = document.querySelector('.editor-scroll')
+    scroller.scrollTop = 420
+    scroller.dispatchEvent(new Event('scroll'))
+    await new Promise((resolve) => setTimeout(resolve, 150))
+
+    expect(state.scroll).toMatchObject({ top: 420 })
+    expect(state.draft).toEqual({ version: 1, kind: 'block', value: 'unfinished' })
+    expect(posts).toContainEqual({
+      type: 'viewport',
+      scroll: expect.objectContaining({ top: 420 })
+    })
+    delete state.draft
+  })
+
   it('shows candidate counts within the other columns\' filter context', async () => {
     send({
       type: 'init',
