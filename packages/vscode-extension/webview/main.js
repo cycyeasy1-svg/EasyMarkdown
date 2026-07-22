@@ -292,17 +292,15 @@ function finishRender() {
     columnState,
     t,
     onFilterClick: (clonedBtn) => openFilterPop(clonedBtn),
-    onHeaderEdit: (clonedTh) => {
-      // Resolve the clicked clone to the REAL <th> (same data-line/data-ci → same
-      // source line) and edit that, anchoring the popup under the visible clone.
-      const real = host.querySelector(
-        'th[data-line="' +
-          clonedTh.getAttribute('data-line') +
-          '"][data-ci="' +
-          clonedTh.getAttribute('data-ci') +
-          '"]'
-      )
-      if (real) openCellPop(real, clonedTh)
+    onHeaderClick: (liveTh) => selectCell(liveTh),
+    onHeaderContextMenu: (liveTh, _clonedTh, event) => {
+      selectCell(liveTh)
+      event.preventDefault()
+      openMenu(event.clientX, event.clientY, tableItemsForCell(liveTh))
+    },
+    onHeaderEdit: (liveTh, clonedTh) => {
+      // Keep the editor popup under the visible clone while editing the real header.
+      openCellPop(liveTh, clonedTh)
     }
   })
   restoreSelectedCell()
@@ -1397,6 +1395,7 @@ function clearTableSelection({ focusTable = false } = {}) {
     cell.tabIndex = -1
   }
   selectedCell = null
+  tableScroll?.refreshSelection()
   if (table) {
     table.tabIndex = 0
     if (focusTable) table.focus({ preventScroll: true })
@@ -1428,6 +1427,7 @@ function selectCell(cell, { focus = true, scroll = false } = {}) {
     })
   )
   cell.tabIndex = 0
+  tableScroll?.refreshSelection()
   if (focus) cell.focus({ preventScroll: true })
   if (scroll) cell.scrollIntoView({ block: 'nearest', inline: 'nearest' })
   return true

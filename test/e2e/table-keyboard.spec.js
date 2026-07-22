@@ -90,6 +90,34 @@ test('Keep table keyboard navigation reveals cells below the floating header', a
   }
 })
 
+test('Keep floating table header supports selection and the table context menu', async () => {
+  const { page, cleanup } = await openTableFixture()
+  try {
+    const table = page.locator('.km-doc table.km-table[data-ti="0"]')
+    const target = table.locator('tbody tr[data-ri="2"] td[data-ci="0"]')
+    await target.evaluate((cell) => {
+      const scroller = cell.closest('.editor-scroll')
+      const gap = cell.getBoundingClientRect().top - scroller.getBoundingClientRect().top
+      scroller.scrollTop += gap
+      scroller.dispatchEvent(new Event('scroll'))
+    })
+
+    const floatingHeader = page.locator('.km-float-header.km-visible th[data-ci="0"]')
+    const floatingContent = floatingHeader.locator('.km-th-content')
+    const liveHeader = table.locator('thead th[data-ci="0"]')
+    await expect(floatingHeader).toBeVisible()
+
+    await floatingContent.click()
+    await expect(liveHeader).toHaveClass(/km-cell-selected/)
+    await expect(floatingHeader).toHaveClass(/km-cell-selected/)
+
+    await floatingContent.click({ button: 'right' })
+    await expect(page.locator('.km-table-menu')).toBeVisible()
+  } finally {
+    await cleanup()
+  }
+})
+
 test('Keep table pastes a TSV rectangle as one undo transaction and exposes commands', async () => {
   const { page, cleanup } = await openTableFixture()
   try {

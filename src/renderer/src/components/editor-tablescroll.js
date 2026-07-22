@@ -41,7 +41,14 @@ function fallbackT(key, vars) {
 export function enhanceKeepTables(
   host,
   scroller,
-  { onFilterClick, onHeaderEdit, columnState = {}, t: initialT } = {}
+  {
+    onFilterClick,
+    onHeaderClick,
+    onHeaderContextMenu,
+    onHeaderEdit,
+    columnState = {},
+    t: initialT
+  } = {}
 ) {
   const noop = {
     update() {},
@@ -49,6 +56,7 @@ export function enhanceKeepTables(
     destroy() {},
     refreshContent() {},
     refreshLabels() {},
+    refreshSelection() {},
     autoFitColumn() {},
     autoFitTable() {},
     hideColumn() {},
@@ -186,6 +194,7 @@ export function enhanceKeepTables(
     let cloneThead = null
     let syncTopWidth = () => {}
     let syncWidths = () => {}
+    let syncSelection = () => {}
     let updateFloat = () => {}
 
     // Group toolbar + top scrollbar + table as one visual frame. On an in-place
@@ -495,6 +504,7 @@ export function enhanceKeepTables(
       update: () => updateFloat(),
       hide: () => {},
       syncContent: () => {},
+      syncSelection: () => {},
       revealCell: () => false
     }
     controllers.set(stateKey, controller)
@@ -556,12 +566,39 @@ export function enhanceKeepTables(
       button.addEventListener('click', onClick)
       cleanups.push(() => button.removeEventListener('click', onClick))
     })
+    const liveHeaderForClone = (clonedTh) => {
+      const ci = clonedTh?.getAttribute('data-ci')
+      if (ci == null) return null
+      return liveHeaders.find((th) => th.getAttribute('data-ci') === ci) || null
+    }
+    const isHeaderControl = (target) =>
+      target.closest?.('.km-filter-btn, .km-col-hide-btn, .km-col-resize')
+    const onCloneClick = (event) => {
+      if (isHeaderControl(event.target)) return
+      const clonedTh = event.target.closest('th')
+      const liveTh = liveHeaderForClone(clonedTh)
+      if (!liveTh) return
+      onHeaderClick?.(liveTh, clonedTh, event)
+      syncSelection()
+    }
+    const onCloneContextMenu = (event) => {
+      const clonedTh = event.target.closest('th')
+      const liveTh = liveHeaderForClone(clonedTh)
+      if (!liveTh) return
+      onHeaderContextMenu?.(liveTh, clonedTh, event)
+      syncSelection()
+    }
     const onCloneDoubleClick = (event) => {
       if (event.target.closest('.km-filter-btn, .km-col-hide-btn, .km-col-resize')) return
-      const th = event.target.closest('th')
-      if (th) onHeaderEdit?.(th)
+      const clonedTh = event.target.closest('th')
+      const liveTh = liveHeaderForClone(clonedTh)
+      if (liveTh) onHeaderEdit?.(liveTh, clonedTh, event)
     }
+    cloneThead.addEventListener('click', onCloneClick)
+    cloneThead.addEventListener('contextmenu', onCloneContextMenu)
     cloneThead.addEventListener('dblclick', onCloneDoubleClick)
+    cleanups.push(() => cloneThead.removeEventListener('click', onCloneClick))
+    cleanups.push(() => cloneThead.removeEventListener('contextmenu', onCloneContextMenu))
     cleanups.push(() => cloneThead.removeEventListener('dblclick', onCloneDoubleClick))
 
     const syncContent = () => {
@@ -597,6 +634,15 @@ export function enhanceKeepTables(
         if (clone[i]) clone[i].classList.toggle('active', button.classList.contains('active'))
       })
     }
+    syncSelection = () => {
+      const original = thead.querySelectorAll('th')
+      const clone = cloneThead.querySelectorAll('th')
+      original.forEach((th, i) => {
+        if (clone[i]) {
+          clone[i].classList.toggle('km-cell-selected', th.classList.contains('km-cell-selected'))
+        }
+      })
+    }
 
     const hideFloat = () => floatEl.classList.remove('km-visible')
     updateFloat = () => {
@@ -616,6 +662,7 @@ export function enhanceKeepTables(
       }
       syncWidths()
       syncActive()
+      syncSelection()
       const zoom = parseFloat(getComputedStyle(host).getPropertyValue('--editor-zoom')) || 1
       const wrapRect = wrap.getBoundingClientRect()
       floatEl.style.top = topOffset / zoom + 'px'
@@ -655,6 +702,7 @@ export function enhanceKeepTables(
     controller.hide = hideFloat
     controller.update = updateFloat
     controller.syncContent = syncContent
+    controller.syncSelection = syncSelection
     controller.revealCell = revealCell
 
     wireHeaderControls(thead)
@@ -680,6 +728,7 @@ export function enhanceKeepTables(
       controllers.forEach((controller) => controller.hide())
     },
     refreshContent: () => controllers.forEach((controller) => controller.syncContent()),
+    refreshSelection: () => controllers.forEach((controller) => controller.syncSelection()),
     refreshLabels: (nextT) => {
       if (typeof nextT === 'function') translate = nextT
       closeColumnPop()

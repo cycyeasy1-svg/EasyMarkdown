@@ -78,4 +78,41 @@ describe('keep-table initialization performance guards', () => {
     expect([...table.querySelectorAll('th[data-ci="0"], td[data-ci="0"]')].some((cell) => cell.classList.contains('km-col-hidden'))).toBe(false)
     controls.destroy()
   })
+
+  it('bridges floating-header clicks and context menus to the live header', () => {
+    const { host, table } = makeTable({ rows: 2, columns: 3 })
+    const onHeaderClick = vi.fn((liveTh) => liveTh.classList.add('km-cell-selected'))
+    const onHeaderContextMenu = vi.fn((liveTh, _clonedTh, event) => {
+      liveTh.classList.add('km-cell-selected')
+      event.preventDefault()
+    })
+    const controls = enhanceKeepTables(host, host, { onHeaderClick, onHeaderContextMenu })
+    const liveTh = table.querySelector('th[data-ci="1"]')
+    const clonedTh = document.querySelector('.km-float-header th[data-ci="1"]')
+    const content = clonedTh.querySelector('.km-th-content')
+
+    content.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
+    expect(onHeaderClick).toHaveBeenCalledWith(liveTh, clonedTh, expect.any(MouseEvent))
+    expect(clonedTh.classList.contains('km-cell-selected')).toBe(true)
+
+    liveTh.classList.remove('km-cell-selected')
+    controls.refreshSelection()
+    expect(clonedTh.classList.contains('km-cell-selected')).toBe(false)
+
+    const menuEvent = new MouseEvent('contextmenu', {
+      bubbles: true,
+      cancelable: true,
+      clientX: 24,
+      clientY: 36
+    })
+    content.dispatchEvent(menuEvent)
+    expect(onHeaderContextMenu).toHaveBeenCalledWith(
+      liveTh,
+      clonedTh,
+      expect.objectContaining({ clientX: 24, clientY: 36 })
+    )
+    expect(menuEvent.defaultPrevented).toBe(true)
+    expect(clonedTh.classList.contains('km-cell-selected')).toBe(true)
+    controls.destroy()
+  })
 })

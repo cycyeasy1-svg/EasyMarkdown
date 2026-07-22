@@ -450,19 +450,14 @@ function KeepEditor({
         columnState: columnStateRef.current,
         t: tRef.current,
         onFilterClick: (clonedBtn) => openFilterPop(clonedBtn),
-        // Editing a floating-header cell: resolve the clone to the REAL <th> (same
-        // data-line/data-ci → same source line) and edit that, but anchor the
-        // editor popup under the clicked clone so it appears where the user clicked.
-        onHeaderEdit: (clonedTh) => {
-          const real = host.querySelector(
-            'th[data-line="' +
-              clonedTh.getAttribute('data-line') +
-              '"][data-ci="' +
-              clonedTh.getAttribute('data-ci') +
-              '"]'
-          )
-          if (real) openCellPop(real, clonedTh)
-        }
+        onHeaderClick: (liveTh) => selectCell(liveTh),
+        onHeaderContextMenu: (liveTh, _clonedTh, event) => {
+          selectCell(liveTh)
+          event.preventDefault()
+          openMenu(event.clientX, event.clientY, tableItemsForCell(liveTh))
+        },
+        // Edit the real header while anchoring the popup under the visible clone.
+        onHeaderEdit: (liveTh, clonedTh) => openCellPop(liveTh, clonedTh)
       })
     }
 
@@ -1397,6 +1392,7 @@ function KeepEditor({
         cell.tabIndex = -1
       }
       selectedCellRef.current = null
+      tableScrollRef.current?.refreshSelection()
       if (table) {
         table.tabIndex = 0
         if (focusTable) table.focus({ preventScroll: true })
@@ -1484,6 +1480,7 @@ function KeepEditor({
         })
       )
       cell.tabIndex = 0
+      tableScrollRef.current?.refreshSelection()
       if (focus) cell.focus({ preventScroll: true })
       if (scroll && !tableScrollRef.current?.revealCell(cell)) {
         cell.scrollIntoView({ block: 'nearest', inline: 'nearest' })
