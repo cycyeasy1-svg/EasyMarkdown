@@ -2019,36 +2019,43 @@ body.dark .milkdown .ProseMirror mark.hm-hl-blue { background: #2f4a6b; }
   display: flex;
   align-items: center;
   gap: 8px;
-  /* Browser-style sizing: a single tab grows to fit the whole filename (up to a
-     generous cap); as tabs pile up they shrink toward a minimum and then the
-     strip scrolls. flex-shrink lets the strip compress instead of always
-     scrolling. */
-  flex: 0 1 auto;
-  min-width: 84px;
+  /* Give every tab the same preferred basis so crowded tabs shrink evenly,
+     rather than in proportion to each filename's intrinsic width. Once every
+     tab reaches the readable floor, the strip's existing horizontal overflow
+     takes over. */
+  flex: 1 1 220px;
+  min-width: 120px;
   max-width: 260px;
   height: 30px;
   padding: 0 12px;
   border: 1px solid var(--border-soft);
   border-bottom-color: transparent;
   border-radius: var(--radius-md) var(--radius-md) 0 0;
-  background: var(--bg);
+  --tab-surface: var(--bg);
+  background: var(--tab-surface);
   color: var(--muted);
   font-size: 13px;
   font-weight: 500;
   white-space: nowrap;
   position: relative;
-  transition: all 0.2s var(--ease-out);
+  transition:
+    background 0.2s var(--ease-out),
+    border-color 0.2s var(--ease-out),
+    color 0.2s var(--ease-out),
+    transform 0.2s var(--ease-out);
   cursor: pointer;
   user-select: none;
 }
 .tab:hover {
-  background: var(--hover);
+  --tab-surface: var(--hover);
+  background: var(--tab-surface);
   border-color: var(--border);
   border-bottom-color: transparent;
   color: var(--text);
 }
 .tab.active {
-  background: var(--bg-editor);
+  --tab-surface: var(--bg-editor);
+  background: var(--tab-surface);
   border-color: var(--border);
   border-bottom-color: transparent;
   color: var(--text-strong);
@@ -2085,16 +2092,23 @@ body.dark .milkdown .ProseMirror mark.hm-hl-blue { background: #2f4a6b; }
 .tab-close {
   display: grid;
   place-items: center;
+  position: absolute;
+  top: 50%;
+  right: 8px;
   width: 16px;
   height: 16px;
   border-radius: 4px;
+  background: var(--tab-surface);
   color: var(--faint);
-  flex-shrink: 0;
+  box-shadow: -6px 0 6px 2px var(--tab-surface);
   opacity: 0;
+  transform: translateY(-50%);
   transition: opacity 0.15s var(--ease-out), background 0.15s var(--ease-out), color 0.15s var(--ease-out);
 }
-.tab:hover .tab-close { opacity: 1; }
-.tab-close.dirty { opacity: 1; }
+.tab:hover .tab-close,
+.tab-close.dirty {
+  opacity: 1;
+}
 .tab-close:hover {
   background: var(--active);
   color: var(--text);

@@ -17,8 +17,10 @@ test('tab migration buttons appear only on overflow and switch adjacent tabs', a
   }
 
   const dir = mkdtempSync(join(tmpdir(), 'em-tab-overflow-'))
+  // Vary intrinsic title lengths so this also guards the browser-style rule:
+  // crowded tabs share one width instead of shrinking by filename length.
   const names = Array.from({ length: 14 }, (_, index) =>
-    `long-document-name-for-tab-migration-${String(index + 1).padStart(2, '0')}.md`
+    `${'document-'.repeat((index % 4) + 1)}${String(index + 1).padStart(2, '0')}.md`
   )
   const files = names.map((name) => {
     const path = join(dir, name)
@@ -33,6 +35,12 @@ test('tab migration buttons appear only on overflow and switch adjacent tabs', a
     await expect(next).toBeVisible()
     await expect(previous).toHaveAttribute('title', '切换到上一个标签')
     await expect(next).toHaveAttribute('title', '切换到下一个标签')
+
+    const tabWidths = await many.page.locator('.tab').evaluateAll((tabs) =>
+      tabs.map((tab) => tab.getBoundingClientRect().width)
+    )
+    expect(Math.max(...tabWidths) - Math.min(...tabWidths)).toBeLessThanOrEqual(1)
+    expect(Math.min(...tabWidths)).toBeGreaterThanOrEqual(120)
 
     await many.page.locator('.tab', { hasText: names[7] }).click()
     await expect(many.page.locator('.tab.active')).toContainText(names[7])
