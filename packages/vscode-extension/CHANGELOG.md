@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.4.1
+<!-- head: 5d779a4 -->
+
+- **Keep your place between sessions** — restore the Keep viewport after tabs
+  or webviews reopen, while explicit anchors and search navigation still take
+  priority.
+- **More reliable view switching and scroll sync** — prevent hidden Keep views
+  from jumping to the top, improve preview-tab reuse, and avoid conflicts with
+  explicit mode changes.
+- **Fix: fully interactive floating table headers** — sticky headers now
+  support cell selection, right-click table actions, and synchronized selection
+  highlighting.
+
 ## 1.4.0
 <!-- head: fcc772d -->
 

@@ -21,8 +21,9 @@ minimal line-range edit, so VSCode owns dirty state, undo/redo and save.
   keep view without changing the source.
 - **Tables** — Excel-style per-column filters, add/remove rows & columns,
   drag-to-resize and auto-fit, temporary hide/restore controls, a sticky
-  floating header for wide tables, rich copy (cell / row / column / table),
-  keyboard cell navigation, and rectangular TSV paste from spreadsheets.
+  floating header for wide tables with selection and context-menu actions, rich
+  copy (cell / row / column / table), keyboard cell navigation, and rectangular
+  TSV paste from spreadsheets.
 - **Task lists** — `- [ ]` / `- [x]` render as real checkboxes; a click toggles
   exactly that source line.
 - **Block structure editing** — insert a block above/below, duplicate it, or
@@ -49,6 +50,9 @@ minimal line-range edit, so VSCode owns dirty state, undo/redo and save.
   selected match into the rendered view for precise find/highlight positioning.
 - **Scroll sync** — "Open Keep View to the Side" keeps the keep view and the
   source editor scroll-locked both ways (`easymarkdown.keep.scrollSync`).
+- **Viewport restore** — reopening a Keep tab or restoring its webview returns
+  to the previous reading position unless an explicit anchor or search result
+  supplies a more specific destination.
 - **Settings** (the gear button) — color **theme** (follow VSCode, or the built-in
   Warm Light / Warm Dark), UI **language** (follow system, or 中文 / 日本語 /
   English), and **layout** (page width, font size, zoom, line height, paragraph
