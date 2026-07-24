@@ -39,6 +39,7 @@ import {
 } from '../shared/fonts.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
+const isInternalDemoBuild = __INTERNAL_UPDATE_DEMO__
 
 async function openExternalUrl(url) {
   const allowedUrl = getAllowedExternalUrl(url)
@@ -152,6 +153,9 @@ let allowClose = false
 // handler tell "quit the app" apart from "just close the window" (macOS keeps the
 // app running on window close, but Cmd+Q must fully quit).
 let isQuitting = false
+// Non-null only for the separately packaged `internal-demo` distribution.
+// Public ZIP/NSIS builds do not carry its distribution marker.
+let internalDemoUpdater = null
 const watchers = new Map() // folder path -> watcher
 const fileWatchers = new Map() // file path -> { watcher, timer }
 
@@ -424,6 +428,21 @@ app.whenReady().then(() => {
     allowLocalFonts(webContents, permission, details?.requestingUrl || requestingOrigin, details?.isMainFrame)
   )
   createWindow()
+  if (isInternalDemoBuild) {
+    void import('./internal-updater.js')
+      .then(({ createInternalDemoUpdater }) => createInternalDemoUpdater({
+        app,
+        resourcesPath: process.resourcesPath,
+        sendState: (state) => sendToRenderer('update:state', state)
+      }))
+      .then((updater) => {
+        internalDemoUpdater = updater
+        if (updater) console.info('[updater] Internal demo update channel enabled.')
+      })
+      .catch((error) => {
+        console.warn('[updater] Internal demo update channel was not enabled:', error?.message || error)
+      })
+  }
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })
@@ -1603,6 +1622,12 @@ ipcMain.on('app:cancel-close', () => {
 // (drafts/prereleases are excluded by this endpoint) and report its version so
 // the renderer can show a "new version available" prompt. No download here.
 ipcMain.handle('update:check', async () => {
+  if (internalDemoUpdater) return internalDemoUpdater.checkForUpdates()
+  // An internal build never falls back to the public GitHub channel. If its
+  // marker/provider is invalid, fail closed and leave the editor unaffected.
+  if (isInternalDemoBuild) {
+    return { ok: false, internal: true, error: 'The internal update channel is not configured.' }
+  }
   try {
     // Use Electron's net (Chromium's network stack), NOT Node's global fetch:
     // Node's fetch resolves DNS via the bundled c-ares, which can abort() the
@@ -1628,6 +1653,30 @@ ipcMain.handle('update:check', async () => {
   } catch {
     return { ok: false }
   }
+})
+
+ipcMain.handle('update:download', async () => {
+  if (!internalDemoUpdater) {
+    return { ok: false, internal: false, error: 'Internal auto-update is disabled for this distribution.' }
+  }
+  return internalDemoUpdater.downloadUpdate()
+})
+
+ipcMain.handle('update:install', () => {
+  if (!internalDemoUpdater) {
+    return { ok: false, internal: false, error: 'Internal auto-update is disabled for this distribution.' }
+  }
+  // The renderer has already flushed the session and confirmed any unsaved
+  // documents. Let electron-updater close without triggering the same prompt a
+  // second time, which could otherwise prevent the installer from launching.
+  allowClose = true
+  isQuitting = true
+  const result = internalDemoUpdater.installDownloadedUpdate()
+  if (!result?.ok) {
+    allowClose = false
+    isQuitting = false
+  }
+  return result
 })
 
 // Menu actions are forwarded to renderer as commands.

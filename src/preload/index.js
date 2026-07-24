@@ -122,8 +122,11 @@ const api = {
   windowClose: () => ipcRenderer.invoke('window:close'),
   windowIsMaximized: () => ipcRenderer.invoke('window:isMaximized'),
 
-  // update check (notify-only)
+  // Public builds use the existing notify-only check. The separately packaged
+  // internal-demo distribution also exposes download/install lifecycle IPC.
   checkUpdate: () => ipcRenderer.invoke('update:check'),
+  downloadUpdate: () => ipcRenderer.invoke('update:download'),
+  installUpdate: () => ipcRenderer.invoke('update:install'),
 
   // report the UI language so the native application menu follows it
   setAppLang: (lang) => ipcRenderer.invoke('app:setLang', lang),
@@ -157,6 +160,7 @@ const api = {
   onFileChanged: on('file:changed'),
   onWindowMaximized: on('window:maximized'),
   onAppCloseRequest: on('app-close-request'),
+  onUpdateState: on('update:state'),
 
   platform: process.platform,
 

@@ -677,6 +677,40 @@ button:focus-visible,
   font-weight: 650;
 }
 
+.update-toast-progress {
+  padding: 4px 16px 0;
+}
+.update-toast-progress-label {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 7px;
+  color: var(--muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.update-toast-progress-track {
+  height: 6px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--hover);
+}
+.update-toast-progress-track > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+  transition: width 0.18s ease;
+}
+.update-toast-error {
+  margin: 4px 16px 0;
+  max-height: 72px;
+  overflow: auto;
+  color: var(--danger, #c64b3c);
+  font-size: 11px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
 .update-toast-foot {
   padding: 14px 16px 16px;
 }
@@ -697,6 +731,11 @@ button:focus-visible,
 }
 .update-toast-primary:active {
   transform: translateY(1px);
+}
+.update-toast-primary:disabled,
+.update-toast-close:disabled {
+  cursor: default;
+  opacity: 0.62;
 }
 .update-toast-close {
   position: absolute;

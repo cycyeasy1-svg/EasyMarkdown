@@ -14,7 +14,10 @@ import reactHooks from 'eslint-plugin-react-hooks'
 
 // Vite injects this at build time (electron.vite.config.mjs `define`); vitest
 // mirrors it. Declare it so renderer/source modules don't trip no-undef.
-const buildGlobals = { __APP_VERSION__: 'readonly' }
+const buildGlobals = {
+  __APP_VERSION__: 'readonly',
+  __INTERNAL_UPDATE_DEMO__: 'readonly'
+}
 
 // Shared tweaks to the recommended baseline (applied everywhere).
 const baseRules = {
@@ -44,6 +47,8 @@ export default [
     ignores: [
       '**/out/**',
       '**/dist/**',
+      'dist-update-demo/**',
+      'dist-update-demo-handoff/**',
       'dist-mobile/**',
       '**/node_modules/**',
       'android/**',

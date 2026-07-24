@@ -1,6 +1,10 @@
 node_modules/
 out/
 dist/
+dist-update-demo/
+dist-update-demo-handoff/
+dist-update-demo-handoff.zip
+dist-update-demo-handoff.zip.sha256
 *.log
 .DS_Store
 

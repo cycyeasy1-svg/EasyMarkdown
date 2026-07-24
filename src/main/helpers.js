@@ -343,3 +343,39 @@ export function shouldSkipWorkspaceEntry(name, isDirectory, showHidden = false) 
   if (name === '.DS_Store') return true
   return name.startsWith('.') && name !== '.gitignore' && !showHidden
 }
+
+// The auto-updater is deliberately fail-closed. Only a packaged build carrying
+// this exact distribution marker may contact the internal update source. Public
+// ZIP/NSIS builds have no marker and keep the existing notify-only GitHub flow.
+export function parseUpdateDistribution(raw) {
+  try {
+    const value = typeof raw === 'string' ? JSON.parse(raw) : raw
+    if (
+      value?.schemaVersion !== 1 ||
+      value?.distribution !== 'internal-demo' ||
+      value?.autoUpdate !== true
+    ) {
+      return null
+    }
+    return {
+      distribution: 'internal-demo',
+      autoUpdate: true
+    }
+  } catch {
+    return null
+  }
+}
+
+export function normalizeUpdateReleaseNotes(notes) {
+  if (typeof notes === 'string') return notes.slice(0, 4000)
+  if (!Array.isArray(notes)) return ''
+  return notes
+    .map((entry) => {
+      if (typeof entry === 'string') return entry
+      if (typeof entry?.note === 'string') return entry.note
+      return ''
+    })
+    .filter(Boolean)
+    .join('\n\n')
+    .slice(0, 4000)
+}

@@ -674,6 +674,11 @@ export const STRINGS = {
     'update.title': 'Update available',
     'update.whatsNew': "What's new",
     'update.download': 'Download',
+    'update.install': 'Update now',
+    'update.downloading': 'Downloading update…',
+    'update.restart': 'Restart and install',
+    'update.retry': 'Retry download',
+    'update.failed': 'Update failed',
     'update.later': 'Later'
   },
 
@@ -1322,6 +1327,11 @@ export const STRINGS = {
     'update.title': '发现新版本',
     'update.whatsNew': '更新内容',
     'update.download': '前往下载',
+    'update.install': '立即更新',
+    'update.downloading': '正在下载更新…',
+    'update.restart': '重启并安装',
+    'update.retry': '重新下载',
+    'update.failed': '更新失败',
     'update.later': '稍后'
   },
 
@@ -1990,6 +2000,11 @@ export const STRINGS = {
     'update.title': '新しいバージョンがあります',
     'update.whatsNew': '更新内容',
     'update.download': 'ダウンロード',
+    'update.install': '今すぐ更新',
+    'update.downloading': '更新をダウンロード中…',
+    'update.restart': '再起動してインストール',
+    'update.retry': '再ダウンロード',
+    'update.failed': '更新に失敗しました',
     'update.later': '後で'
   }
 }

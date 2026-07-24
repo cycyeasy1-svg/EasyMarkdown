@@ -19,7 +19,9 @@ import {
   slugifyMarkdownAnchor,
   docLangAttr,
   WIN_MD_PROGID,
-  winDefaultOpenerRegOps
+  winDefaultOpenerRegOps,
+  parseUpdateDistribution,
+  normalizeUpdateReleaseNotes
 } from '../src/main/helpers.js'
 import {
   collectMarkdownAnchors,
@@ -31,6 +33,39 @@ import {
   resolveMarkdownTarget,
   splitMarkdownTarget
 } from '../src/main/markdown-links.js'
+
+describe('internal update distribution gate', () => {
+  it('enables only the exact fail-closed internal demo marker', () => {
+    expect(parseUpdateDistribution(JSON.stringify({
+      schemaVersion: 1,
+      distribution: 'internal-demo',
+      autoUpdate: true
+    }))).toEqual({
+      distribution: 'internal-demo',
+      autoUpdate: true
+    })
+    expect(parseUpdateDistribution('not-json')).toBeNull()
+    expect(parseUpdateDistribution({
+      schemaVersion: 1,
+      distribution: 'public',
+      autoUpdate: true
+    })).toBeNull()
+    expect(parseUpdateDistribution({
+      schemaVersion: 1,
+      distribution: 'internal-demo',
+      autoUpdate: false
+    })).toBeNull()
+  })
+
+  it('normalizes updater release-note variants and caps the IPC payload', () => {
+    expect(normalizeUpdateReleaseNotes([
+      { version: '90.0.2', note: 'Second demo' },
+      { version: '90.0.1', note: 'First demo' }
+    ])).toBe('Second demo\n\nFirst demo')
+    expect(normalizeUpdateReleaseNotes('x'.repeat(5000))).toHaveLength(4000)
+    expect(normalizeUpdateReleaseNotes(null)).toBe('')
+  })
+})
 
 describe('Markdown link intelligence', () => {
   const winFiles = [

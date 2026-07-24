@@ -62,13 +62,40 @@ function renderNotes(md) {
   return out
 }
 
-// Notify-only "new version available" toast — slides in at the bottom-right.
-// Shows the GitHub release notes (auto-loaded) so the user sees what changed.
-export default function UpdateToast({ t, latest, current, notes, onDownload, onDismiss }) {
+// Public builds keep the notify-only behavior. The internal-demo distribution
+// reuses the same toast for download progress and restart/install confirmation.
+export default function UpdateToast({
+  t,
+  latest,
+  current,
+  notes,
+  internal = false,
+  phase = 'available',
+  percent = 0,
+  error = '',
+  onDownload,
+  onDismiss
+}) {
   const hasNotes = !!(notes && notes.trim())
+  const downloading = internal && phase === 'downloading'
+  const downloaded = internal && phase === 'downloaded'
+  const failed = internal && phase === 'error'
+  const roundedPercent = Math.max(0, Math.min(100, Math.round(percent || 0)))
+  const actionLabel = downloaded
+    ? t('update.restart')
+    : failed
+      ? t('update.retry')
+      : internal
+        ? t('update.install')
+        : t('update.download')
   return (
     <div className="update-toast" role="alert">
-      <button className="update-toast-close" onClick={onDismiss} title={t('update.later')}>
+      <button
+        className="update-toast-close"
+        onClick={onDismiss}
+        title={t('update.later')}
+        disabled={downloading}
+      >
         <Icon name="close" size={13} />
       </button>
       <div className="update-toast-head">
@@ -90,9 +117,31 @@ export default function UpdateToast({ t, latest, current, notes, onDownload, onD
           <div className="update-toast-notes-body">{renderNotes(notes)}</div>
         </div>
       )}
+      {downloading && (
+        <div className="update-toast-progress" aria-live="polite">
+          <div className="update-toast-progress-label">
+            <span>{t('update.downloading')}</span>
+            <span>{roundedPercent}%</span>
+          </div>
+          <div
+            className="update-toast-progress-track"
+            role="progressbar"
+            aria-valuemin="0"
+            aria-valuemax="100"
+            aria-valuenow={roundedPercent}
+          >
+            <span style={{ width: `${roundedPercent}%` }} />
+          </div>
+        </div>
+      )}
+      {failed && (
+        <div className="update-toast-error">
+          {t('update.failed')}{error ? `：${error}` : ''}
+        </div>
+      )}
       <div className="update-toast-foot">
-        <button className="update-toast-primary" onClick={onDownload}>
-          {t('update.download')}
+        <button className="update-toast-primary" onClick={onDownload} disabled={downloading}>
+          {downloading ? t('update.downloading') : actionLabel}
         </button>
       </div>
     </div>

@@ -855,7 +855,8 @@ export default function App() {
   const findEditDebounceRef = useRef(0)
   const findOpenRef = useRef(find.open)
   findOpenRef.current = find.open
-  // "New version available" toast — populated by the startup update check below.
+  // "New version available" toast — public builds remain notify-only; the
+  // separately packaged internal-demo build adds download/install phases.
   const [update, setUpdate] = useState(null)
   // Transient bottom-center toast (e.g. "Copied"), fired via a `hm:toast` event.
   const [toast, setToast] = useState(null)
@@ -4473,7 +4474,40 @@ export default function App() {
     }
   }, [flushSession])
 
-  // ------------------------- update check (notify-only) ------------
+  // ------------------------- update check / internal demo updater ------------
+  useEffect(() => {
+    const offUpdateState = window.api.onUpdateState?.((state) => {
+      if (!state?.internal) return
+      if (state.phase === 'available' && state.latest) {
+        setUpdate({
+          latest: state.latest,
+          current: state.current,
+          notes: state.notes,
+          name: state.name,
+          internal: true,
+          phase: 'available',
+          percent: 0,
+          error: ''
+        })
+        return
+      }
+      if (state.phase === 'downloading' || state.phase === 'downloaded') {
+        setUpdate((previous) => previous
+          ? { ...previous, ...state, internal: true, error: '' }
+          : previous)
+        return
+      }
+      if (state.phase === 'error') {
+        // A failed background check must stay invisible. Only surface errors
+        // after the user has already seen/started an internal update.
+        setUpdate((previous) => previous
+          ? { ...previous, phase: 'error', error: state.error || '' }
+          : previous)
+      }
+    })
+    return () => offUpdateState?.()
+  }, [])
+
   useEffect(() => {
     let alive = true
     // Delayed a few seconds: the check itself is async (net.fetch in main), but
@@ -4485,7 +4519,17 @@ export default function App() {
         if (!alive || !r?.ok || !r.latest) return
         const dismissed = localStorage.getItem(UPDATE_DISMISS_KEY)
         if (isNewerVersion(r.latest, r.current) && r.latest !== dismissed) {
-          setUpdate({ latest: r.latest, current: r.current, url: r.url, notes: r.notes, name: r.name })
+          setUpdate({
+            latest: r.latest,
+            current: r.current,
+            url: r.url,
+            notes: r.notes,
+            name: r.name,
+            internal: r.internal === true,
+            phase: r.phase || 'available',
+            percent: 0,
+            error: ''
+          })
         }
       }).catch(() => {})
     }, 4000)
@@ -5311,6 +5355,50 @@ export default function App() {
     }
     attempt()
   }, [])
+
+  const runUpdateAction = useCallback(async () => {
+    const currentUpdate = update
+    if (!currentUpdate) return
+    if (!currentUpdate.internal) {
+      window.api.openExternal(currentUpdate.url)
+      dismissUpdate()
+      return
+    }
+    if (currentUpdate.phase === 'downloading') return
+
+    if (currentUpdate.phase === 'downloaded') {
+      flushSession()
+      const dirty = tabsRef.current.some(hasUnsavedTab)
+      if (dirty && !window.confirm(tRef.current('confirm.quitUnsaved'))) return
+      const result = await window.api.installUpdate?.()
+      if (!result?.ok) {
+        setUpdate((previous) => previous
+          ? { ...previous, phase: 'error', error: result?.error || '' }
+          : previous)
+      }
+      return
+    }
+
+    setUpdate((previous) => previous
+      ? { ...previous, phase: 'downloading', percent: 0, error: '' }
+      : previous)
+    try {
+      const result = await window.api.downloadUpdate?.()
+      if (!result?.ok) {
+        setUpdate((previous) => previous
+          ? { ...previous, phase: 'error', error: result?.error || '' }
+          : previous)
+      } else if (result.phase) {
+        setUpdate((previous) => previous
+          ? { ...previous, ...result, internal: true, error: '' }
+          : previous)
+      }
+    } catch (error) {
+      setUpdate((previous) => previous
+        ? { ...previous, phase: 'error', error: error?.message || String(error) }
+        : previous)
+    }
+  }, [dismissUpdate, flushSession, hasUnsavedTab, update])
   jumpToTabLineRef.current = jumpToTabLine
 
   const locateReviewChange = useCallback((change) => {
@@ -6337,10 +6425,11 @@ export default function App() {
           latest={update.latest}
           current={update.current}
           notes={update.notes}
-          onDownload={() => {
-            window.api.openExternal(update.url)
-            dismissUpdate()
-          }}
+          internal={update.internal}
+          phase={update.phase}
+          percent={update.percent}
+          error={update.error}
+          onDownload={runUpdateAction}
           onDismiss={dismissUpdate}
         />
       )}
