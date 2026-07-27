@@ -1,5 +1,6 @@
 import { Plugin } from '@milkdown/prose/state'
 import katex from 'katex'
+import { inlineMathAtCaret } from './editor-inline-math.js'
 
 const MATHY_RE = /[\\^_{}]/
 
@@ -34,6 +35,20 @@ function getTip() {
   return tip
 }
 
+function placeTip(el, left, top) {
+  const margin = 8
+  el.style.left = Math.round(left) + 'px'
+  el.style.top = Math.round(top) + 'px'
+  el.style.display = ''
+  const rect = el.getBoundingClientRect()
+  if (rect.right > window.innerWidth - margin) {
+    el.style.left = Math.max(margin, Math.round(window.innerWidth - rect.width - margin)) + 'px'
+  }
+  if (rect.bottom > window.innerHeight - margin) {
+    el.style.top = Math.max(margin, Math.round(top - rect.height - 36)) + 'px'
+  }
+}
+
 export function mathPreviewPlugin() {
   let raf = 0
   const hide = (view) => {
@@ -48,7 +63,14 @@ export function mathPreviewPlugin() {
     if (!view.hasFocus() || !selection.empty) return hide(view)
     const $head = selection.$head
     if ($head.parent.type.name === 'code_block') return hide(view)
-    const content = unclosedMathContent(
+    const blockText = $head.parent.textBetween(
+      0,
+      $head.parent.content.size,
+      '\n',
+      '\uFFFC'
+    )
+    const complete = inlineMathAtCaret(blockText, $head.parentOffset)
+    const content = complete?.value || unclosedMathContent(
       view.state.doc.textBetween($head.start(), $head.pos, '\n')
     )
     if (!content) return hide(view)
@@ -60,9 +82,7 @@ export function mathPreviewPlugin() {
         output: 'html'
       })
       const coords = view.coordsAtPos(selection.head)
-      el.style.left = Math.round(coords.left) + 'px'
-      el.style.top = Math.round(coords.bottom + 6) + 'px'
-      el.style.display = ''
+      placeTip(el, coords.left, coords.bottom + 6)
       tipOwner = view
     } catch {
       hide(view)

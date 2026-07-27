@@ -61,3 +61,46 @@ export function normalizeDisplayMath(md) {
   }
   return changed ? out.join('\n') : md
 }
+
+const TYPING_KEY = new PluginKey('hm-math-block-typing')
+
+// Prevent the inline-math input rule from consuming the first closing `$` of a
+// typed `$$...$$` block. The complete run becomes a LaTeX code block, matching
+// the representation used by pasted display math.
+export function createMathBlockPromotionPlugin() {
+  return new Plugin({
+    key: TYPING_KEY,
+    props: {
+      handleTextInput(view, from, _to, text) {
+        if (text !== '$') return false
+        const $from = view.state.doc.resolve(from)
+        if (!$from.parent.isTextblock) return false
+        const before = $from.parent.textBetween(0, $from.parentOffset, '\n')
+        const full = before + '$'
+        const blockMatch = full.match(/\$\$([^\n$]+)\$\$$/)
+        if (blockMatch) {
+          const codeType = view.state.schema.nodes.code_block
+          if (!codeType) return false
+          const content = blockMatch[1]
+          const start = from - (blockMatch[0].length - 1)
+          const node = codeType.create(
+            { language: 'LaTeX' },
+            content ? view.state.schema.text(content) : null
+          )
+          view.dispatch(
+            view.state.tr
+              .replaceWith(start, from, node)
+              .setMeta('addToHistory', true)
+          )
+          return true
+        }
+        if (/\$\$([^\n$]+)\$$/.test(full)) {
+          view.dispatch(view.state.tr.insertText('$', from))
+          return true
+        }
+        return false
+      }
+    }
+  })
+}
+import { Plugin, PluginKey } from '@milkdown/prose/state'

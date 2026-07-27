@@ -76,13 +76,16 @@ function KeepEditor({
   onFindReferences,
   onRenameHeading,
   sourceSplitMode = false,
-  onLocateSource
+  onLocateSource,
+  readOnly = false
 }) {
   const { t, lang } = useI18n()
   const tRef = useRef(t)
   tRef.current = t
   const blankLineSpacingRef = useRef(blankLineSpacing)
   blankLineSpacingRef.current = blankLineSpacing
+  const readOnlyRef = useRef(readOnly)
+  readOnlyRef.current = readOnly
   const onOpenSourceRef = useRef(onOpenSource)
   onOpenSourceRef.current = onOpenSource
   const onOpenDocLinkRef = useRef(onOpenDocLink)
@@ -758,7 +761,7 @@ function KeepEditor({
     }
     const commitCellPop = (restoreFocus = true) => {
       const cur = activeCellPopRef.current
-      if (!cur) return
+      if (!cur || readOnlyRef.current) return
       const ta = cur.pop.querySelector('textarea')
       const val = ta ? ta.value.replace(/\n/g, '<br>') : cur.raw
       const td = cur.td
@@ -806,6 +809,7 @@ function KeepEditor({
     const closeBlockEdit = (commit) => {
       const cur = activeBlockEditRef.current
       if (!cur) return
+      if (commit && readOnlyRef.current) return
       activeBlockEditRef.current = null
       setDraftActive(false)
       if (cur.mode === 'insert') {
@@ -964,7 +968,7 @@ function KeepEditor({
 
     const openCellPop = (td, anchor) =>
       openAfterClose(() => {
-        if (destroyed) return
+        if (destroyed || readOnlyRef.current) return
         // A commit re-rendered the doc → the original cell is detached; re-resolve.
         // Match both <td> (body) and <th> (header) — headers are editable too.
         if (!host.contains(td)) {
@@ -1029,7 +1033,7 @@ function KeepEditor({
       openAfterClose(() => {
         // only one edit bar at a time; openAfterClose re-renders on a save, so
         // resolve the block fresh here (not before the close).
-        if (destroyed) return
+        if (destroyed || readOnlyRef.current) return
         const b = blocksRef.current[bi]
         if (!b) return
         const blockDiv = host.querySelector('.km-block[data-bi="' + bi + '"]')
@@ -1074,7 +1078,7 @@ function KeepEditor({
 
     const startBlockInsert = (bi, where) =>
       openAfterClose(() => {
-        if (destroyed) return
+        if (destroyed || readOnlyRef.current) return
         const b = blocksRef.current[bi]
         if (!b || b.type === 'table' || b.type === 'frontmatter') return
         const blockDiv = host.querySelector('.km-block[data-bi="' + bi + '"]')
@@ -1160,6 +1164,7 @@ function KeepEditor({
       return changed
     }
     const performBlockCommand = (command, requestedBi) => {
+      if (readOnlyRef.current) return false
       const bi = Number.isInteger(requestedBi) ? requestedBi : lastInteractedBi
       if (!structuralBlock(bi)) return false
       if (command === 'insertAbove' || command === 'insertBelow') {
@@ -1178,6 +1183,7 @@ function KeepEditor({
     }
 
     const toggleTaskAt = (lineIdx, checked) => {
+      if (readOnlyRef.current) return false
       const current = rawLinesRef.current[lineIdx]
       const next = toggleTaskLine(current, checked)
       if (next === current) return false
@@ -1414,14 +1420,16 @@ function KeepEditor({
       if (Number.isFinite(selection.line)) {
         items.push({ label: T('keep.openSource'), fn: () => openSourceAt(selection.line) })
       }
-      items.push('sep')
-      buildTableItems(
-        items,
-        selection.ti,
-        selection.ri,
-        selection.ci,
-        selection.isHeader
-      )
+      if (!readOnlyRef.current) {
+        items.push('sep')
+        buildTableItems(
+          items,
+          selection.ti,
+          selection.ri,
+          selection.ci,
+          selection.isHeader
+        )
+      }
       return items
     }
     function performTableCommand(command) {
@@ -1432,6 +1440,10 @@ function KeepEditor({
       const headerFilter = table.querySelector(
         `.km-filter-btn[data-ci="${selection.ci}"]`
       )
+      if (
+        readOnlyRef.current &&
+        !['filter', 'menu'].includes(command)
+      ) return false
       if (command === 'edit') openCellPop(cell)
       else if (command === 'filter') {
         if (!headerFilter) return false
@@ -1550,6 +1562,7 @@ function KeepEditor({
       return target ? selectCell(target, { scroll: true }) : false
     }
     const pasteIntoSelectedCells = (event) => {
+      if (readOnlyRef.current) return
       if (activeCellPopRef.current || activeBlockEditRef.current) return false
       const cell = resolveSelection()
       const selection = selectionForCell(cell)
@@ -1993,6 +2006,7 @@ function KeepEditor({
           return
         }
       }
+      if (readOnlyRef.current) return
       // Edit any table cell — body (<td>) or header (<th>). The filter ▼ lives in
       // the header; a double-click on it is a filter toggle, not a cell edit.
       const cell = e.target.closest('td, th')
@@ -2013,6 +2027,11 @@ function KeepEditor({
     const onTaskChange = (e) => {
       const checkbox = e.target.closest?.('.km-task-cb[data-line]')
       if (!checkbox || !host.contains(checkbox)) return
+      if (readOnlyRef.current) {
+        e.preventDefault()
+        checkbox.checked = !checkbox.checked
+        return
+      }
       const lineIdx = Number(checkbox.getAttribute('data-line'))
       if (!Number.isInteger(lineIdx)) return
       const checked = checkbox.checked
@@ -2065,6 +2084,7 @@ function KeepEditor({
       }
       const se = e.target.closest('.km-src-edit')
       if (se) {
+        if (readOnlyRef.current) return
         startBlockEdit(parseInt(se.getAttribute('data-bi')))
         return
       }
@@ -2135,16 +2155,18 @@ function KeepEditor({
                 text: sourceBlock.text
               })
             })
-            items.push({
-              label: T('links.renameHeading'),
-              fn: () => onRenameHeadingRef.current?.({
-                type: 'heading',
-                line: sourceBlock.start + 1,
-                text: sourceBlock.text
+            if (!readOnlyRef.current) {
+              items.push({
+                label: T('links.renameHeading'),
+                fn: () => onRenameHeadingRef.current?.({
+                  type: 'heading',
+                  line: sourceBlock.start + 1,
+                  text: sourceBlock.text
+                })
               })
-            })
+            }
           }
-          if (structuralBlock(bi)) {
+          if (!readOnlyRef.current && structuralBlock(bi)) {
             items.push('sep')
             items.push({
               label: T('keep.blockInsertAbove'),
@@ -2453,7 +2475,7 @@ function KeepEditor({
       return true
     }
     const replaceMarkdown = (markdown) => {
-      if (destroyed) return false
+      if (destroyed || readOnlyRef.current) return false
       closeBlockEdit(false)
       closeCellPop()
       closePop()
@@ -2463,6 +2485,25 @@ function KeepEditor({
       historyRef.current = { undo: [], redo: [] }
       reportHistory()
       applyRawLines(String(markdown ?? '').split('\n'), { record: false, emit: false })
+      rerender()
+      onFilterChangeRef.current?.(null)
+      return true
+    }
+    const replaceMarkdownTransaction = (markdown, meta = null) => {
+      if (
+        destroyed ||
+        readOnlyRef.current ||
+        activeCellPopRef.current ||
+        activeBlockEditRef.current
+      ) return false
+      const nextLines = String(markdown ?? '').split('\n')
+      const changed = applyRawPatch(0, rawLinesRef.current.length, nextLines, { meta })
+      if (!changed) return false
+      closePop()
+      closeMenu()
+      filterStateRef.current = {}
+      columnStateRef.current = {}
+      selectedCellRef.current = null
       rerender()
       onFilterChangeRef.current?.(null)
       return true
@@ -2516,7 +2557,7 @@ function KeepEditor({
       return null
     }
     const insertMarkdown = (markdown) => {
-      if (destroyed) return false
+      if (destroyed || readOnlyRef.current) return false
       const insert = String(markdown ?? '')
       if (!insert) return false
       const blockEdit = activeBlockEditRef.current?.ta
@@ -2550,7 +2591,12 @@ function KeepEditor({
     }
 
     const performHistory = (direction) => {
-      if (destroyed || activeCellPopRef.current || activeBlockEditRef.current) return false
+      if (
+        destroyed ||
+        readOnlyRef.current ||
+        activeCellPopRef.current ||
+        activeBlockEditRef.current
+      ) return false
       const from = direction === 'undo' ? 'undo' : 'redo'
       const to = direction === 'undo' ? 'redo' : 'undo'
       const entry = historyRef.current[from].pop()
@@ -2589,6 +2635,7 @@ function KeepEditor({
       getMarkdown: () => rawLinesRef.current.join('\n'),
       getScroller,
       replaceMarkdown,
+      replaceMarkdownTransaction,
       syncMarkdown,
       highlightMarkdownOffset,
       getReferenceContext,
@@ -2597,6 +2644,7 @@ function KeepEditor({
       hasTableSelection: () => !!resolveSelection(),
       blockCommand: (command) => performBlockCommand(command),
       replaceLineRange: (start, deleteCount, insertedLines) => {
+        if (readOnlyRef.current) return false
         const changed = applyRawPatch(start, deleteCount, insertedLines, {
           meta: {
             kind: 'restore',
@@ -2660,7 +2708,7 @@ function KeepEditor({
         inject('.km-math')
         return tmp.innerHTML
       },
-      setBlock: () => {}, // no block model in keep mode
+      setBlock: () => false, // no block model in keep mode
       // Status-bar filter badge click: drop every table filter in the document.
       clearAllFilters: () => clearAllFilters(),
       // Paint any not-yet-streamed chunks NOW. App calls this before an outline jump
@@ -2738,6 +2786,24 @@ function KeepEditor({
     rerenderRef.current?.()
   }, [blankLineSpacing])
 
+  // Lock an edit draft that was already open when mobile read-only mode was
+  // enabled. Keep the draft visible so it can still be cancelled (or resumed
+  // after unlocking), but make every commit control inert while locked.
+  useEffect(() => {
+    const host = hostRef.current
+    const blockTextarea = activeBlockEditRef.current?.ta
+    const cellPop = activeCellPopRef.current?.pop
+    const cellTextarea = cellPop?.querySelector('textarea')
+    if (blockTextarea) blockTextarea.readOnly = readOnly
+    if (cellTextarea) cellTextarea.readOnly = readOnly
+    host?.querySelectorAll('.km-src-actions .ok').forEach((button) => {
+      button.disabled = readOnly
+    })
+    cellPop?.querySelectorAll('.ok').forEach((button) => {
+      button.disabled = readOnly
+    })
+  }, [readOnly])
+
   // Hot-swap the static "edit source" labels when the UI language changes. The
   // doc HTML is rendered once on mount (rerender lives in a []-deps effect), so
   // the baked-in labels would otherwise stay in the original language. Patch them
@@ -2757,7 +2823,11 @@ function KeepEditor({
 
   return (
     <>
-      <div className="km-doc" ref={hostRef} />
+      <div
+        className={`km-doc${readOnly ? ' km-read-only' : ''}`}
+        aria-readonly={readOnly}
+        ref={hostRef}
+      />
       <ZoomLightbox item={lightbox} onClose={() => setLightbox(null)} t={t} />
     </>
   )

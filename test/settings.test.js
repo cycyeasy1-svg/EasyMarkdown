@@ -44,10 +44,18 @@ describe('loadSettings / saveSettings', () => {
       fontWriteZh: 'Noto Sans SC',
       fontWriteJa: 'Noto Sans JP',
       fontMono: 'Fira Code',
+      sourceFontOffset: 2,
+      userCssSnippets: [
+        { id: 'notes', name: 'Notes', enabled: true, css: '.km-doc { color: red; }' }
+      ],
       spellcheck: true,
       autosave: true,
       defaultEditorMode: 'rich',
       blankLineSpacing: true,
+      tableAutoWrap: true,
+      selectionToolbar: false,
+      inlineMathDeleteMode: 'fast',
+      mobileReadOnly: true,
       localHistory: true,
       showHiddenFiles: true
     }
@@ -83,25 +91,75 @@ describe('loadSettings / saveSettings', () => {
       fontWriteZh: '',
       fontWriteJa: '',
       fontMono: '',
+      sourceFontOffset: 0,
+      userCssSnippets: [{ id: 'default', name: '', enabled: true, css: '' }],
       spellcheck: false,
       autosave: false,
       defaultEditorMode: 'keep',
       blankLineSpacing: false,
+      tableAutoWrap: false,
+      selectionToolbar: true,
+      inlineMathDeleteMode: 'protect',
+      mobileReadOnly: false,
       localHistory: false,
       showHiddenFiles: false
     })
   })
   it('coerces the boolean flags strictly', () => {
-    saveSettings({ spellcheck: 'yes', autosave: 1, blankLineSpacing: 'on', localHistory: 1 })
+    saveSettings({
+      spellcheck: 'yes',
+      autosave: 1,
+      blankLineSpacing: 'on',
+      tableAutoWrap: 'on',
+      selectionToolbar: 0,
+      inlineMathDeleteMode: 'other',
+      localHistory: 1
+    })
     expect(loadSettings().spellcheck).toBe(false)
     expect(loadSettings().autosave).toBe(false)
     expect(loadSettings().blankLineSpacing).toBe(false)
+    expect(loadSettings().tableAutoWrap).toBe(false)
+    expect(loadSettings().selectionToolbar).toBe(true)
+    expect(loadSettings().inlineMathDeleteMode).toBe('protect')
     expect(loadSettings().localHistory).toBe(false)
-    saveSettings({ spellcheck: true, autosave: true, blankLineSpacing: true, localHistory: true })
+    saveSettings({
+      spellcheck: true,
+      autosave: true,
+      blankLineSpacing: true,
+      tableAutoWrap: true,
+      selectionToolbar: false,
+      inlineMathDeleteMode: 'fast',
+      localHistory: true
+    })
     expect(loadSettings().spellcheck).toBe(true)
     expect(loadSettings().autosave).toBe(true)
     expect(loadSettings().blankLineSpacing).toBe(true)
+    expect(loadSettings().tableAutoWrap).toBe(true)
+    expect(loadSettings().selectionToolbar).toBe(false)
+    expect(loadSettings().inlineMathDeleteMode).toBe('fast')
     expect(loadSettings().localHistory).toBe(true)
+  })
+  it('clamps source font offset and migrates legacy custom CSS', () => {
+    saveSettings({ sourceFontOffset: 99, userCss: '.km-doc { color: red; }' })
+    expect(loadSettings()).toMatchObject({
+      sourceFontOffset: 8,
+      userCssSnippets: [
+        { id: 'legacy', name: '', enabled: true, css: '.km-doc { color: red; }' }
+      ]
+    })
+  })
+  it('normalizes duplicate CSS snippet ids and enable flags', () => {
+    saveSettings({
+      userCssSnippets: [
+        { id: 'same', name: 'A', css: 'a{}' },
+        { id: 'same', name: 'B', enabled: false, css: 'b{}' }
+      ]
+    })
+    const snippets = loadSettings().userCssSnippets
+    expect(snippets).toHaveLength(2)
+    expect(new Set(snippets.map((item) => item.id)).size).toBe(2)
+    expect(snippets[0].enabled).toBe(true)
+    expect(snippets[1].enabled).toBe(false)
   })
   it('normalizes defaultEditorMode to keep|rich', () => {
     saveSettings({ defaultEditorMode: 'weird' })

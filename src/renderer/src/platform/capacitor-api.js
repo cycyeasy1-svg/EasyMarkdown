@@ -306,7 +306,9 @@ export function makeCapacitorApi() {
     openFiles,
     openFolder,
     saveAs,
-    exportPDF: async () => ({ ok: false, error: 'unsupported' }),
+    previewPDF: async () => ({ ok: false, error: 'unsupported' }),
+    savePDFPreview: async () => ({ ok: false, error: 'unsupported' }),
+    disposePDFPreview: async () => false,
 
     // fs
     readFile,
@@ -355,6 +357,7 @@ export function makeCapacitorApi() {
 
     // update check — wired up later (CSP/network)
     checkUpdate: async () => null,
+    setMenuKeybindings: async () => ({ ok: false }),
 
     // app close (no "close window" on mobile)
     confirmAppClose: () => {},

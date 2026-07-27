@@ -302,8 +302,7 @@ body.hm-full-width .km-doc {
 .km-doc h6 {
   font-size: 1em;
   font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
+  letter-spacing: 0;
 }
 .km-doc p { margin: calc(0.8em * var(--editor-para-scale, 1)) 0; line-height: inherit; }
 .km-doc ul,
@@ -613,6 +612,27 @@ body.dark .km-doc mark.hm-hl-blue { background: #2f4a6b; }
   padding: 7px 10px;
   text-align: left;
   vertical-align: top;
+}
+body.hm-table-auto-wrap .km-table-wrap {
+  overflow-x: hidden;
+}
+body.hm-table-auto-wrap .km-table-scrolltop,
+body.hm-table-auto-wrap .km-float-scrolltop {
+  display: none !important;
+}
+body.hm-table-auto-wrap .km-table {
+  width: 100% !important;
+  min-width: 100% !important;
+  table-layout: fixed;
+}
+body.hm-table-auto-wrap .km-table col {
+  width: auto !important;
+}
+body.hm-table-auto-wrap .km-table th,
+body.hm-table-auto-wrap .km-table td {
+  min-width: 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 .km-table .km-col-hidden,
 .km-float-header .km-col-hidden {
@@ -1288,9 +1308,45 @@ body.km-column-resizing * {
   font-size: 13px;
   color: var(--text);
 }
+.km-ol-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  border-radius: var(--radius-sm);
+}
+.km-ol-row:hover { background: var(--hover); }
+.km-ol-row.dragging { opacity: 0.42; }
+.km-ol-row.drag-over-before::before,
+.km-ol-row.drag-over-after::after {
+  position: absolute;
+  z-index: 2;
+  right: 5px;
+  left: 5px;
+  height: 2px;
+  border-radius: 999px;
+  background: var(--accent);
+  content: '';
+}
+.km-ol-row.drag-over-before::before { top: -1px; }
+.km-ol-row.drag-over-after::after { bottom: -1px; }
+.km-ol-drag {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 26px;
+  flex: 0 0 18px;
+  color: var(--faint);
+  cursor: grab;
+  opacity: 0;
+}
+.km-ol-row:hover .km-ol-drag { opacity: 1; }
+.km-ol-drag:active { cursor: grabbing; }
 .km-ol-item {
   display: block;
-  width: 100%;
+  min-width: 0;
+  flex: 1;
   text-align: left;
   font: inherit;
   font-size: 13px;
@@ -1305,7 +1361,7 @@ body.km-column-resizing * {
   text-overflow: ellipsis;
 }
 .km-ol-item:hover {
-  background: var(--hover);
+  background: transparent;
   color: var(--text-strong);
 }
 .km-ol-empty {

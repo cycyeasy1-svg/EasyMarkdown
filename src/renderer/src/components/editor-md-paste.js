@@ -44,8 +44,9 @@ function looksLikeMarkdown(text) {
 }
 
 // Attach a capture-phase paste listener on the editor DOM. Returns a cleanup fn.
-export function attachMdPasteHandler(view, parse) {
+export function attachMdPasteHandler(view, parse, canEdit = () => true) {
   const onPaste = (event) => {
+    if (!canEdit()) return
     // Pasting INTO a code block should append code, not restructure.
     if (view.state.selection.$from.parent.type.name === 'code_block') return
     const text = event.clipboardData?.getData('text/plain') || ''

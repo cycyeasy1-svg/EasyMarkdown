@@ -31,6 +31,8 @@ import {
   findMarkdownReferences
 } from './markdown-links.js'
 import { canGrantLocalFonts, createLocalFontGrant } from './security.js'
+import { createPdfExportService } from './pdf-export.js'
+import { menuAccelerator, normalizeMenuKeybindings } from './menu-keybindings.js'
 import {
   DEFAULT_FONT_WRITE_EN,
   DEFAULT_FONT_WRITE_ZH,
@@ -144,6 +146,7 @@ const PDF_CSS = `
 `
 
 let mainWindow = null
+const pdfExportService = createPdfExportService({ getMainWindow: () => mainWindow })
 let localFontGrant = null
 // When true, the window is allowed to close without re-prompting (the renderer
 // has confirmed there are no unsaved changes, or the user chose to discard).
@@ -473,31 +476,12 @@ ipcMain.handle('dialog:saveAs', async (_e, defaultName) => {
   return res.canceled ? null : res.filePath
 })
 
-// Export the current document (inline-styled HTML from the renderer) to a PDF
-// by rendering it in a hidden window and using Chromium's printToPDF.
-ipcMain.handle('export:pdf', async (_e, { html, defaultName, typography }) => {
-  const res = await dialog.showSaveDialog(mainWindow, {
-    defaultPath: defaultName || 'Untitled.pdf',
-    filters: [{ name: 'PDF', extensions: ['pdf'] }]
-  })
-  if (res.canceled || !res.filePath) return { canceled: true }
-
-  const doc = `<!doctype html><html><head><meta charset="utf-8"><style>${PDF_CSS}${exportTypographyCss(typography)}</style></head><body><div class="doc"${docLangAttr(html)}>${html}</div></body></html>`
-
-  const tmp = join(app.getPath('temp'), `easymarkdown-export-${Date.now()}.html`)
-  await fs.writeFile(tmp, doc, 'utf8')
-  const win = new BrowserWindow({ show: false, webPreferences: { webSecurity: false } })
-  try {
-    await win.loadFile(tmp)
-    const pdf = await win.webContents.printToPDF({ printBackground: true, pageSize: 'A4' })
-    await fs.writeFile(res.filePath, pdf)
-  } finally {
-    if (!win.isDestroyed()) win.destroy()
-    fs.unlink(tmp).catch(() => {})
-  }
-  shell.openPath(res.filePath)
-  return { path: res.filePath }
-})
+ipcMain.handle('pdf:preview', (event, payload) =>
+  pdfExportService.createPreview(event, payload))
+ipcMain.handle('pdf:save-preview', (event, payload) =>
+  pdfExportService.savePreview(event, payload))
+ipcMain.handle('pdf:dispose-preview', (event, token) =>
+  pdfExportService.disposePreview(event, token))
 
 // Export the current document as a self-contained .html file: same inline-
 // styled snapshot the PDF pipeline uses, wrapped in a standalone page with the
@@ -1760,6 +1744,7 @@ const MENU_STRINGS = {
 }
 
 let menuLang = 'en'
+let menuKeybindings = {}
 
 // A role item keeps Electron's native (OS-localized) label unless the current
 // menu language provides an explicit override.
@@ -1770,29 +1755,30 @@ function roleItem(role, label, extra) {
 function buildMenu() {
   const isMac = process.platform === 'darwin'
   const L = MENU_STRINGS[menuLang] || MENU_STRINGS.en
+  const accelerator = (id, fallback) => menuAccelerator(menuKeybindings, id, fallback)
   const template = [
     ...(isMac ? [{ role: 'appMenu' }] : []),
     {
       label: L.file,
       submenu: [
-        { label: L.newFile, accelerator: 'CmdOrCtrl+N', click: menuCmd('new') },
-        { label: L.openFile, accelerator: 'CmdOrCtrl+O', click: menuCmd('open') },
-        { label: L.openFolder, accelerator: 'CmdOrCtrl+Shift+O', click: menuCmd('openFolder') },
+        { label: L.newFile, accelerator: accelerator('file.new', 'CmdOrCtrl+N'), click: menuCmd('new') },
+        { label: L.openFile, accelerator: accelerator('file.open', 'CmdOrCtrl+O'), click: menuCmd('open') },
+        { label: L.openFolder, accelerator: accelerator('workspace.openFolder', 'CmdOrCtrl+Shift+O'), click: menuCmd('openFolder') },
         { type: 'separator' },
-        { label: L.save, accelerator: 'CmdOrCtrl+S', click: menuCmd('save') },
-        { label: L.saveAs, accelerator: 'CmdOrCtrl+Shift+S', click: menuCmd('saveAs') },
+        { label: L.save, accelerator: accelerator('file.save', 'CmdOrCtrl+S'), click: menuCmd('save') },
+        { label: L.saveAs, accelerator: accelerator('file.saveAs', 'CmdOrCtrl+Shift+S'), click: menuCmd('saveAs') },
         { label: L.attach, click: menuCmd('attach') },
-        { label: L.exportPdf, accelerator: 'CmdOrCtrl+Shift+E', click: menuCmd('exportPdf') },
-        { label: L.exportHtml, accelerator: 'CmdOrCtrl+Shift+H', click: menuCmd('exportHtml') },
+        { label: L.exportPdf, accelerator: accelerator('file.exportPdf', 'CmdOrCtrl+Shift+E'), click: menuCmd('exportPdf') },
+        { label: L.exportHtml, accelerator: accelerator('file.exportHtml', 'CmdOrCtrl+Shift+H'), click: menuCmd('exportHtml') },
         // Ctrl/Cmd+P is the command palette, so print gets the Alt variant.
-        { label: L.print, accelerator: 'CmdOrCtrl+Alt+P', click: menuCmd('print') },
+        { label: L.print, accelerator: accelerator('file.print', 'CmdOrCtrl+Alt+P'), click: menuCmd('print') },
         { type: 'separator' },
-        { label: L.settings, accelerator: 'CmdOrCtrl+,', click: menuCmd('settings') },
+        { label: L.settings, accelerator: accelerator('app.settings', 'CmdOrCtrl+,'), click: menuCmd('settings') },
         { type: 'separator' },
-        { label: L.closeTab, accelerator: 'CmdOrCtrl+W', click: menuCmd('closeTab') },
+        { label: L.closeTab, accelerator: accelerator('tab.close', 'CmdOrCtrl+W'), click: menuCmd('closeTab') },
         {
           label: L.reopenClosedTab,
-          accelerator: 'CmdOrCtrl+Shift+T',
+          accelerator: accelerator('tab.reopen', 'CmdOrCtrl+Shift+T'),
           // Renderer capture handles this so the shortcut also works while an
           // editor/input owns focus. Keep the accelerator visible in the menu
           // without registering a second native handler that would double-fire.
@@ -1817,23 +1803,28 @@ function buildMenu() {
         roleItem('paste', L.paste),
         roleItem('selectAll', L.selectAll),
         { type: 'separator' },
-        { label: L.find, accelerator: 'CmdOrCtrl+F', click: menuCmd('find') },
+        { label: L.find, accelerator: accelerator('editor.find', 'CmdOrCtrl+F'), click: menuCmd('find') },
         // macOS: ⌘H hides the app, so replace uses the VS Code-style ⌥⌘F there.
-        { label: L.replace, accelerator: isMac ? 'Alt+Cmd+F' : 'Ctrl+H', click: menuCmd('replace') }
+        { label: L.replace, accelerator: accelerator('editor.replace', isMac ? 'Alt+Cmd+F' : 'Ctrl+H'), click: menuCmd('replace') }
       ]
     },
     {
       label: L.view,
       submenu: [
-        { label: L.palette, accelerator: 'CmdOrCtrl+P', click: menuCmd('palette') },
-        { label: L.searchWorkspace, accelerator: 'CmdOrCtrl+Shift+F', click: menuCmd('searchWorkspace') },
+        { label: L.palette, accelerator: accelerator('view.commandPalette', 'CmdOrCtrl+P'), click: menuCmd('palette') },
+        { label: L.searchWorkspace, accelerator: accelerator('workspace.search', 'CmdOrCtrl+Shift+F'), click: menuCmd('searchWorkspace') },
         // Sidebar toggle is handled in the renderer (capture phase) so it wins
         // over the editor's Ctrl/Cmd+B "bold" binding instead of conflicting.
-        { label: L.toggleSidebar, click: menuCmd('toggleSidebar') },
-        { label: L.toggleOutline, accelerator: 'CmdOrCtrl+Shift+L', click: menuCmd('toggleOutline') },
-        { label: L.toggleSource, accelerator: 'CmdOrCtrl+/', click: menuCmd('toggleSource') },
+        {
+          label: L.toggleSidebar,
+          accelerator: accelerator('view.toggleSidebar', 'CmdOrCtrl+B'),
+          registerAccelerator: false,
+          click: menuCmd('toggleSidebar')
+        },
+        { label: L.toggleOutline, accelerator: accelerator('view.showOutline', 'CmdOrCtrl+Shift+L'), click: menuCmd('toggleOutline') },
+        { label: L.toggleSource, accelerator: accelerator('view.toggleSource', 'CmdOrCtrl+/'), click: menuCmd('toggleSource') },
         { type: 'separator' },
-        { label: L.toggleTheme, click: menuCmd('toggleTheme') },
+        { label: L.toggleTheme, accelerator: accelerator('view.cycleTheme'), click: menuCmd('toggleTheme') },
         { type: 'separator' },
         // Content-only zoom (not Electron's whole-window webFrame zoom): the
         // renderer scales just the editor document. Keep the familiar
@@ -1878,6 +1869,14 @@ ipcMain.handle('app:setLang', (_e, lang) => {
   if (next === menuLang) return
   menuLang = next
   buildMenu()
+})
+
+ipcMain.handle('menu:setKeybindings', (_event, value) => {
+  const normalized = normalizeMenuKeybindings(value)
+  if (!normalized) return { ok: false, error: 'invalid-keybindings' }
+  menuKeybindings = normalized
+  buildMenu()
+  return { ok: true }
 })
 
 // "Set as default Markdown app" (Settings → System). Windows 10+ blocks

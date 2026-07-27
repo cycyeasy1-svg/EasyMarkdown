@@ -4,6 +4,8 @@ import { useI18n, LANGS } from '../i18n.jsx'
 import { THEMES } from '../themes.js'
 import { fireToast } from '../ui.js'
 import { resolveDefaultFontName } from '../../../shared/fonts.js'
+import KeyboardSettings from './KeyboardSettings.jsx'
+import UserCssSnippets from './UserCssSnippets.jsx'
 
 // One labeled row with a toggle switch on the right.
 function SwitchRow({ label, desc, checked, onChange }) {
@@ -80,7 +82,8 @@ export default function Settings({
   onOpenThemesFolder,
   onGetMoreThemes,
   onClearLocalHistory,
-  onOpenHelp
+  onOpenHelp,
+  keybindings
 }) {
   const { lang, t, setLang } = useI18n()
   const caps = window.api.capabilities || {}
@@ -148,6 +151,7 @@ export default function Settings({
     onRefreshThemes?.()
     const onKey = (e) => {
       if (e.key === 'Escape') {
+        if (document.querySelector('[data-keybinding-recording="true"]')) return
         e.stopPropagation()
         onClose()
       }
@@ -226,7 +230,46 @@ export default function Settings({
                 onChange={(v) => updateSettings({ spellcheck: v })}
               />
             )}
+            <SwitchRow
+              label={t('settings.tableAutoWrap')}
+              desc={t('settings.tableAutoWrapDesc')}
+              checked={settings.tableAutoWrap}
+              onChange={(tableAutoWrap) => updateSettings({ tableAutoWrap })}
+            />
+            <SwitchRow
+              label={t('settings.blankLineSpacing')}
+              desc={t('settings.blankLineSpacingDesc')}
+              checked={settings.blankLineSpacing}
+              onChange={(blankLineSpacing) => updateSettings({ blankLineSpacing })}
+            />
+            {caps.nativeMenus && (
+              <SwitchRow
+                label={t('settings.selectionToolbar')}
+                desc={t('settings.selectionToolbarDesc')}
+                checked={settings.selectionToolbar}
+                onChange={(selectionToolbar) => updateSettings({ selectionToolbar })}
+              />
+            )}
+            <SwitchRow
+              label={t('settings.inlineMathFastDelete')}
+              desc={t('settings.inlineMathFastDeleteDesc')}
+              checked={settings.inlineMathDeleteMode === 'fast'}
+              onChange={(fast) => updateSettings({
+                inlineMathDeleteMode: fast ? 'fast' : 'protect'
+              })}
+            />
           </div>
+
+          {caps.nativeMenus && keybindings && (
+            <KeyboardSettings
+              overrides={keybindings.overrides}
+              effective={keybindings.effective}
+              onUpdate={keybindings.update}
+              onReset={keybindings.reset}
+              onResetAll={keybindings.resetAll}
+              t={t}
+            />
+          )}
 
           {/* ── Fonts ── */}
           {caps.nativeMenus && (
@@ -319,7 +362,39 @@ export default function Settings({
                 <Icon name="globe" size={13} /> {t('theme.getMore')}
               </button>
             </div>
+            {caps.nativeMenus && (
+              <div className="hm-source-font-offset">
+                <div className="hm-set-row">
+                  <label className="hm-set-text" htmlFor="hm-source-font-offset">
+                    <span className="hm-set-label">{t('settings.sourceFontOffset')}</span>
+                    <span className="hm-set-desc">{t('settings.sourceFontOffsetDesc')}</span>
+                  </label>
+                  <output>{settings.sourceFontOffset > 0 ? '+' : ''}{settings.sourceFontOffset}px</output>
+                </div>
+                <input
+                  id="hm-source-font-offset"
+                  type="range"
+                  min="-4"
+                  max="8"
+                  step="1"
+                  value={settings.sourceFontOffset}
+                  onChange={(event) => updateSettings({ sourceFontOffset: Number(event.target.value) })}
+                />
+              </div>
+            )}
           </div>
+
+          {caps.nativeMenus && (
+            <div className="hm-set-section">
+              <div className="hm-set-section-title">{t('settings.customCss')}</div>
+              <p className="hm-set-section-desc">{t('settings.customCssDesc')}</p>
+              <UserCssSnippets
+                snippets={settings.userCssSnippets}
+                onChange={(userCssSnippets) => updateSettings({ userCssSnippets })}
+                t={t}
+              />
+            </div>
+          )}
 
           {/* ── System (default Markdown opener) ── */}
           {(caps.defaultOpener || caps.folderWorkspace) && (

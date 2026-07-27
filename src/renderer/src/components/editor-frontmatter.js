@@ -39,17 +39,46 @@ export const frontmatterSchema = $nodeSchema('frontmatter', () => ({
   }
 }))
 
+const defaultLabels = {
+  edit: 'Edit YAML',
+  done: 'Done',
+  input: 'YAML front matter'
+}
+
 // Build the visible card. Flat `key: value` lines → a definition grid; if there's
 // any complex YAML (lists, nesting, multiline), fall back to a code box so we
 // never misrender.
-function buildCard(value) {
+function buildCard(value, { editing = false, labels = defaultLabels, onToggle } = {}) {
   const card = document.createElement('div')
   card.className = 'hm-frontmatter'
+  card.dataset.editing = editing ? 'true' : 'false'
 
   const head = document.createElement('div')
   head.className = 'hm-frontmatter-head'
-  head.textContent = 'YAML'
+  const title = document.createElement('span')
+  title.className = 'hm-frontmatter-title'
+  title.textContent = 'YAML'
+  head.appendChild(title)
+  if (onToggle) {
+    const action = document.createElement('button')
+    action.type = 'button'
+    action.className = 'hm-frontmatter-action'
+    action.textContent = editing ? labels.done : labels.edit
+    action.title = editing ? labels.done : labels.edit
+    action.addEventListener('click', onToggle)
+    head.appendChild(action)
+  }
   card.appendChild(head)
+
+  if (editing) {
+    const input = document.createElement('textarea')
+    input.className = 'hm-frontmatter-input'
+    input.value = value || ''
+    input.spellcheck = false
+    input.setAttribute('aria-label', labels.input)
+    card.appendChild(input)
+    return card
+  }
 
   const lines = (value || '').split('\n')
   // "simple" = every non-blank line is a flat `key: value` (no indentation,
@@ -85,47 +114,70 @@ const rawBlock = (value) => {
   return pre
 }
 
-// Node view: render the card, display-only (contentEditable false). Registered
-// through nodeViewCtx (the same channel Milkdown's $view uses) so it composes
-// with the other component node views.
-export function renderFrontmatterNodeView(node) {
+export function updateFrontmatterValue(view, getPos, node, value) {
+  const pos = getPos?.()
+  if (!Number.isFinite(pos)) return false
+  const current = view.state.doc.nodeAt(pos)
+  if (!current || current.type !== node.type || current.attrs.value === value) return !!current
+  view.dispatch(
+    view.state.tr.setNodeMarkup(pos, current.type, { ...current.attrs, value }, current.marks)
+  )
+  return true
+}
+
+// The front matter stays an atom for lossless serialization. Its explicit
+// textarea edits the atom attribute through one normal ProseMirror transaction,
+// so source mode, dirty state, undo/redo, and save all see the same Markdown.
+export function renderFrontmatterNodeView(node, view, getPos, {
+  labels = defaultLabels,
+  canEdit = () => true
+} = {}) {
   const dom = document.createElement('div')
   dom.className = 'hm-frontmatter-wrap'
   dom.setAttribute('data-type', 'frontmatter')
-  dom.setAttribute('data-value', node.attrs.value || '')
   dom.contentEditable = 'false'
-  dom.appendChild(buildCard(node.attrs.value || ''))
-  return { dom, ignoreMutation: () => true, stopEvent: () => false }
-}
+  let currentNode = node
+  let editing = false
 
-// remark-frontmatter only recognizes a `---` block at the very START of the
-// document. Anywhere else, commonmark turns `---\nkey: value\n---` into a
-// thematicBreak + a Setext heading. This plugin reconstructs that mangled pair
-// back into a `yaml` node, so front matter renders (and round-trips) no matter
-// where it sits — which is what users expect when they paste one mid-document.
-const headingText = (node) =>
-  (node.children || []).map((c) => c.value || '').join('\n').trim()
-const looksLikeYaml = (text) => !!text && /^[\w.-]+:\s?.*$/m.test(text)
+  const render = ({ focus = false } = {}) => {
+    dom.dataset.value = currentNode.attrs.value || ''
+    dom.replaceChildren(buildCard(currentNode.attrs.value || '', {
+      editing,
+      labels,
+      onToggle: canEdit()
+        ? () => {
+            editing = !editing
+            render({ focus: editing })
+          }
+        : undefined
+    }))
+    const input = dom.querySelector('.hm-frontmatter-input')
+    if (!input) return
+    input.readOnly = !canEdit()
+    input.addEventListener('input', () => {
+      if (canEdit()) updateFrontmatterValue(view, getPos, currentNode, input.value)
+    })
+    input.addEventListener('keydown', (event) => {
+      if (event.key !== 'Escape') return
+      event.preventDefault()
+      editing = false
+      render()
+      view.focus()
+    })
+    if (focus) requestAnimationFrame(() => input.focus())
+  }
 
-export function remarkFrontmatterAnywhere() {
-  return (tree) => {
-    if (!Array.isArray(tree.children)) return
-    const out = []
-    for (let i = 0; i < tree.children.length; i++) {
-      const node = tree.children[i]
-      const next = tree.children[i + 1]
-      if (
-        node.type === 'thematicBreak' &&
-        next &&
-        next.type === 'heading' &&
-        looksLikeYaml(headingText(next))
-      ) {
-        out.push({ type: 'yaml', value: headingText(next) })
-        i++ // consume the heading too
-      } else {
-        out.push(node)
-      }
-    }
-    tree.children = out
+  render()
+  return {
+    dom,
+    update(nextNode) {
+      if (nextNode.type !== currentNode.type) return false
+      currentNode = nextNode
+      if (!editing) render()
+      return true
+    },
+    ignoreMutation: () => true,
+    stopEvent: (event) =>
+      event.target instanceof Element && !!event.target.closest('button, textarea')
   }
 }

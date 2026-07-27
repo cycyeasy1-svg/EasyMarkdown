@@ -36,8 +36,11 @@ const api = {
   openAttachments: () => ipcRenderer.invoke('dialog:openAttachments'),
   openFolder: () => ipcRenderer.invoke('dialog:openFolder'),
   saveAs: (defaultName) => ipcRenderer.invoke('dialog:saveAs', defaultName),
-  exportPDF: (html, defaultName, typography) =>
-    ipcRenderer.invoke('export:pdf', { html, defaultName, typography }),
+  previewPDF: (source, defaultName, options) =>
+    ipcRenderer.invoke('pdf:preview', { source, defaultName, options }),
+  savePDFPreview: (token, defaultName) =>
+    ipcRenderer.invoke('pdf:save-preview', { token, defaultName }),
+  disposePDFPreview: (token) => ipcRenderer.invoke('pdf:dispose-preview', token),
   exportHTML: (html, defaultName, title, typography) =>
     ipcRenderer.invoke('export:html', { html, defaultName, title, typography }),
   printHTML: (html, typography) => ipcRenderer.invoke('print:html', { html, typography }),
@@ -127,6 +130,7 @@ const api = {
 
   // report the UI language so the native application menu follows it
   setAppLang: (lang) => ipcRenderer.invoke('app:setLang', lang),
+  setMenuKeybindings: (keybindings) => ipcRenderer.invoke('menu:setKeybindings', keybindings),
 
   // toggle the built-in spellchecker (settings preference)
   setSpellcheck: (enabled) => ipcRenderer.invoke('spell:set', enabled),

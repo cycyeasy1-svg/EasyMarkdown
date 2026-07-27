@@ -321,10 +321,11 @@ test('milkdown mode: right-click block menu opens and converts the block', async
     await pm.locator('p', { hasText: 'reliable click' }).click({ button: 'right' })
     const menu = page.locator('.block-ctxmenu')
     await expect(menu).toBeVisible()
-    await expect(menu.locator('.block-menu-item')).toHaveCount(7)
-    // Converting via the menu reuses the same path as Ctrl+2 (Editor.jsx) — click
-    // the "Heading 2" item and confirm the paragraph became an H2.
-    await menu.locator('.block-menu-item', { hasText: '标题 2' }).click()
+    const turnInto = menu.locator('.block-menu-submenu-parent').filter({ hasText: '转换为' })
+    await expect(turnInto.locator('.block-menu-submenu > .block-menu-item')).toHaveCount(7)
+    // Converting via the compact submenu reuses the same path as Ctrl+2.
+    await turnInto.locator(':scope > .block-menu-item').hover()
+    await turnInto.locator('.block-menu-submenu > .block-menu-item', { hasText: '标题 2' }).click()
     await expect(pm.locator('h2', { hasText: 'reliable click' })).toBeVisible()
   } finally {
     await cleanup()

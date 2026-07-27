@@ -2444,6 +2444,23 @@ body.dark .milkdown .ProseMirror mark.hm-hl-blue { background: #2f4a6b; }
   padding: 12px 10px 8px 14px;
   flex-shrink: 0;
 }
+.outline-head-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 24px;
+  margin: -5px -2px -5px 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+.outline-head-btn:hover {
+  background: var(--hover);
+  color: var(--text);
+}
 .outline-list {
   overflow-y: auto;
   padding: 0 8px 12px;
@@ -2451,6 +2468,7 @@ body.dark .milkdown .ProseMirror mark.hm-hl-blue { background: #2f4a6b; }
   flex: 1;
 }
 .outline-item {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 2px;
@@ -2461,6 +2479,35 @@ body.dark .milkdown .ProseMirror mark.hm-hl-blue { background: #2f4a6b; }
   font-size: 13px;
   transition: background 0.12s var(--ease-out), color 0.12s var(--ease-out);
 }
+.outline-drag-handle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 15px;
+  flex: 0 0 15px;
+  margin-left: -3px;
+  color: var(--faint);
+  cursor: grab;
+  opacity: 0;
+  transition: opacity 0.12s var(--ease-out), color 0.12s var(--ease-out);
+}
+.outline-item:hover .outline-drag-handle,
+.outline-drag-handle:focus-visible { opacity: 1; }
+.outline-drag-handle:active { cursor: grabbing; }
+.outline-item.dragging { opacity: 0.42; }
+.outline-item.drag-over-before::before,
+.outline-item.drag-over-after::after {
+  position: absolute;
+  z-index: 2;
+  right: 6px;
+  left: 6px;
+  height: 2px;
+  border-radius: 999px;
+  background: var(--accent);
+  content: '';
+}
+.outline-item.drag-over-before::before { top: -1px; }
+.outline-item.drag-over-after::after { bottom: -1px; }
 .outline-item:hover {
   background: var(--hover);
   color: var(--text);
@@ -2494,6 +2541,10 @@ body.dark .milkdown .ProseMirror mark.hm-hl-blue { background: #2f4a6b; }
 .outline-item.active {
   background: var(--accent-soft);
   color: var(--accent-strong);
+}
+.outline-item.active.contained-active {
+  outline: 1px dashed color-mix(in srgb, var(--accent) 42%, transparent);
+  outline-offset: -2px;
 }
 
 /* =====================================================
@@ -2763,13 +2814,39 @@ body.hm-full-width .editor-skeleton {
   font-size: 0.9em;
 }
 .hm-frontmatter-head {
-  padding: 5px 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 30px;
+  padding: 0 10px 0 13px;
   font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--accent-strong);
-  background: var(--accent-soft);
+  background: color-mix(in srgb, var(--accent-soft) 72%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--border-soft) 72%, transparent);
+}
+.hm-frontmatter-title { line-height: 1; }
+.hm-frontmatter-action {
+  min-height: 22px;
+  padding: 2px 7px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: none;
+  cursor: pointer;
+}
+.hm-frontmatter-action:hover,
+.hm-frontmatter-action:focus-visible {
+  color: var(--accent-strong);
+  background: var(--hover);
+  outline: none;
 }
 .hm-frontmatter-grid {
   display: grid;
@@ -2800,6 +2877,27 @@ body.hm-full-width .editor-skeleton {
   color: var(--text);
   white-space: pre-wrap;
   word-break: break-word;
+}
+.hm-frontmatter-input {
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 88px;
+  margin: 0;
+  padding: 10px 13px;
+  border: 0;
+  border-radius: 0;
+  outline: 0;
+  resize: vertical;
+  background: transparent;
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+.hm-frontmatter-input:focus {
+  background: color-mix(in srgb, var(--accent-soft) 18%, transparent);
+  box-shadow: inset 2px 0 0 var(--accent);
 }
 .hm-html-block table {
   border-collapse: collapse;
@@ -3014,6 +3112,9 @@ body.hm-full-width .editor-skeleton {
   /* Crepe clips the toolbar (overflow:hidden); allow our submenu to escape. */
   overflow: visible !important;
 }
+body.hm-selection-toolbar-off .milkdown .milkdown-toolbar {
+  display: none !important;
+}
 /* Slash (/) command menu: contain wheel scrolling so scrolling the list (or
    reaching its edge) never scrolls the editor body behind it. */
 .milkdown .milkdown-slash-menu,
@@ -3218,6 +3319,42 @@ body.hm-full-width .editor-skeleton {
   font-size: 11px;
   color: var(--faint);
 }
+.block-menu-divider {
+  height: 1px;
+  margin: 5px 4px;
+  background: var(--border-soft);
+}
+.block-menu-submenu-parent {
+  position: relative;
+}
+.block-menu-arrow {
+  margin-left: auto;
+  color: var(--faint);
+  font-size: 17px;
+  line-height: 1;
+}
+.block-menu-submenu {
+  position: absolute;
+  top: -6px;
+  left: calc(100% + 7px);
+  display: none;
+  min-width: 194px;
+  max-height: min(440px, calc(100vh - 24px));
+  overflow-y: auto;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-elevated);
+  box-shadow: var(--shadow-lg);
+}
+.block-menu-submenu-parent:hover > .block-menu-submenu,
+.block-menu-submenu-parent:focus-within > .block-menu-submenu {
+  display: block;
+}
+.block-ctxmenu-submenus-left .block-menu-submenu {
+  right: calc(100% + 7px);
+  left: auto;
+}
 
 /* Status-bar block switcher */
 .block-switch {
@@ -3276,10 +3413,9 @@ body.hm-full-width .editor-skeleton {
   background: transparent;
   color: var(--text);
   font-family: var(--font-mono);
-  /* Track the editor font size, kept ~2px smaller (mono reads larger), and follow
-     the overall zoom. The textarea is a flex item, so we scale its font (not
-     `zoom`, which would disturb the flex sizing) — for plain source that's enough. */
-  font-size: calc((var(--editor-font-size, 16px) - 2px) * var(--editor-zoom, 1));
+  /* Track the editor size plus the user's source-only offset. The textarea is a
+     flex item, so scale its font instead of using CSS zoom. */
+  font-size: calc((var(--editor-font-size, 16px) + var(--source-font-offset, 0px)) * var(--editor-zoom, 1));
   line-height: 1.75;
   padding:
     var(--source-editor-pad-top)
@@ -3322,7 +3458,7 @@ body.hm-full-width .editor-skeleton {
   padding: var(--source-editor-pad-top) 10px var(--source-editor-pad-bottom) 0;
   color: var(--faint);
   font-family: var(--font-mono);
-  font-size: calc((var(--editor-font-size, 16px) - 2px) * var(--editor-zoom, 1));
+  font-size: calc((var(--editor-font-size, 16px) + var(--source-font-offset, 0px)) * var(--editor-zoom, 1));
   line-height: 1.75;
   text-align: right;
   white-space: pre;
@@ -3751,6 +3887,13 @@ body.hm-full-width .source-editor-wrap {
   align-items: flex-start;
   padding-top: 10vh;
   animation: fadeIn 0.12s var(--ease-out);
+}
+/* Avoid a full-window backdrop re-composite on Windows when palette rows change
+   hover/selection state. The dim layer remains, only the GPU-sensitive blur is
+   removed on that platform. */
+.app.is-win .palette-overlay {
+  backdrop-filter: none;
+  background: rgba(0, 0, 0, 0.38);
 }
 @keyframes fadeIn {
   from { opacity: 0; }
@@ -4419,8 +4562,7 @@ body.dark .milkdown {
   font-size: 1em;
   font-weight: 600;
   color: var(--text);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
+  letter-spacing: 0;
 }
 /* First block sits flush with the top — no leading whitespace */
 .milkdown .ProseMirror > *:first-child {
@@ -4521,8 +4663,11 @@ body.dark .milkdown {
   background: var(--code-block-bg) !important;
   border: 1px solid var(--code-block-border);
   border-radius: var(--radius-md);
-  margin: 1.5em 0;
+  margin: 0;
   font-size: 0.92em;
+}
+.milkdown .milkdown-code-block {
+  margin: var(--editor-para-spacing, 0.8em) 0;
 }
 .milkdown .cm-editor .cm-scroller {
   padding: 14px 16px;
@@ -4579,11 +4724,29 @@ body.dark .milkdown {
 /* Keep a wide display equation inside the column: scroll horizontally instead of
    overflowing the page (issue #5). Short formulas still center as usual. The
    block-math preview panel scrolls too. */
-.milkdown .katex-display,
-.milkdown .milkdown-code-block .preview {
+.milkdown .katex-display {
+  max-width: 100%;
+  overflow-x: hidden;
+  overflow-y: hidden;
+}
+.milkdown .katex-display[data-hm-math-overflow='true'] {
+  overflow-x: auto;
+}
+.milkdown .milkdown-code-block .preview:has(> .katex-display) {
+  max-width: 100%;
+  overflow: hidden;
+}
+.milkdown .milkdown-code-block .preview:not(:has(> .katex-display)) {
   max-width: 100%;
   overflow-x: auto;
   overflow-y: hidden;
+}
+/* Rendered display math follows paragraph rhythm; its source/edit state keeps
+   the normal code-block padding and controls. */
+.milkdown .milkdown-code-block:has(.preview > .katex-display) {
+  margin: calc(var(--editor-para-spacing, 0.8em) * 0.45) 0;
+  padding: 0 2px;
+  background: transparent;
 }
 /* Mermaid diagram inside a code block's built-in preview panel: center it. */
 .milkdown .milkdown-code-block .preview:has(svg),
@@ -4599,6 +4762,15 @@ body.dark .milkdown {
 .milkdown .katex-display {
   padding: 4px 2px;
 }
+.milkdown .milkdown-code-block .preview > .katex-display {
+  flex: 0 0 100%;
+  width: 100%;
+  box-sizing: border-box;
+}
+.milkdown .milkdown-code-block .preview > .katex-display > .katex > .katex-html:has(> .tag) {
+  box-sizing: border-box;
+  padding-right: 4em;
+}
 .milkdown .ProseMirror span[data-type='math_inline'] {
   max-width: 100%;
   overflow-x: auto;
@@ -4613,6 +4785,76 @@ body.dark .milkdown {
 }
 
 /* Tables — elegant borders */
+.milkdown .milkdown-table-block {
+  max-width: 100%;
+  margin: 1.1em 0;
+  contain: inline-size;
+}
+.source-editor[readonly] {
+  cursor: text;
+}
+.editor-host.hm-read-only .milkdown-toolbar,
+.editor-host.hm-read-only .milkdown-block-handle,
+.editor-host.hm-read-only .image-resize-handle,
+.editor-host.hm-read-only .caption-button,
+.editor-host.hm-read-only .add-button,
+.editor-host.hm-read-only .cell-handle,
+.editor-host.hm-read-only .line-handle,
+.editor-host.hm-read-only .operation,
+.editor-host.hm-read-only .language-picker,
+.editor-host.hm-read-only .hm-frontmatter-action {
+  display: none !important;
+}
+.editor-host.hm-read-only .ProseMirror,
+.editor-host.hm-read-only .cm-content,
+.km-doc.km-read-only {
+  user-select: text;
+}
+.km-doc.km-read-only .km-src-edit,
+.km-doc.km-read-only .km-table-tools {
+  display: none !important;
+}
+.km-doc.km-read-only .km-task-cb {
+  pointer-events: none;
+}
+.milkdown .milkdown-table-block > div > .cell-handle[data-show='false'] {
+  display: none;
+}
+.milkdown .milkdown-table-block .table-wrapper {
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+  contain: inline-size layout paint;
+  -webkit-overflow-scrolling: touch;
+}
+.milkdown .ProseMirror .milkdown-table-block table.children {
+  table-layout: fixed;
+  width: max-content;
+  min-width: 0;
+  margin: 0;
+}
+.milkdown .ProseMirror .milkdown-table-block th,
+.milkdown .ProseMirror .milkdown-table-block td {
+  min-width: 6rem;
+  max-width: 20rem;
+  box-sizing: border-box;
+}
+body.hm-table-auto-wrap .milkdown .milkdown-table-block .table-wrapper {
+  overflow-x: hidden;
+}
+body.hm-table-auto-wrap .milkdown .ProseMirror .milkdown-table-block table.children {
+  width: 100% !important;
+  min-width: 100% !important;
+}
+body.hm-table-auto-wrap .milkdown .ProseMirror .milkdown-table-block col {
+  width: auto !important;
+}
+body.hm-table-auto-wrap .milkdown .ProseMirror .milkdown-table-block th,
+body.hm-table-auto-wrap .milkdown .ProseMirror .milkdown-table-block td {
+  min-width: 0;
+  max-width: none;
+}
 .milkdown .ProseMirror table {
   border-collapse: collapse;
   width: 100%;
@@ -4685,6 +4927,19 @@ body.dark .milkdown {
 /* Theme the column-resize handle (default is a hard blue #adf bar). */
 .milkdown .ProseMirror .column-resize-handle {
   background-color: var(--accent);
+}
+
+body.hm-table-auto-wrap .hm-html-block {
+  overflow-x: hidden;
+}
+body.hm-table-auto-wrap .hm-html-block table {
+  table-layout: fixed;
+  width: 100%;
+}
+body.hm-table-auto-wrap .hm-html-block th,
+body.hm-table-auto-wrap .hm-html-block td {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 /* Horizontal rule — elegant divider */
@@ -5366,8 +5621,7 @@ body.hm-full-width .km-doc {
 .km-doc h6 {
   font-size: 1em;
   font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
+  letter-spacing: 0;
 }
 .km-doc p { margin: calc(0.8em * var(--editor-para-scale, 1)) 0; line-height: inherit; }
 .km-doc ul,
@@ -6242,6 +6496,251 @@ body.hm-has-custom-theme .km-doc {
 .hm-font-reset:hover { background: var(--hover); color: var(--text); }
 .hm-font-reset:disabled { opacity: 0.4; cursor: default; }
 .hm-font-reset:disabled:hover { background: var(--bg-elevated); color: var(--muted); }
+
+.hm-set-section-desc {
+  margin: -4px 0 10px;
+  color: var(--faint);
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+.app.is-mobile .hm-readonly-btn.active {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+.hm-source-font-offset {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-soft);
+}
+.hm-source-font-offset .hm-set-text span { display: block; }
+.hm-source-font-offset output {
+  min-width: 40px;
+  color: var(--muted);
+  font: 12px/1.4 var(--font-mono);
+  text-align: right;
+}
+.hm-source-font-offset input[type="range"] { width: 100%; accent-color: var(--accent); }
+.hm-css-snippets {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.hm-css-snippet-list {
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+.hm-css-snippet-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 32px;
+  padding: 2px 5px 2px 9px;
+  border-bottom: 1px solid var(--border-soft);
+}
+.hm-css-snippet-row:last-child { border-bottom: 0; }
+.hm-css-snippet-row.active { background: var(--accent-soft); }
+.hm-css-snippet-select {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text);
+  background: transparent;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.hm-css-snippet-icon {
+  display: inline-grid;
+  place-items: center;
+  width: 25px;
+  height: 25px;
+  padding: 0;
+  color: var(--muted);
+  background: transparent;
+  border-radius: var(--radius-xs);
+}
+.hm-css-snippet-icon:hover:not(:disabled) { color: var(--text); background: var(--hover); }
+.hm-css-snippet-icon.danger:hover:not(:disabled) { color: var(--danger); }
+.hm-css-snippet-icon:disabled { opacity: 0.28; cursor: default; }
+.hm-css-snippet-actions { display: flex; gap: 7px; }
+.hm-css-snippet-editor {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  color: var(--muted);
+  font-size: 11.5px;
+}
+.hm-css-snippet-editor input {
+  flex: 1;
+  min-width: 0;
+  height: 30px;
+  padding: 0 9px;
+  color: var(--text);
+  background: var(--bg-editor);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+.hm-css-snippet-code {
+  width: 100%;
+  min-height: 150px;
+  resize: vertical;
+  padding: 10px;
+  color: var(--text);
+  background: var(--bg-editor);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font: 12px/1.55 var(--font-mono);
+  tab-size: 2;
+}
+.hm-css-snippet-editor input:focus,
+.hm-css-snippet-code:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+/* Shortcut recorder: compact enough to scan, but every recorder remains a
+   normal button so keyboard and assistive-technology users get the same flow. */
+.hm-keyboard-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+body.hm-table-auto-wrap .km-table-wrap {
+  overflow-x: hidden;
+}
+body.hm-table-auto-wrap .km-table-scrolltop,
+body.hm-table-auto-wrap .km-float-scrolltop {
+  display: none !important;
+}
+body.hm-table-auto-wrap .km-table {
+  width: 100% !important;
+  min-width: 100% !important;
+  table-layout: fixed;
+}
+body.hm-table-auto-wrap .km-table col {
+  width: auto !important;
+}
+body.hm-table-auto-wrap .km-table th,
+body.hm-table-auto-wrap .km-table td {
+  min-width: 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.hm-keyboard-heading .hm-set-section-title { margin-bottom: 4px; }
+.hm-keyboard-heading p,
+.hm-keyboard-note {
+  margin: 0;
+  color: var(--faint);
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+.hm-keyboard-search {
+  width: 100%;
+  height: 34px;
+  margin: 12px 0;
+  padding: 0 10px;
+  color: var(--text);
+  background: var(--bg-editor);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font: 12px/1.4 var(--font-ui);
+}
+.hm-keyboard-search:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.hm-keyboard-issue {
+  margin-top: 10px;
+  padding: 8px 10px;
+  color: var(--danger, #b33b2e);
+  background: color-mix(in srgb, var(--danger, #b33b2e) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--danger, #b33b2e) 24%, transparent);
+  border-radius: var(--radius-sm);
+  font-size: 11.5px;
+}
+.hm-keyboard-groups {
+  max-height: 360px;
+  overflow-y: auto;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+}
+.hm-keyboard-group + .hm-keyboard-group { border-top: 1px solid var(--border-soft); }
+.hm-keyboard-group h3 {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  margin: 0;
+  padding: 7px 10px;
+  color: var(--faint);
+  background: var(--bg-editor);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.hm-keyboard-row {
+  display: grid;
+  grid-template-columns: minmax(130px, 1fr) minmax(150px, 210px) 26px 26px;
+  align-items: center;
+  gap: 5px;
+  min-height: 40px;
+  padding: 5px 7px 5px 10px;
+  border-top: 1px solid var(--border-soft);
+  color: var(--text);
+  font-size: 12px;
+}
+.hm-keyboard-row.has-error { background: color-mix(in srgb, var(--danger, #b33b2e) 5%, transparent); }
+.hm-keyboard-recorder {
+  min-width: 0;
+  min-height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  padding: 3px 7px;
+  color: var(--muted);
+  background: var(--bg-editor);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  font-size: 11px;
+}
+.hm-keyboard-recorder:hover { border-color: var(--accent); color: var(--text); }
+.hm-keyboard-recorder.recording {
+  justify-content: center;
+  color: var(--accent-strong);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.hm-keyboard-recorder kbd {
+  padding: 1px 5px;
+  color: var(--text);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  font: 10.5px/1.5 var(--font-mono);
+}
+.hm-keyboard-action {
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  color: var(--faint);
+  border-radius: 5px;
+}
+.hm-keyboard-action:hover:not(:disabled) { color: var(--text); background: var(--hover); }
+.hm-keyboard-action:disabled { opacity: 0.22; cursor: default; }
+.hm-keyboard-note { margin-top: 10px; }
+.hm-keyboard-empty { padding: 24px; text-align: center; color: var(--faint); font-size: 12px; }
+
+@media (max-width: 560px) {
+  .hm-keyboard-row {
+    grid-template-columns: minmax(95px, 1fr) minmax(105px, 1fr) 26px 26px;
+  }
+}
 /* Toggle switch */
 .hm-switch {
   flex: 0 0 auto;

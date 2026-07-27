@@ -3,6 +3,7 @@ import { flushSync } from 'react-dom'
 import { Crepe, CrepeFeature } from '@milkdown/crepe'
 import {
   editorViewCtx,
+  editorViewOptionsCtx,
   nodeViewCtx,
   parserCtx,
   prosePluginsCtx,
@@ -29,9 +30,12 @@ import { dirOf, isRelativePath, resolveToFileUrl, uniqueImageName } from './edit
 import { inlineRichStyles } from './editor-copy.js'
 import { createMermaidPreviewRenderer, createMermaidSplitPlugin } from './editor-mermaid.js'
 import { tableBreakKeymap, tableCellBreakHandler, brToBreakRemarkPlugin } from './editor-tablebreak.js'
+import { normalizeEmptyTableCells } from './editor-table-markdown.js'
 import { attachMdPasteHandler } from './editor-md-paste.js'
-import { normalizeDisplayMath } from './editor-math.js'
+import { createMathBlockPromotionPlugin, normalizeDisplayMath } from './editor-math.js'
 import { mathPreviewPlugin } from './editor-math-preview.js'
+import { createInlineMathEditingPlugin } from './editor-inline-math.js'
+import { createInlineCodeEditingPlugin } from './editor-inline-code.js'
 import { createSafeUnderscoreEmphasisInputRule } from './editor-inputrules.js'
 import { tabAtCursorKeymap } from './editor-codeblock-tab.js'
 import { remarkRepairNonAsciiAutolinks } from './editor-autolink.js'
@@ -42,13 +46,22 @@ import { ensureEmbedZoomButtons, zoomItemFromButton } from './editor-zoom.js'
 import { internalLinkTarget, parseInternalDocLink } from '../link-navigation.js'
 import './editor-codeblock-eager.js' // side effect: stable code-block heights (scroll-jump fix)
 import remarkFrontmatter from 'remark-frontmatter'
-import { frontmatterSchema, renderFrontmatterNodeView, remarkFrontmatterAnywhere } from './editor-frontmatter.js'
+import { frontmatterSchema, renderFrontmatterNodeView } from './editor-frontmatter.js'
 import {
   highlightFeatures,
   highlightStringifyHandler,
   applyHighlightInView,
   HIGHLIGHT_COLORS
 } from './editor-highlight.js'
+import { keybindingMatchesEvent, keybindingToDisplay } from '../../../shared/keybindings.js'
+import { imageBlockMarkdownSchema } from './editor-image-markdown.js'
+import { normalizeWebPasteHtml } from './editor-web-paste.js'
+import {
+  convertListAtSelection,
+  getListConversionContext
+} from './editor-list-conversion.js'
+import { createBlockHandleGutterPlugin } from './editor-block-handle-guard.js'
+import { createMathOverflowPlugin } from './editor-math-overflow.js'
 
 // Every mounted rich editor registers itself here. A rich-text tab stays mounted
 // after its first activation, so several editors (and several Crepe selection
@@ -154,7 +167,11 @@ function Editor({
   onChange,
   onReady,
   onActiveBlock,
-  onOpenDocLink
+  onOpenDocLink,
+  keybindings,
+  selectionToolbar,
+  inlineMathDeleteMode,
+  readOnly = false
 }) {
   const { t } = useI18n()
   const tRef = useRef(t)
@@ -163,6 +180,14 @@ function Editor({
   onOpenDocLinkRef.current = onOpenDocLink
   const docPathRef = useRef(docPath)
   docPathRef.current = docPath
+  const keybindingsRef = useRef(keybindings)
+  keybindingsRef.current = keybindings
+  const selectionToolbarRef = useRef(selectionToolbar !== false)
+  selectionToolbarRef.current = selectionToolbar !== false
+  const inlineMathDeleteModeRef = useRef(inlineMathDeleteMode)
+  inlineMathDeleteModeRef.current = inlineMathDeleteMode
+  const readOnlyRef = useRef(readOnly)
+  readOnlyRef.current = readOnly
   const hostRef = useRef(null)
   const viewRef = useRef(null)
   const apiRef = useRef(null)
@@ -183,6 +208,46 @@ function Editor({
   // biggish doc shows feedback (and lets a queued click through) before the
   // synchronous ProseMirror parse blocks the main thread.
   const isLargeDoc = (initialContent?.length || 0) > 8000
+
+  useEffect(() => {
+    const view = viewRef.current
+    if (!view?.dom) return
+    try {
+      view.setProps({ editable: () => !readOnly })
+    } catch {
+      return
+    }
+    view.dom.contentEditable = readOnly ? 'false' : 'true'
+    view.dom.setAttribute('aria-readonly', readOnly ? 'true' : 'false')
+  }, [readOnly])
+
+  useEffect(() => {
+    if (!readOnly) return
+    const host = hostRef.current
+    if (!host) return
+    const stopMutation = (event) => {
+      event.preventDefault()
+      event.stopImmediatePropagation()
+    }
+    const onKeyDown = (event) => {
+      const key = String(event.key || '')
+      const lower = key.toLowerCase()
+      if ((event.ctrlKey || event.metaKey) && ['a', 'c', 'f'].includes(lower)) return
+      if (
+        key === 'Escape' ||
+        key === 'ContextMenu' ||
+        /^(Arrow|Home|End|Page)/.test(key)
+      ) return
+      stopMutation(event)
+    }
+    const mutationEvents = ['beforeinput', 'paste', 'drop', 'cut']
+    mutationEvents.forEach((name) => host.addEventListener(name, stopMutation, true))
+    host.addEventListener('keydown', onKeyDown, true)
+    return () => {
+      mutationEvents.forEach((name) => host.removeEventListener(name, stopMutation, true))
+      host.removeEventListener('keydown', onKeyDown, true)
+    }
+  }, [readOnly])
 
   useEffect(() => {
     const host = hostRef.current
@@ -244,6 +309,7 @@ function Editor({
     // Insert an image at the caret (used by paste / drop of image files). Persists
     // the file first, then drops an inline image node with the resulting src.
     const insertUploadedImage = async (file, fromClipboard = false) => {
+      if (readOnlyRef.current) return
       const url = await persistImage(file, fromClipboard)
       const v = viewRef.current
       if (!v || !url) return
@@ -304,10 +370,27 @@ function Editor({
     // blocks, tables, list items). Appending here merges with them.
     crepe.editor.config((ctx) => {
       disableCrepeSlash(ctx)
+      ctx.update(editorViewOptionsCtx, (options) => ({
+        ...options,
+        editable: () => !readOnlyRef.current,
+        transformPastedHTML: (html, view) => {
+          const transformed = options.transformPastedHTML
+            ? options.transformPastedHTML(html, view)
+            : html
+          return normalizeWebPasteHtml(transformed)
+        }
+      }))
       ctx.update(nodeViewCtx, (views) => [
         ...views,
         ['html', (node) => renderHtmlNodeView(node)],
-        ['frontmatter', (node) => renderFrontmatterNodeView(node)]
+        ['frontmatter', (node, view, getPos) => renderFrontmatterNodeView(node, view, getPos, {
+          labels: {
+            edit: tRef.current('frontmatter.edit'),
+            done: tRef.current('frontmatter.done'),
+            input: tRef.current('frontmatter.input')
+          },
+          canEdit: () => !readOnlyRef.current
+        })]
       ])
       // Localize the image caption / upload text to the current language.
       applyImageText(ctx, tRef.current)
@@ -348,6 +431,13 @@ function Editor({
         ...plugins,
         // Table-cell line break (issue #7): keymap first so it wins Enter inside a cell.
         tableBreakKeymap(),
+        createInlineCodeEditingPlugin(),
+        createInlineMathEditingPlugin({
+          getDeleteMode: () => inlineMathDeleteModeRef.current || 'protect'
+        }),
+        createMathBlockPromotionPlugin(),
+        createMathOverflowPlugin(),
+        createBlockHandleGutterPlugin(),
         mathPreviewPlugin(),
         createSlashPlugin(ctx, (key) => tRef.current(key)),
         // Split a mermaid block that holds 2+ diagrams (e.g. a 2nd paste appended
@@ -368,12 +458,9 @@ function Editor({
       }))
       ctx.update(remarkPluginsCtx, (plugins) => [
         ...plugins,
-        // Parse the `---` YAML block at the top of a doc into a `yaml` node
-        // (handled by the frontmatter block schema), and reconstruct mangled
-        // mid-doc `---` blocks (thematicBreak + Setext heading) back into yaml
-        // nodes so front matter works anywhere.
+        // YAML front matter is valid only at the document header. Body `---`
+        // separators must stay ordinary Markdown even if a heading follows.
         { plugin: remarkFrontmatter, options: undefined },
-        { plugin: remarkFrontmatterAnywhere, options: undefined },
         { plugin: brToBreakRemarkPlugin, options: undefined },
         { plugin: remarkRepairNonAsciiAutolinks, options: undefined },
         // Merge balanced inline HTML pairs (<span>…</span>, <sub>…</sub>) into one
@@ -393,6 +480,7 @@ function Editor({
     crepe.editor.use(
       inlineCodeSchema.extendSchema((prev) => (ctx) => ({ ...prev(ctx), inclusive: false }))
     )
+    crepe.editor.use(imageBlockMarkdownSchema)
     // YAML front matter (`---` block at the top) — a block node rendered as a
     // structured key/value card (see editor-frontmatter.js).
     crepe.editor.use(frontmatterSchema)
@@ -408,6 +496,7 @@ function Editor({
 
     // Convert the block the cursor sits in to a given block id (paragraph/h1…h6).
     const setBlock = (id) => {
+      if (readOnlyRef.current) return
       const view = viewRef.current
       if (!view) return
       const def = blockById(id)
@@ -417,6 +506,64 @@ function Editor({
       reportActiveBlock()
       refreshLevel()
       setCtxMenu(null)
+    }
+    const convertList = (targetType, listPos) => {
+      if (readOnlyRef.current) return false
+      const view = viewRef.current
+      if (!view) return false
+      const converted = convertListAtSelection(view, targetType, listPos)
+      if (!converted) return false
+      view.focus()
+      setCtxMenu(null)
+      return true
+    }
+    const restoreActionSelection = (view, range) => {
+      if (!range || !Number.isFinite(range.anchor) || !Number.isFinite(range.head)) return
+      try {
+        view.dispatch(view.state.tr.setSelection(
+          TextSelection.create(view.state.doc, range.anchor, range.head)
+        ))
+      } catch {
+        // The document may have changed between opening and choosing the item.
+      }
+    }
+    const applyTextFormat = (format, range) => {
+      if (readOnlyRef.current) return false
+      const view = viewRef.current
+      if (!view) return false
+      restoreActionSelection(view, range)
+      if (view.state.selection.empty) return false
+      if (format === 'highlight') {
+        applyHighlightInView(view, 'yellow')
+        return true
+      }
+      const markNames = {
+        bold: ['strong'],
+        italic: ['emphasis', 'em'],
+        strike: ['strike_through', 'strike'],
+        code: ['inlineCode', 'inline_code', 'code'],
+        link: ['link']
+      }
+      const type = markNames[format]
+        ?.map((name) => view.state.schema.marks[name])
+        .find(Boolean)
+      if (!type) return false
+      const { from, to } = view.state.selection
+      let tr = view.state.tr
+      if (view.state.doc.rangeHasMark(from, to, type)) {
+        tr = tr.removeMark(from, to, type)
+      } else {
+        let attrs
+        if (format === 'link') {
+          const href = window.prompt(tRef.current('editor.linkPrompt'), 'https://')
+          if (!href) return false
+          attrs = { href }
+        }
+        tr = tr.addMark(from, to, type.create(attrs))
+      }
+      view.dispatch(tr.scrollIntoView())
+      view.focus()
+      return true
     }
 
     // Push the cursor's current block type up to the parent (status bar).
@@ -523,10 +670,11 @@ function Editor({
     // frozen at the initial value while the editor was actually edited.
     crepe.on((api) => {
       api.markdownUpdated((_ctx, md) => {
-        mappingMarkdownRef.current = md
+        const normalized = normalizeEmptyTableCells(md)
+        mappingMarkdownRef.current = normalized
         if (ready) {
-          onChange?.(md, false)
-          syncDocLang(md)
+          onChange?.(normalized, false)
+          syncDocLang(normalized)
         }
       })
     })
@@ -571,6 +719,13 @@ function Editor({
         if (view?.dom) {
           view.dom.id = 'write'
           view.dom.classList.add('markdown-body')
+          view.dom.setAttribute('aria-readonly', readOnlyRef.current ? 'true' : 'false')
+          try {
+            view.setProps({ editable: () => !readOnlyRef.current })
+          } catch {
+            /* the view can be tearing down during a rapid tab switch */
+          }
+          view.dom.contentEditable = readOnlyRef.current ? 'false' : 'true'
         }
 
         // Content is in the DOM now — remove the loading skeleton SYNCHRONOUSLY
@@ -581,29 +736,114 @@ function Editor({
         flushSync(() => setLoaded(true))
 
         const onKeydown = (e) => {
-          if (!(e.ctrlKey || e.metaKey) || e.altKey) return
-          if (e.key >= '1' && e.key <= '6') {
+          const bindings = keybindingsRef.current || {}
+          for (let level = 1; level <= 6; level += 1) {
+            if (!keybindingMatchesEvent(
+              bindings[`editor.block.h${level}`]?.[0],
+              e,
+              window.api.platform
+            )) continue
             e.preventDefault()
-            setBlock('h' + e.key)
-          } else if (e.key === '0') {
+            setBlock(`h${level}`)
+            return
+          }
+          if (keybindingMatchesEvent(
+            bindings['editor.block.paragraph']?.[0],
+            e,
+            window.api.platform
+          )) {
             e.preventDefault()
             setBlock('paragraph')
           }
         }
 
         const onContextMenu = (e) => {
+          const tableBlock = e.target.closest?.('.milkdown-table-block')
+          const tableWrapper = tableBlock?.querySelector('.table-wrapper')
+          const tableScrollLeft = tableWrapper?.scrollLeft
+          const tableIndex = tableBlock
+            ? [...view.dom.querySelectorAll('.milkdown-table-block')].indexOf(tableBlock)
+            : -1
+          const restoreTableScroll = () => {
+            if (!Number.isFinite(tableScrollLeft) || tableIndex < 0) return
+            const nextWrapper = viewRef.current?.dom
+              ?.querySelectorAll('.milkdown-table-block')[tableIndex]
+              ?.querySelector('.table-wrapper')
+            if (nextWrapper) nextWrapper.scrollLeft = tableScrollLeft
+          }
           e.preventDefault()
           // Move the caret to the click so the menu acts on the clicked block.
           const v = viewRef.current
+          let listConversion = null
+          let showTextFormatting = false
+          let selection = null
           if (v) {
             const at = v.posAtCoords({ left: e.clientX, top: e.clientY })
             if (at) {
-              const $pos = v.state.doc.resolve(at.pos)
-              v.dispatch(v.state.tr.setSelection(TextSelection.near($pos)))
+              const positions = [at.pos]
+              try {
+                positions.push(v.posAtDOM(e.target, 0))
+              } catch {
+                // Some node-view controls are outside ProseMirror's content DOM.
+              }
+              const listItem = e.target.closest?.('li')
+              if (listItem) {
+                try {
+                  positions.push(v.posAtDOM(listItem, 0) + 1)
+                } catch {
+                  // A list node view may refresh during the contextmenu event.
+                }
+              }
+              listConversion = positions
+                .map((position) => getListConversionContext(v.state, position))
+                .find(Boolean) || null
+
+              const domSelection = v.dom.ownerDocument.getSelection()
+              let preservedTextSelection = false
+              if (
+                domSelection &&
+                !domSelection.isCollapsed &&
+                v.dom.contains(domSelection.anchorNode) &&
+                v.dom.contains(domSelection.focusNode)
+              ) {
+                try {
+                  const anchor = v.posAtDOM(domSelection.anchorNode, domSelection.anchorOffset)
+                  const head = v.posAtDOM(domSelection.focusNode, domSelection.focusOffset)
+                  v.dispatch(v.state.tr.setSelection(TextSelection.create(v.state.doc, anchor, head)))
+                  preservedTextSelection = true
+                } catch {
+                  // Fall back to the clicked caret position.
+                }
+              }
+              if (!preservedTextSelection) {
+                const $pos = v.state.doc.resolve(at.pos)
+                v.dispatch(v.state.tr.setSelection(TextSelection.near($pos)))
+              }
               reportActiveBlock()
+              showTextFormatting =
+                !selectionToolbarRef.current && !v.state.selection.empty
+              if (showTextFormatting) {
+                selection = {
+                  anchor: v.state.selection.anchor,
+                  head: v.state.selection.head
+                }
+              }
             }
           }
-          setCtxMenu({ x: e.clientX, y: e.clientY })
+          setCtxMenu({
+            x: e.clientX,
+            y: e.clientY,
+            listConversion,
+            showTextFormatting,
+            selection
+          })
+          requestAnimationFrame(() => {
+            restoreTableScroll()
+            requestAnimationFrame(() => {
+              restoreTableScroll()
+              requestAnimationFrame(restoreTableScroll)
+            })
+          })
         }
 
         // Reflect whether the selection is highlighted onto every injected
@@ -748,6 +988,7 @@ function Editor({
         const imageHandlingActive = (e) =>
           !e.target.closest?.('.cm-editor, input, textarea, .caption-input')
         const onPasteImage = (e) => {
+          if (readOnlyRef.current) return
           if (!imageHandlingActive(e)) return
           const items = e.clipboardData?.items
           if (!items) return
@@ -762,6 +1003,7 @@ function Editor({
           insertUploadedImage(file, true)
         }
         const onDropImage = (e) => {
+          if (readOnlyRef.current) return
           if (!imageHandlingActive(e)) return
           const files = [...(e.dataTransfer?.files || [])].filter((f) =>
             f.type.startsWith('image/')
@@ -905,7 +1147,7 @@ function Editor({
             } catch {
               return null
             }
-          })
+          }, () => !readOnlyRef.current)
         )
 
         // --- Resolve relative image paths against the file's folder ---
@@ -1077,6 +1319,51 @@ function Editor({
           // body observer instead of N (see registerToolbarScanner above).
           cleanups.push(registerToolbarScanner(scanToolbars))
         }
+
+        // Clicking the visible writing area below the final rich block should
+        // continue the document, even when the centered page itself ends above
+        // the pointer. Reuse an existing trailing empty paragraph or append one.
+        const blankScrollEl = host.closest('.editor-scroll')
+        const onBlankAreaMouseDown = (event) => {
+          if (readOnlyRef.current) return
+          if (
+            event.button !== 0 ||
+            event.ctrlKey ||
+            event.metaKey ||
+            event.altKey ||
+            event.shiftKey
+          ) return
+          if (event.target.closest?.('button, input, textarea, select, a')) return
+          const nestedEditable = event.target.closest?.('[contenteditable="true"]')
+          if (nestedEditable && nestedEditable !== view.dom) return
+          const lastBlock = view.dom.lastElementChild
+          const contentBottom =
+            lastBlock?.getBoundingClientRect().bottom ??
+            view.dom.getBoundingClientRect().top
+          if (event.clientY <= contentBottom + 1) return
+          if (blankScrollEl) {
+            const rect = blankScrollEl.getBoundingClientRect()
+            const scrollbarWidth = blankScrollEl.offsetWidth - blankScrollEl.clientWidth
+            if (scrollbarWidth > 0 && event.clientX >= rect.right - scrollbarWidth) return
+          }
+
+          event.preventDefault()
+          const paragraphType = view.state.schema.nodes.paragraph
+          const trailingNode = view.state.doc.lastChild
+          const hasEmpty =
+            trailingNode?.type === paragraphType && trailingNode.content.size === 0
+          let tr = view.state.tr
+          if (paragraphType && !hasEmpty) {
+            tr = tr.insert(view.state.doc.content.size, paragraphType.create())
+          }
+          view.dispatch(tr.setSelection(TextSelection.atEnd(tr.doc)).scrollIntoView())
+          view.focus()
+          reportActiveBlock()
+        }
+        ;(blankScrollEl || host).addEventListener('mousedown', onBlankAreaMouseDown)
+        cleanups.push(() =>
+          (blankScrollEl || host).removeEventListener('mousedown', onBlankAreaMouseDown)
+        )
         }
 
         // Typora-style new document: first line is an empty Heading 1 (title),
@@ -1123,7 +1410,7 @@ function Editor({
                 '.tools-button-group, .button-group, .cm-panel, .cm-tooltip, ' +
                 '.preview-panel, .cell-handle, .line-handle, .handle, .add-button, ' +
                 '.operation, .operation-item, .drag-preview, .milkdown-block-handle, ' +
-                '.milkdown-toolbar, .image-resize-handle, .label-wrapper, .hm-frontmatter-wrap'
+                '.milkdown-toolbar, .image-resize-handle, .label-wrapper'
             )
             .forEach((el) => el.remove())
           // Mermaid: the rendered diagram lives in a `.hm-mermaid-preview` widget
@@ -1151,13 +1438,26 @@ function Editor({
             pre.appendChild(code)
             cm.replaceWith(pre)
           })
+          // KaTeX duplicates every formula as visual HTML and semantic MathML.
+          // Printing both produces doubled formulas, while printing only the
+          // visual layer can lose glyphs in a hidden export window. Keep the
+          // self-contained MathML representation and preserve block display.
+          clone.querySelectorAll('.katex').forEach((katex) => {
+            const math = katex.querySelector('.katex-mathml math')?.cloneNode(true)
+            if (!math) return
+            if (katex.closest('.katex-display')) math.setAttribute('display', 'block')
+            katex.replaceWith(math)
+          })
           // Strip editor-only attributes but keep semantic tags + src/href/alt,
           // so the print stylesheet (in the main process) fully controls the look.
           clone.querySelectorAll('*').forEach((el) => {
             // Leave the mermaid <svg> subtree untouched — its class/style/viewBox
             // carry the diagram's geometry and colors; stripping them blanks it.
             if (el.closest('svg')) return
-            el.removeAttribute('class')
+            // Front matter uses these hooks in the print stylesheet; its source
+            // must remain visible even though the rich editor wraps it in UI.
+            const isFrontmatter = !!el.closest('.hm-frontmatter-wrap, .hm-frontmatter')
+            if (!isFrontmatter) el.removeAttribute('class')
             el.removeAttribute('style')
             el.removeAttribute('contenteditable')
             ;[...el.attributes].forEach((a) => {
@@ -1168,13 +1468,13 @@ function Editor({
         }
         const getMarkdown = () => {
           try {
-            return crepe.getMarkdown()
+            return normalizeEmptyTableCells(crepe.getMarkdown())
           } catch {
             return ''
           }
         }
         const replaceMarkdown = (markdown) => {
-          if (destroyed || !crepeRef.current) return false
+          if (destroyed || readOnlyRef.current || !crepeRef.current) return false
           try {
             const next = normalizeDisplayMath(markdown || '')
             mappingMarkdownRef.current = next
@@ -1284,6 +1584,7 @@ function Editor({
           }
         }
         const insertMarkdown = (markdown) => {
+          if (readOnlyRef.current) return false
           const v = viewRef.current
           if (!v || !crepeRef.current) return false
           try {
@@ -1303,6 +1604,8 @@ function Editor({
         }
         const editorApi = {
           setBlock,
+          convertList,
+          applyTextFormat,
           getView: () => viewRef.current,
           getDocHTML,
           getMarkdown,
@@ -1324,7 +1627,7 @@ function Editor({
         // after the rendered content is on screen instead of holding it back.
         const finishInitial = () => {
           if (destroyed) return
-          const md = crepe.getMarkdown()
+          const md = normalizeEmptyTableCells(crepe.getMarkdown())
           onChange?.(md, true)
           ready = true
           reportActiveBlock()
@@ -1396,6 +1699,17 @@ function Editor({
   // The floating bar and context menu reuse the same conversion path as the
   // keyboard shortcuts (defined inside the effect, reached through apiRef).
   const pickBlock = (id) => apiRef.current?.setBlock(id)
+  const pickListConversion = (targetType, listPos) =>
+    apiRef.current?.convertList(targetType, listPos)
+  const pickTextFormat = (format, selection) => {
+    const applied = apiRef.current?.applyTextFormat(format, selection)
+    if (applied) setCtxMenu(null)
+  }
+  const blockShortcut = (id) =>
+    keybindingToDisplay(
+      keybindings?.[`editor.block.${id}`]?.[0],
+      window.api.platform
+    )
 
   return (
     <>
@@ -1404,7 +1718,7 @@ function Editor({
           (re-rendered on lang change) and let CSS prefer it over the editor's
           static data-placeholder. */}
       <div
-        className="editor-host"
+        className={`editor-host${readOnly ? ' hm-read-only' : ''}`}
         ref={hostRef}
         style={{ '--hm-placeholder': JSON.stringify(t('editor.placeholder')) }}
       />
@@ -1441,18 +1755,90 @@ function Editor({
       {ctxMenu && (
         <>
           <div className="menu-backdrop" onMouseDown={() => setCtxMenu(null)} onContextMenu={(e) => { e.preventDefault(); setCtxMenu(null) }} />
-          <div className="block-ctxmenu" style={{
+          <div className={`block-ctxmenu${ctxMenu.x > window.innerWidth - 410 ? ' block-ctxmenu-submenus-left' : ''}`} style={{
             left: Math.min(ctxMenu.x, window.innerWidth - 210),
-            top: Math.min(ctxMenu.y, window.innerHeight - 320)
+            top: Math.max(8, Math.min(ctxMenu.y, window.innerHeight - 360))
           }}>
-            <div className="block-menu-label">{t('block.turnInto')}</div>
-            {BLOCK_TYPES.map((b) => (
-              <button key={b.id} className="block-menu-item" onMouseDown={(e) => e.preventDefault()} onClick={() => pickBlock(b.id)}>
-                <span className="block-menu-short">{b.short}</span>
-                <span className="block-menu-name">{t('block.' + b.id)}</span>
-                <span className="block-menu-sc">{b.shortcut}</span>
-              </button>
-            ))}
+            {ctxMenu.showTextFormatting && (
+              <>
+                <div className="block-menu-submenu-parent">
+                  <button className="block-menu-item block-menu-submenu-trigger" aria-haspopup="menu">
+                    <span className="block-menu-short">Aa</span>
+                    <span className="block-menu-name">{t('editor.textFormatting')}</span>
+                    <span className="block-menu-arrow" aria-hidden="true">›</span>
+                  </button>
+                  <div className="block-menu-submenu" role="menu">
+                    {[
+                      ['bold', 'tb.bold', 'B'],
+                      ['italic', 'tb.italic', 'I'],
+                      ['strike', 'tb.strike', 'S'],
+                      ['code', 'tb.code', '</>'],
+                      ['link', 'tb.link', '↗'],
+                      ['highlight', 'tb.highlight', '▰']
+                    ].map(([format, labelKey, symbol]) => (
+                      <button
+                        key={format}
+                        className="block-menu-item"
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={() => pickTextFormat(format, ctxMenu.selection)}
+                      >
+                        <span className="block-menu-short">{symbol}</span>
+                        <span className="block-menu-name">{t(labelKey)}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className="block-menu-divider" />
+              </>
+            )}
+            {!ctxMenu.listConversion ? (
+              <div className="block-menu-submenu-parent">
+                <button className="block-menu-item block-menu-submenu-trigger" aria-haspopup="menu">
+                  <span className="block-menu-short">H</span>
+                  <span className="block-menu-name">{t('block.turnInto')}</span>
+                  <span className="block-menu-arrow" aria-hidden="true">›</span>
+                </button>
+                <div className="block-menu-submenu" role="menu">
+                  {BLOCK_TYPES.map((b) => (
+                    <button key={b.id} className="block-menu-item" onMouseDown={(e) => e.preventDefault()} onClick={() => pickBlock(b.id)}>
+                      <span className="block-menu-short">{b.short}</span>
+                      <span className="block-menu-name">{t('block.' + b.id)}</span>
+                      <span className="block-menu-sc">{blockShortcut(b.id)}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <div className="block-menu-submenu-parent">
+                <button className="block-menu-item block-menu-submenu-trigger" aria-haspopup="menu">
+                  <span className="block-menu-short">☷</span>
+                  <span className="block-menu-name">{t('list.convert')}</span>
+                  <span className="block-menu-arrow" aria-hidden="true">›</span>
+                </button>
+                <div className="block-menu-submenu" role="menu">
+                  {ctxMenu.listConversion.actions.map((action) => (
+                    <button
+                      key={action.targetType}
+                      className="block-menu-item"
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => pickListConversion(
+                        action.targetType,
+                        ctxMenu.listConversion.listPos
+                      )}
+                    >
+                      <span className="block-menu-short">
+                        {action.targetType === 'ordered_list'
+                          ? '1.'
+                          : action.targetType === 'task_list' ? '☐' : '•'}
+                      </span>
+                      <span className="block-menu-name">
+                        {t(`list.convertTo.${action.targetType}`)}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         </>
       )}

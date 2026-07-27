@@ -5,10 +5,12 @@ import { memo, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMem
 // keeps that heavy code (and its memory) out of startup for the common case.
 const Editor = lazy(() => import('./components/Editor.jsx'))
 const HelpCenter = lazy(() => import('./components/HelpCenter.jsx'))
+const PdfExportStudio = lazy(() => import('./components/pdf-export/PdfExportStudio.jsx'))
 import KeepEditor from './components/KeepEditor.jsx'
 import Sidebar from './components/Sidebar.jsx'
 import Tabs from './components/Tabs.jsx'
 import Outline, { parseHeadingDetails } from './components/Outline.jsx'
+import { moveHeadingSection } from './outline-reorder.js'
 import StatusBar from './components/StatusBar.jsx'
 import SaveFab from './components/SaveFab.jsx'
 import CommandPalette from './components/CommandPalette.jsx'
@@ -33,10 +35,13 @@ import {
   saveSettings,
   applyPageWidth,
   applyFontSize,
+  applySourceFontOffset,
   applyEditorFonts,
   applyZoom,
   applyLineHeight,
   applyParagraphSpacing,
+  applyTableAutoWrap,
+  applySelectionToolbar,
   normalizeZoom,
   ZOOM_STEP,
   DEFAULT_ZOOM
@@ -46,7 +51,14 @@ import {
   extractMarkdownLinks,
   slugifyMarkdownAnchor
 } from '../../main/helpers.js'
-import { applyCustomTheme } from './customThemes.js'
+import { applyCustomTheme, applyUserCss } from './customThemes.js'
+import { preparePdfSource } from './pdf-source.js'
+import { useKeybindings } from './hooks/useKeybindings.js'
+import {
+  keybindingMatchesEvent,
+  keybindingToDisplay,
+  menuAcceleratorPayload
+} from '../../shared/keybindings.js'
 import { fireToast, HM_TOAST_EVENT } from './ui.js'
 import logoUrl from './assets/logo.png'
 import {
@@ -225,6 +237,7 @@ function resolveReferenceTarget(tab, context) {
 // test/source-fold.test.js). Memoized: App passes stable per-tab handlers and
 // style objects, so a pane only re-renders when its own value/layout changes.
 const SourceEditorPane = memo(function SourceEditorPane({
+  tabId,
   value,
   textareaRef,
   paneClass,
@@ -234,6 +247,7 @@ const SourceEditorPane = memo(function SourceEditorPane({
   onChange,
   onViewportChange,
   onSelectionChange,
+  readOnly = false
 }) {
   const localTextareaRef = useRef(null)
   const lineNumbersRef = useRef(null)
@@ -498,6 +512,7 @@ const SourceEditorPane = memo(function SourceEditorPane({
   ])
 
   const insertMarkdown = useCallback((markdown) => {
+    if (readOnly) return false
     const el = localTextareaRef.current
     if (!el) return false
     const full = String(valueRef.current ?? '')
@@ -510,7 +525,7 @@ const SourceEditorPane = memo(function SourceEditorPane({
     markInteraction('edit')
     onChange({ target: { value: next } })
     return true
-  }, [fullOffsetFromDisplay, markInteraction, onChange])
+  }, [fullOffsetFromDisplay, markInteraction, onChange, readOnly])
 
   const getViewportOffset = useCallback(() => {
     const el = localTextareaRef.current
@@ -657,6 +672,7 @@ const SourceEditorPane = memo(function SourceEditorPane({
   return (
     <div
       className={`source-editor-wrap${paneClass || ''}`}
+      data-tab-id={tabId}
       style={style}
       onFocusCapture={onPaneFocus}
       onMouseDownCapture={(e) => {
@@ -669,6 +685,8 @@ const SourceEditorPane = memo(function SourceEditorPane({
         className="source-editor"
         value={displayedValue}
         spellCheck={false}
+        readOnly={readOnly}
+        aria-readonly={readOnly}
         wrap="off"
         onScroll={handleScroll}
         onKeyDown={(e) => {
@@ -773,6 +791,9 @@ export default function App() {
   const cancelNavigationEffectsRef = useRef(() => {})
   // Unified settings modal (status-bar gear / command palette / File menu).
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [pdfRequest, setPdfRequest] = useState(null)
+  const [pdfSaving, setPdfSaving] = useState(false)
+  const [pdfSaveError, setPdfSaveError] = useState('')
   // Bumped each time workspace search is invoked so an already-open panel
   // re-focuses its input (Ctrl+Shift+F while the panel is showing).
   const [searchFocusNonce, setSearchFocusNonce] = useState(0)
@@ -878,6 +899,8 @@ export default function App() {
   // User preferences (page width, font size, zoom). Persisted separately from
   // the session; see settings.js.
   const [settings, setSettings] = useState(loadSettings)
+  const mobileReadOnly = isMobile && settings.mobileReadOnly
+  const keybindings = useKeybindings(window.api.platform)
   // Keep-mode table-filter results per tab id ({ shown, total } or null) — drives
   // the status-bar "filtered N/M" badge for the active tab.
   const [keepFilters, setKeepFilters] = useState({})
@@ -917,6 +940,7 @@ export default function App() {
   // single ref would get stuck on whichever editor mounted last; keying by tab
   // id lets commands act on the *currently active* document.
   const editorApis = useRef({})
+  const editorReadyWaitersRef = useRef(new Map())
   // The tab id of whichever editor pane last had focus — so Save / Export target
   // the pane you're actually editing in split view, not always the left one.
   const focusedTabRef = useRef(null)
@@ -1047,6 +1071,22 @@ export default function App() {
     !isPlainTextDoc(sourcePreviewTab) &&
     !milkdownForced.has(sourcePreviewTab.id)
   const layoutSplit = split || sourceSplit
+  // The outline belongs to the pane the user last focused. In ordinary split
+  // view this is the left/right document; in Rich + Source it can be either the
+  // source document or the (optionally pinned) Keep preview document.
+  const sourceSide = sourceOnLeft ? 'left' : 'right'
+  const outlineId = sourceSplit
+    ? focusedPane === sourceSide ? activeId : sourcePreviewId
+    : split && focusedPane === 'right' ? splitId : activeId
+  const outlineTab = useMemo(
+    () => (outlineId != null ? tabs.find((tab) => tab.id === outlineId) || null : null),
+    [tabs, outlineId]
+  )
+  const outlineSourceMode = sourceSplit
+    ? focusedPane === sourceSide
+    : outlineId === activeId && sourceMode
+  const outlineIdRef = useRef(outlineId)
+  outlineIdRef.current = outlineId
   // Always-current activeId for callbacks that fire after a tab switch.
   const activeIdRef = useRef(activeId)
   activeIdRef.current = activeId
@@ -1253,6 +1293,9 @@ export default function App() {
     applyFontSize(settings.fontSize)
   }, [settings.fontSize])
   useEffect(() => {
+    applySourceFontOffset(settings.sourceFontOffset)
+  }, [settings.sourceFontOffset])
+  useEffect(() => {
     applyEditorFonts(
       settings.fontWriteEn,
       settings.fontWriteZh,
@@ -1270,8 +1313,20 @@ export default function App() {
     applyParagraphSpacing(settings.paragraphSpacing)
   }, [settings.paragraphSpacing])
   useEffect(() => {
+    applyTableAutoWrap(settings.tableAutoWrap)
+  }, [settings.tableAutoWrap])
+  useEffect(() => {
+    applySelectionToolbar(settings.selectionToolbar)
+  }, [settings.selectionToolbar])
+  useEffect(() => {
+    applyUserCss(settings.userCssSnippets)
+  }, [settings.userCssSnippets])
+  useEffect(() => {
     saveSettings(settings)
   }, [settings])
+  useEffect(() => {
+    window.api.setMenuKeybindings?.(menuAcceleratorPayload(keybindings.effective)).catch(() => {})
+  }, [keybindings.effective])
   // Merge a partial settings change (from the Settings modal).
   const updateSettings = useCallback((partial) => {
     setSettings((prev) => ({ ...prev, ...partial }))
@@ -2298,7 +2353,12 @@ export default function App() {
         },
         onReady: (api) => {
           editorApis.current[id] = api
-          if (id === activeIdRef.current) setOutlineSyncNonce((nonce) => nonce + 1)
+          const waiters = editorReadyWaitersRef.current.get(id)
+          if (waiters) {
+            editorReadyWaitersRef.current.delete(id)
+            waiters.forEach((resolve) => resolve(api))
+          }
+          if (id === outlineIdRef.current) setOutlineSyncNonce((nonce) => nonce + 1)
         },
         onFilterChange: (info) =>
           setKeepFilters((m) => {
@@ -3090,30 +3150,63 @@ export default function App() {
   // Export a file (by path) to PDF: open/focus it, wait for its editor to mount,
   // then reuse the same HTML→PDF pipeline as the menu command. Driven from the
   // sidebar's right-click menu, where the file may not be open yet.
-  const exportPathToPdf = useCallback(
-    async (path) => {
-      await openPaths([path])
-      const norm = (path || '').replace(/\\/g, '/')
-      const tab = tabsRef.current.find((t) => (t.path || '').replace(/\\/g, '/') === norm)
-      if (!tab) return
-      let html = null
-      for (let i = 0; i < 40 && !html; i++) {
-        html = editorApis.current[tab.id]?.getDocHTML?.()
-        if (!html) await new Promise((r) => setTimeout(r, 75))
+  const waitForEditorApi = useCallback((id, timeout = 8000) => {
+    const ready = editorApis.current[id]
+    if (ready) return Promise.resolve(ready)
+    return new Promise((resolve) => {
+      let waiters = editorReadyWaitersRef.current.get(id)
+      if (!waiters) {
+        waiters = new Set()
+        editorReadyWaitersRef.current.set(id, waiters)
       }
-      if (!html) {
-        window.alert(tRef.current('error.exportPdfUnavailable'))
-        return
+      let timer = 0
+      const finish = (api) => {
+        clearTimeout(timer)
+        waiters.delete(finish)
+        if (!waiters.size) editorReadyWaitersRef.current.delete(id)
+        resolve(api || null)
       }
-      const base = (tab.title || 'Untitled').replace(/\.(md|markdown|mdx|txt)$/i, '')
-      await window.api.exportPDF(html, base + '.pdf', {
+      waiters.add(finish)
+      timer = window.setTimeout(() => finish(null), timeout)
+    })
+  }, [])
+
+  const openPdfStudio = useCallback((tab, html) => {
+    if (!tab || !html || !window.api.capabilities?.pdfExport) {
+      window.alert(tRef.current('error.exportPdfUnavailable'))
+      return false
+    }
+    const base = (tab.title || 'Untitled').replace(/\.(md|markdown|mdx|txt)$/i, '')
+    setPdfSaveError('')
+    setPdfSaving(false)
+    setPdfRequest({
+      source: preparePdfSource(html, base, {
         fontWriteEn: settings.fontWriteEn,
         fontWriteZh: settings.fontWriteZh,
         fontWriteJa: settings.fontWriteJa,
         fontMono: settings.fontMono
-      })
+      }),
+      defaultName: base + '.pdf'
+    })
+    return true
+  }, [settings.fontWriteEn, settings.fontWriteJa, settings.fontWriteZh, settings.fontMono])
+
+  const exportPathToPdf = useCallback(
+    async (path) => {
+      if (!window.api.capabilities?.pdfExport) return
+      await openPaths([path])
+      const norm = (path || '').replace(/\\/g, '/')
+      const tab = tabsRef.current.find((t) => (t.path || '').replace(/\\/g, '/') === norm)
+      if (!tab) return
+      const api = await waitForEditorApi(tab.id)
+      const html = api?.getDocHTML?.()
+      if (!html) {
+        window.alert(tRef.current('error.exportPdfUnavailable'))
+        return
+      }
+      openPdfStudio(tab, html)
     },
-    [openPaths, settings.fontWriteEn, settings.fontWriteZh, settings.fontWriteJa, settings.fontMono]
+    [openPaths, openPdfStudio, waitForEditorApi]
   )
 
   // --------------------------- workspace ---------------------------
@@ -3343,6 +3436,21 @@ export default function App() {
   const [activeHeading, setActiveHeading] = useState(-1)
   const forcedActiveHeadingRef = useRef(null)
   const outlineJumpRef = useRef({ token: 0, raf: 0, timer: 0, scroller: null, overflowAnchor: '' })
+  const visiblePaneForTab = useCallback((selector, id) => {
+    if (id == null) return null
+    const panes = editorAreaRef.current?.querySelectorAll(`${selector}[data-tab-id]`) || []
+    return [...panes].find(
+      (pane) => pane.dataset.tabId === String(id) && pane.offsetParent !== null
+    ) || null
+  }, [])
+  const visibleSourceForTab = useCallback(
+    (id) => visiblePaneForTab('.source-editor-wrap', id)?.querySelector('textarea') || null,
+    [visiblePaneForTab]
+  )
+  const visiblePreviewForTab = useCallback(
+    (id) => visiblePaneForTab('.editor-scroll', id),
+    [visiblePaneForTab]
+  )
 
   const cancelOutlineJump = useCallback(() => {
     const job = outlineJumpRef.current
@@ -3363,11 +3471,11 @@ export default function App() {
     if (isMobile) setSidebarOpen(false)
     cancelOutlineJump()
 
-    if (sourceModeRef.current) {
-      const source = sourceRef.current
+    if (outlineSourceMode) {
+      const source = visibleSourceForTab(outlineId)
       const currentDetails = parseHeadingDetails(
         source?.__hmSourceApi?.getFullValue?.() ??
-        tabsRef.current.find((tab) => tab.id === activeIdRef.current)?.content ??
+        tabsRef.current.find((tab) => tab.id === outlineId)?.content ??
         ''
       )
       const details = currentDetails[index] || heading
@@ -3384,7 +3492,7 @@ export default function App() {
 
     const job = outlineJumpRef.current
     const token = job.token
-    const api = editorApis.current[activeId]
+    const api = editorApis.current[outlineId]
     let attempts = 0
 
     const finish = () => {
@@ -3457,15 +3565,8 @@ export default function App() {
       // editor; touching hidden tabs would make one outline click render them.
       api?.ensureRendered?.()
 
-      let scroller = editorHostRef.current
-      let headings = scroller && scroller.offsetParent !== null
-        ? scroller.querySelectorAll(OUTLINE_HEADING_SELECTOR)
-        : []
-      if (!headings.length) {
-        const candidates = editorAreaRef.current?.querySelectorAll('.editor-scroll.km-scroll.hm-pane-left') || []
-        scroller = [...candidates].find((el) => el.offsetParent !== null) || null
-        headings = scroller?.querySelectorAll(OUTLINE_HEADING_SELECTOR) || []
-      }
+      const scroller = visiblePreviewForTab(outlineId)
+      const headings = scroller?.querySelectorAll(OUTLINE_HEADING_SELECTOR) || []
       const el = headings[index]
       if (!scroller || !el) {
         if (attempts++ < 75) job.timer = setTimeout(tryJump, 40)
@@ -3476,7 +3577,48 @@ export default function App() {
     }
 
     tryJump()
-  }, [activeId, cancelOutlineJump, isMobile])
+  }, [
+    cancelOutlineJump,
+    isMobile,
+    outlineId,
+    outlineSourceMode,
+    visiblePreviewForTab,
+    visibleSourceForTab
+  ])
+  const moveOutlineHeading = useCallback((fromIndex, targetIndex, placement) => {
+    const id = outlineId
+    const tab = tabsRef.current.find((item) => item.id === id)
+    if (!tab || isPlainTextDoc(tab) || !guardKeepDraft(id)) return false
+    const next = moveHeadingSection(tab.content, fromIndex, targetIndex, placement)
+    if (!next) return false
+
+    const meta = {
+      kind: 'outline-reorder',
+      summaryKey: 'outline.reordered'
+    }
+    let changed = false
+    if (!outlineSourceMode && !milkdownForcedRef.current.has(id)) {
+      changed = editorApis.current[id]?.replaceMarkdownTransaction?.(next, meta) === true
+    } else if (!outlineSourceMode) {
+      changed = editorApis.current[id]?.replaceMarkdown?.(next) === true
+      if (changed) {
+        updateContent(id, next, false)
+        fireToast(tRef.current('outline.reordered'))
+      }
+    } else {
+      updateContent(id, next, false)
+      if (sourceSplitRef.current && sourcePreviewIdRef.current === id) {
+        editorApis.current[id]?.syncMarkdown?.(next)
+      }
+      changed = true
+      fireToast(tRef.current('outline.reordered'))
+    }
+    if (changed) {
+      setOutlineSyncNonce((nonce) => nonce + 1)
+      requestAnimationFrame(() => setActiveHeading(Math.max(0, targetIndex)))
+    }
+    return changed
+  }, [guardKeepDraft, outlineId, outlineSourceMode, updateContent])
   const onPaletteOpenHeading = useCallback(
     (index, heading) => jumpToHeading(index, heading),
     [jumpToHeading]
@@ -3485,11 +3627,11 @@ export default function App() {
   useEffect(() => {
     setActiveHeading(-1)
     return cancelOutlineJump
-  }, [activeId, cancelOutlineJump])
+  }, [outlineId, cancelOutlineJump])
 
   useEffect(() => {
-    if (home || !sidebarOpen || sidebarMode !== 'outline' || !sourceMode) return
-    const source = sourceRef.current
+    if (home || !sidebarOpen || sidebarMode !== 'outline' || !outlineSourceMode) return
+    const source = visibleSourceForTab(outlineId)
     if (!source) return
     let cachedText = null
     let headings = []
@@ -3524,7 +3666,15 @@ export default function App() {
       source.removeEventListener('scroll', schedule)
       source.removeEventListener('input', schedule)
     }
-  }, [activeId, home, outlineSyncNonce, sidebarMode, sidebarOpen, sourceMode])
+  }, [
+    home,
+    outlineId,
+    outlineSourceMode,
+    outlineSyncNonce,
+    sidebarMode,
+    sidebarOpen,
+    visibleSourceForTab
+  ])
 
   // Outline scrollspy: highlight the heading you're currently viewing (the last
   // one scrolled past the top), mirroring how the file tree marks the open file.
@@ -3534,12 +3684,12 @@ export default function App() {
   // Throttle to at most once per 300ms (not per frame) and skip entirely while
   // the user is actively scrolling fast (resume on settle).
   useEffect(() => {
-    if (sourceMode) return
+    if (outlineSourceMode) return
     if (home || !sidebarOpen || sidebarMode !== 'outline') {
       setActiveHeading(-1)
       return
     }
-    const scroller = editorHostRef.current
+    const scroller = visiblePreviewForTab(outlineId)
     if (!scroller) return
 
     // Reflow-free scrollspy. The previous version re-queried and called
@@ -3617,7 +3767,15 @@ export default function App() {
       scroller.removeEventListener('scroll', schedule)
       window.removeEventListener('resize', invalidate)
     }
-  }, [home, sidebarOpen, sidebarMode, sourceMode, activeId, outlineSyncNonce])
+  }, [
+    home,
+    outlineId,
+    outlineSourceMode,
+    outlineSyncNonce,
+    sidebarMode,
+    sidebarOpen,
+    visiblePreviewForTab
+  ])
 
   // ------------------------- menu / shortcuts ----------------------
   // In split view, target the pane you're actually editing (last focused), as
@@ -3629,6 +3787,7 @@ export default function App() {
   }
 
   const runKeepHistory = useCallback((direction, targetId = null) => {
+    if (mobileReadOnly) return false
     const focused = focusedTabRef.current
     const id = targetId || (
       focused && (
@@ -3650,7 +3809,7 @@ export default function App() {
     const changed = editorApis.current[id]?.[direction]?.() === true
     if (changed) fireToast(tRef.current(direction === 'undo' ? 'keep.undoDone' : 'keep.redoDone'))
     return changed
-  }, [guardKeepDraft])
+  }, [guardKeepDraft, mobileReadOnly])
 
   keepCommitRef.current = (id, entry) => {
     const meta = entry?.meta
@@ -3915,6 +4074,7 @@ export default function App() {
       if (id && guardKeepDraft(id)) saveTab(id, true)
     },
     attach: async () => {
+      if (mobileReadOnly) return
       const id = pickEditableId()
       const tab = tabsRef.current.find((item) => item.id === id)
       if (!tab || !tab.path || !MD_DOC_RE.test(tab.path)) {
@@ -3961,13 +4121,7 @@ export default function App() {
         return
       }
       const tab = tabs.find((x) => x.id === id)
-      const base = (tab?.title || 'Untitled').replace(/\.(md|markdown|mdx|txt)$/i, '')
-      await window.api.exportPDF(html, base + '.pdf', {
-        fontWriteEn: settings.fontWriteEn,
-        fontWriteZh: settings.fontWriteZh,
-        fontWriteJa: settings.fontWriteJa,
-        fontMono: settings.fontMono
-      })
+      openPdfStudio(tab, html)
     },
     exportHtml: async () => {
       const id = pickEditableId()
@@ -4033,7 +4187,9 @@ export default function App() {
     },
     linkProblems: () => openProblemsPanel(),
     findReferences: () => findCurrentReferencesRef.current(),
-    renameHeading: () => beginHeadingRenameRef.current(),
+    renameHeading: () => {
+      if (!mobileReadOnly) beginHeadingRenameRef.current()
+    },
     toggleSource,
     toggleEditorMode,
     toggleTheme: cycleTheme,
@@ -4211,12 +4367,11 @@ export default function App() {
   useEffect(() => {
     const onKeyDown = (e) => {
       const modifier = e.ctrlKey || e.metaKey
-      if (
-        modifier &&
-        e.shiftKey &&
-        !e.altKey &&
-        (e.code === 'KeyT' || e.key.toLowerCase() === 't')
-      ) {
+      if (keybindingMatchesEvent(
+        keybindings.effective['tab.reopen']?.[0],
+        e,
+        window.api.platform
+      )) {
         e.preventDefault()
         e.stopPropagation()
         handlers.current.reopenClosedTab()
@@ -4259,15 +4414,20 @@ export default function App() {
           return
         }
       }
-      if (
-        modifier &&
-        !e.altKey &&
-        !e.shiftKey &&
-        (e.key === 'PageUp' || e.key === 'PageDown')
-      ) {
+      const previousTab = keybindingMatchesEvent(
+        keybindings.effective['tab.previous']?.[0],
+        e,
+        window.api.platform
+      )
+      const nextTab = keybindingMatchesEvent(
+        keybindings.effective['tab.next']?.[0],
+        e,
+        window.api.platform
+      )
+      if (previousTab || nextTab) {
         e.preventDefault()
         e.stopPropagation()
-        stepSequentialTab(e.key === 'PageDown' ? 1 : -1)
+        stepSequentialTab(nextTab ? 1 : -1)
       }
     }
     const onKeyUp = (e) => {
@@ -4288,7 +4448,8 @@ export default function App() {
     commitTabSwitcher,
     openOrStepTabSwitcher,
     stepSequentialTab,
-    updateTabSwitcher
+    updateTabSwitcher,
+    keybindings.effective
   ])
 
   // Ctrl/Cmd+B toggles the sidebar. Handled here in the CAPTURE phase so it
@@ -4297,7 +4458,11 @@ export default function App() {
   // double-fire either.
   useEffect(() => {
     const onKey = (e) => {
-      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.code === 'KeyB') {
+      if (keybindingMatchesEvent(
+        keybindings.effective['view.toggleSidebar']?.[0],
+        e,
+        window.api.platform
+      )) {
         e.preventDefault()
         e.stopPropagation()
         handlers.current.toggleSidebar()
@@ -4305,7 +4470,7 @@ export default function App() {
     }
     window.addEventListener('keydown', onKey, true)
     return () => window.removeEventListener('keydown', onKey, true)
-  }, [])
+  }, [keybindings.effective])
 
   // Ctrl/Cmd+0 means two different things depending on where the caret is:
   // inside the rich editor it turns the current block back into a paragraph
@@ -4555,15 +4720,17 @@ export default function App() {
       const caps = window.api.capabilities || {}
       const mod = window.api.platform === 'darwin' ? '⌘' : 'Ctrl+'
       const shift = window.api.platform === 'darwin' ? '⇧' : 'Shift+'
+      const shortcut = (id) =>
+        keybindingToDisplay(keybindings.effective[id]?.[0], window.api.platform)
       return [
-        { id: 'cmd.new', title: t('cmd.new'), icon: 'file-plus', shortcut: `${mod}N`, run: () => handlers.current.new() },
-        { id: 'cmd.open', title: t('cmd.open'), icon: 'file', shortcut: `${mod}O`, run: () => handlers.current.open() },
-        { id: 'cmd.openFolder', title: t('cmd.openFolder'), icon: 'folder', shortcut: `${mod}${shift}O`, run: () => handlers.current.openFolder() },
-        { id: 'cmd.save', title: t('cmd.save'), icon: 'save', shortcut: `${mod}S`, run: () => handlers.current.save() },
-        { id: 'cmd.saveAs', title: t('cmd.saveAs'), icon: 'save', shortcut: `${mod}${shift}S`, run: () => handlers.current.saveAs() },
-        { id: 'cmd.reopenClosedTab', title: t('cmd.reopenClosedTab'), icon: 'file', shortcut: `${mod}${shift}T`, run: () => handlers.current.reopenClosedTab() },
-        { id: 'cmd.previousTab', title: t('cmd.previousTab'), icon: 'chevron-right', shortcut: `${mod}PageUp`, run: () => handlers.current.previousTab() },
-        { id: 'cmd.nextTab', title: t('cmd.nextTab'), icon: 'chevron-right', shortcut: `${mod}PageDown`, run: () => handlers.current.nextTab() },
+        { id: 'cmd.new', title: t('cmd.new'), icon: 'file-plus', shortcut: shortcut('file.new'), run: () => handlers.current.new() },
+        { id: 'cmd.open', title: t('cmd.open'), icon: 'file', shortcut: shortcut('file.open'), run: () => handlers.current.open() },
+        { id: 'cmd.openFolder', title: t('cmd.openFolder'), icon: 'folder', shortcut: shortcut('workspace.openFolder'), run: () => handlers.current.openFolder() },
+        { id: 'cmd.save', title: t('cmd.save'), icon: 'save', shortcut: shortcut('file.save'), run: () => handlers.current.save() },
+        { id: 'cmd.saveAs', title: t('cmd.saveAs'), icon: 'save', shortcut: shortcut('file.saveAs'), run: () => handlers.current.saveAs() },
+        { id: 'cmd.reopenClosedTab', title: t('cmd.reopenClosedTab'), icon: 'file', shortcut: shortcut('tab.reopen'), run: () => handlers.current.reopenClosedTab() },
+        { id: 'cmd.previousTab', title: t('cmd.previousTab'), icon: 'chevron-right', shortcut: shortcut('tab.previous'), run: () => handlers.current.previousTab() },
+        { id: 'cmd.nextTab', title: t('cmd.nextTab'), icon: 'chevron-right', shortcut: shortcut('tab.next'), run: () => handlers.current.nextTab() },
         { id: 'cmd.undoKeep', title: t('cmd.undoKeep'), icon: 'undo', shortcut: `${mod}Z`, run: () => handlers.current.undoKeep() },
         { id: 'cmd.redoKeep', title: t('cmd.redoKeep'), icon: 'undo', shortcut: `${mod}${shift}Z`, run: () => handlers.current.redoKeep() },
         { id: 'cmd.reviewKeep', title: t('keep.reviewChanges'), icon: 'outline', run: () => handlers.current.reviewKeep() },
@@ -4586,18 +4753,18 @@ export default function App() {
         { id: 'cmd.toggleZen', title: t(zenMode ? 'cmd.exitZen' : 'cmd.enterZen'), icon: 'expand', shortcut: `${mod}K Z`, run: () => handlers.current.toggleZen() },
         caps.fileAttachments && { id: 'cmd.attach', title: t('cmd.attach'), icon: 'file-plus', run: () => handlers.current.attach() },
         // Export-to-PDF needs a save dialog / print pipeline that doesn't exist on mobile.
-        caps.pdfExport && { id: 'cmd.exportPdf', title: t('cmd.exportPdf'), icon: 'file', run: () => handlers.current.exportPdf() },
-        caps.htmlExport && { id: 'cmd.exportHtml', title: t('cmd.exportHtml'), icon: 'file', run: () => handlers.current.exportHtml() },
-        caps.print && { id: 'cmd.print', title: t('cmd.print'), icon: 'file', run: () => handlers.current.print() },
-        { id: 'cmd.sidebar', title: t('cmd.sidebar'), icon: 'sidebar', shortcut: `${mod}B`, run: () => handlers.current.toggleSidebar() },
+        caps.pdfExport && { id: 'cmd.exportPdf', title: t('cmd.exportPdf'), icon: 'file', shortcut: shortcut('file.exportPdf'), run: () => handlers.current.exportPdf() },
+        caps.htmlExport && { id: 'cmd.exportHtml', title: t('cmd.exportHtml'), icon: 'file', shortcut: shortcut('file.exportHtml'), run: () => handlers.current.exportHtml() },
+        caps.print && { id: 'cmd.print', title: t('cmd.print'), icon: 'file', shortcut: shortcut('file.print'), run: () => handlers.current.print() },
+        { id: 'cmd.sidebar', title: t('cmd.sidebar'), icon: 'sidebar', shortcut: shortcut('view.toggleSidebar'), run: () => handlers.current.toggleSidebar() },
         { id: 'cmd.files', title: t('cmd.files'), icon: 'folder', run: () => handlers.current.toggleFiles() },
-        { id: 'cmd.outline', title: t('cmd.outline'), icon: 'outline', shortcut: `${mod}${shift}L`, run: () => handlers.current.toggleOutline() },
-        { id: 'cmd.source', title: t('cmd.source'), icon: 'code', shortcut: `${mod}/`, run: () => handlers.current.toggleSource() },
+        { id: 'cmd.outline', title: t('cmd.outline'), icon: 'outline', shortcut: shortcut('view.showOutline'), run: () => handlers.current.toggleOutline() },
+        { id: 'cmd.source', title: t('cmd.source'), icon: 'code', shortcut: shortcut('view.toggleSource'), run: () => handlers.current.toggleSource() },
         { id: 'cmd.toggleKeep', title: t('cmd.toggleKeep'), icon: 'shield', run: () => handlers.current.toggleEditorMode() },
-        { id: 'cmd.theme', title: t('cmd.theme'), icon: 'moon', run: () => handlers.current.toggleTheme() },
-        { id: 'cmd.find', title: t('cmd.find'), icon: 'search', shortcut: `${mod}F`, run: () => handlers.current.find() },
-        { id: 'cmd.replace', title: t('cmd.replace'), icon: 'search', shortcut: window.api.platform === 'darwin' ? '⌥⌘F' : `${mod}H`, run: () => handlers.current.replace() },
-        caps.workspaceSearch && { id: 'cmd.searchWorkspace', title: t('cmd.searchWorkspace'), icon: 'search', shortcut: `${mod}${shift}F`, run: () => handlers.current.searchWorkspace() },
+        { id: 'cmd.theme', title: t('cmd.theme'), icon: 'moon', shortcut: shortcut('view.cycleTheme'), run: () => handlers.current.toggleTheme() },
+        { id: 'cmd.find', title: t('cmd.find'), icon: 'search', shortcut: shortcut('editor.find'), run: () => handlers.current.find() },
+        { id: 'cmd.replace', title: t('cmd.replace'), icon: 'search', shortcut: shortcut('editor.replace'), run: () => handlers.current.replace() },
+        caps.workspaceSearch && { id: 'cmd.searchWorkspace', title: t('cmd.searchWorkspace'), icon: 'search', shortcut: shortcut('workspace.search'), run: () => handlers.current.searchWorkspace() },
         { id: 'cmd.linkProblems', title: t('links.problems'), icon: 'alert', shortcut: 'F8', run: () => handlers.current.linkProblems() },
         { id: 'cmd.findReferences', title: t('links.findReferences'), icon: 'search', run: () => handlers.current.findReferences() },
         { id: 'cmd.renameHeading', title: t('links.renameHeading'), icon: 'outline', shortcut: 'F2', run: () => handlers.current.renameHeading() },
@@ -4607,12 +4774,12 @@ export default function App() {
           icon: 'check',
           run: () => updateSettings({ spellcheck: !settings.spellcheck })
         },
-        { id: 'cmd.settings', title: t('cmd.settings'), icon: 'settings', run: () => handlers.current.settings() },
+        { id: 'cmd.settings', title: t('cmd.settings'), icon: 'settings', shortcut: shortcut('app.settings'), run: () => handlers.current.settings() },
         { id: 'cmd.helpGuide', title: t('cmd.helpGuide'), icon: 'help', shortcut: 'F1', run: () => handlers.current.help() },
         { id: 'cmd.helpShortcuts', title: t('cmd.helpShortcuts'), icon: 'command', run: () => handlers.current.shortcuts() }
       ].filter(Boolean)
     },
-    [t, settings.spellcheck, updateSettings, zenMode]
+    [t, settings.spellcheck, updateSettings, zenMode, keybindings.effective]
   )
 
   // Discriminate the active view: the visible source <textarea> sets sourceRef;
@@ -4998,6 +5165,7 @@ export default function App() {
   // the source disagree (markdown syntax inside the match), counts may differ
   // and the ordinal is clamped.
   const applyReplace = (all) => {
+    if (mobileReadOnly) return
     if (findModeRef.current !== 'text') return
     const q = findInputRef.current?.value ?? findQueryRef.current
     if (!q) return
@@ -5501,6 +5669,25 @@ export default function App() {
     : []
   const tabSwitcherSelectedId = tabSwitcher?.ids[tabSwitcher.index] || null
   const helpOpen = home === 'help'
+  const closePdfStudio = () => {
+    if (pdfSaving) return
+    setPdfSaveError('')
+    setPdfRequest(null)
+  }
+  const savePdfStudio = async (token) => {
+    if (!pdfRequest || pdfSaving || !token) return
+    setPdfSaving(true)
+    setPdfSaveError('')
+    try {
+      const result = await window.api.savePDFPreview(token, pdfRequest.defaultName)
+      if (result?.path) setPdfRequest(null)
+      else if (!result?.canceled) setPdfSaveError(result?.error || t('pdf.saveFailed'))
+    } catch (error) {
+      setPdfSaveError(error?.message || String(error))
+    } finally {
+      setPdfSaving(false)
+    }
+  }
 
   return (
     <I18nProvider lang={lang} setLang={setLang}>
@@ -5564,6 +5751,16 @@ export default function App() {
             onClick={() => setSidebarOpen((v) => !v)}
           >
             <Icon name="menu" size={20} />
+          </button>
+        )}
+        {isMobile && (
+          <button
+            className={`icon-btn drag-no hm-readonly-btn${mobileReadOnly ? ' active' : ''}`}
+            title={t(mobileReadOnly ? 'mobile.readOnlyOff' : 'mobile.readOnlyOn')}
+            aria-pressed={mobileReadOnly}
+            onClick={() => updateSettings({ mobileReadOnly: !settings.mobileReadOnly })}
+          >
+            <Icon name={mobileReadOnly ? 'lock' : 'unlock'} size={18} />
           </button>
         )}
         <Tabs
@@ -5659,7 +5856,17 @@ export default function App() {
                 onOpenResult={openSearchResult}
               />
             ) : (
-              <Outline content={activeTab?.content || ''} activeIndex={activeHeading} onJump={jumpToHeading} />
+              <Outline
+                key={outlineId || 'outline-empty'}
+                content={outlineTab?.content || ''}
+                activeIndex={activeHeading}
+                onJump={jumpToHeading}
+                onMoveHeading={
+                  !isMobile && outlineTab && !isPlainTextDoc(outlineTab)
+                    ? moveOutlineHeading
+                    : undefined
+                }
+              />
             )
           )}
         </aside>
@@ -5765,7 +5972,7 @@ export default function App() {
                 <Icon name="close" size={14} />
               </button>
               </div>
-              {find.mode === 'text' && find.showReplace && (
+              {find.mode === 'text' && find.showReplace && !mobileReadOnly && (
                 <div className="findbar-row findbar-replace-row">
                   <input
                     className="findbar-replace-input"
@@ -5860,6 +6067,7 @@ export default function App() {
               const sourceNode = shouldMountSource ? (
                 <SourceEditorPane
                   key={`source:${tab.id}:${tab.reloadNonce}`}
+                  tabId={tab.id}
                   textareaRef={(normalIsLeft || dualSource) && sourceVisible ? sourceRef : undefined}
                   paneClass={sourcePaneClass}
                   style={sourceStyle}
@@ -5869,6 +6077,7 @@ export default function App() {
                   onSelectionChange={h.onSourceSelectionChange}
                   onPaneFocus={h.onSourcePaneFocus}
                   onPaneMouseDown={h.onSourcePaneFocus}
+                  readOnly={mobileReadOnly}
                 />
               ) : null
               if (plainText || heavyAsSource) return sourceNode
@@ -5886,6 +6095,7 @@ export default function App() {
                     // modes fully remounts (no ref/child reconciliation surprises).
                     key={`keep:${tab.id}:${tab.reloadNonce}`}
                     className={`editor-scroll km-scroll${previewPaneClass}`}
+                    data-tab-id={tab.id}
                     ref={(normalIsLeft || (dualPreview && tab.id === activeId)) && previewVisible ? editorHostRef : undefined}
                     style={{ ...previewPaneStyle, display: previewVisible ? undefined : 'none' }}
                     onFocusCapture={h.onPaneFocus}
@@ -5909,6 +6119,7 @@ export default function App() {
                       onRenameHeading={onKeepRenameHeading}
                       sourceSplitMode={sourceSplit && dualPreview}
                       onLocateSource={h.onLocateSource}
+                      readOnly={mobileReadOnly}
                     />
                   </div>
                 ]
@@ -5925,6 +6136,7 @@ export default function App() {
                   // runs on mount). tab switches keep the same key → stay mounted.
                   key={`${tab.id}:${tab.reloadNonce}`}
                   className={`editor-scroll${previewPaneClass}`}
+                  data-tab-id={tab.id}
                   ref={(normalIsLeft || (dualPreview && tab.id === activeId)) && previewVisible ? editorHostRef : undefined}
                   style={{ ...previewPaneStyle, display: previewVisible ? undefined : 'none' }}
                   onFocusCapture={h.onPaneFocus}
@@ -5938,6 +6150,10 @@ export default function App() {
                       onChange={h.onChange}
                       onReady={h.onReady}
                       onOpenDocLink={openDocLink}
+                      keybindings={keybindings.effective}
+                      selectionToolbar={settings.selectionToolbar}
+                      inlineMathDeleteMode={settings.inlineMathDeleteMode}
+                      readOnly={mobileReadOnly}
                     />
                   </Suspense>
                 </div>
@@ -6144,7 +6360,21 @@ export default function App() {
         onGetMoreThemes={onGetMoreThemes}
         onClearLocalHistory={clearAllLocalHistory}
         onOpenHelp={openHelp}
+        keybindings={keybindings}
       />
+
+      {pdfRequest && (
+        <Suspense fallback={<div className="hm-pdf-loading">{t('pdf.generatingPreview')}</div>}>
+          <PdfExportStudio
+            request={pdfRequest}
+            saving={pdfSaving}
+            saveError={pdfSaveError}
+            onCancel={closePdfStudio}
+            onSave={savePdfStudio}
+            t={t}
+          />
+        </Suspense>
+      )}
 
       <SaveFab
         visible={!home && !!activeTab && hasUnsavedTab(activeTab)}

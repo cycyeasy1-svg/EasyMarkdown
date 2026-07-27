@@ -53,6 +53,7 @@
     "markdown-it": "^14.3.0",
     "mdast-util-find-and-replace": "^3.0.2",
     "mermaid": "^11.15.0",
+    "pdfjs-dist": "^4.10.38",
     "pinyin-pro": "^3.28.1",
     "remark-frontmatter": "^5.0.0"
   },

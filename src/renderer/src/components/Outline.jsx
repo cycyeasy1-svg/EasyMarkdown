@@ -1,88 +1,12 @@
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
 import { useI18n } from '../i18n.jsx'
 import { Icon } from './icons.jsx'
+import { parseHeadingDetails, parseHeadings } from '../outline-model.js'
+import { haveSameHeadingParent } from '../outline-reorder.js'
 
-// Pull every heading the document renders — not just ATX `#` headings, but also
-// Setext (text underlined with === / ---) and inline HTML <h1>…<h6> — so the
-// outline matches what's actually shown. Fenced code is skipped, and a leading
-// `---` YAML front-matter block is stepped over so its closing fence isn't
-// mistaken for a Setext underline.
-export function parseHeadingDetails(md) {
-  const lines = (md || '').split('\n')
-  const lineOffsets = []
-  let offset = 0
-  lines.forEach((line) => {
-    lineOffsets.push(offset)
-    offset += line.length + 1
-  })
-  const out = []
-  let inFence = false
-  let fence = ''
-  let i = 0
-  // Skip a YAML front-matter block at the very top (--- … ---).
-  if (lines[0] !== undefined && /^---\s*$/.test(lines[0])) {
-    let j = 1
-    while (j < lines.length && !/^---\s*$/.test(lines[j])) j++
-    if (j < lines.length) i = j + 1 // found the closing fence
-  }
-  for (; i < lines.length; i++) {
-    const line = lines[i]
-    const fm = line.match(/^(\s*)(```+|~~~+)/)
-    if (fm) {
-      const marker = fm[2][0]
-      if (!inFence) {
-        inFence = true
-        fence = marker
-      } else if (marker === fence) {
-        inFence = false
-      }
-      continue
-    }
-    if (inFence) continue
-    // ATX: # … ######
-    const hm = line.match(/^(#{1,6})\s+(.+?)\s*#*\s*$/)
-    if (hm) {
-      out.push({ level: hm[1].length, text: hm[2].trim(), line: i, charOffset: lineOffsets[i] })
-      continue
-    }
-    // Inline HTML heading: <h2 …>text</h2> (single line).
-    const htm = line.match(/<h([1-6])\b[^>]*>(.*?)<\/h\1>/i)
-    if (htm) {
-      out.push({
-        level: Number(htm[1]),
-        text: htm[2].replace(/<[^>]+>/g, '').trim(),
-        line: i,
-        charOffset: lineOffsets[i]
-      })
-      continue
-    }
-    // Setext: a paragraph line underlined by === (h1) or --- (h2). The text line
-    // must carry real content and not itself be a heading / list / quote / table.
-    const next = lines[i + 1]
-    if (
-      next !== undefined &&
-      /^(=+|-+)\s*$/.test(next) &&
-      /\S/.test(line) &&
-      !/^(#{1,6}\s|[-*+]\s|\d+\.\s|>\s|\||\s*$)/.test(line)
-    ) {
-      out.push({
-        level: next.trim()[0] === '=' ? 1 : 2,
-        text: line.trim(),
-        line: i,
-        charOffset: lineOffsets[i]
-      })
-      i++ // consume the underline
-      continue
-    }
-  }
-  return out
-}
+export { parseHeadingDetails, parseHeadings }
 
-export function parseHeadings(md) {
-  return parseHeadingDetails(md).map(({ level, text }) => ({ level, text }))
-}
-
-export default function Outline({ content, activeIndex = -1, onJump }) {
+export default function Outline({ content, activeIndex = -1, onJump, onMoveHeading }) {
   const { t } = useI18n()
   // Re-parsing the whole document on every keystroke is wasted work — the outline
   // can lag a beat behind the cursor. Deferring the content keeps typing smooth on
@@ -95,6 +19,9 @@ export default function Outline({ content, activeIndex = -1, onJump }) {
   // at the same-or-shallower level. Default is fully expanded (empty set), so the
   // outline reads like a flat list until the user folds something.
   const [collapsed, setCollapsed] = useState(() => new Set())
+  const draggingIndexRef = useRef(-1)
+  const [draggingIndex, setDraggingIndex] = useState(-1)
+  const [dropTarget, setDropTarget] = useState(null)
   const toggle = (i) =>
     setCollapsed((prev) => {
       const next = new Set(prev)
@@ -136,6 +63,20 @@ export default function Outline({ content, activeIndex = -1, onJump }) {
   // hides it instead, so the outline still shows roughly where you are.
   const effectiveActive =
     activeIndex >= 0 && !view.visible[activeIndex] ? view.hiddenBy[activeIndex] : activeIndex
+  const containedActive = effectiveActive >= 0 && effectiveActive !== activeIndex
+
+  const foldable = headings.map((_, index) => index).filter((index) => view.hasChildren[index])
+  const allCollapsed = foldable.length > 0 && foldable.every((index) => collapsed.has(index))
+  const toggleAll = () => setCollapsed(allCollapsed ? new Set() : new Set(foldable))
+  const clearDrag = () => {
+    draggingIndexRef.current = -1
+    setDraggingIndex(-1)
+    setDropTarget(null)
+  }
+  const placementFor = (event) => {
+    const rect = event.currentTarget.getBoundingClientRect()
+    return event.clientY < rect.top + rect.height / 2 ? 'before' : 'after'
+  }
 
   // Keep the active row scrolled into view (like the file tree reveals the open
   // file). Guarded so we only scroll on a real change.
@@ -150,21 +91,80 @@ export default function Outline({ content, activeIndex = -1, onJump }) {
 
   return (
     <div className="outline">
-      <div className="panel-head">{t('outline.title')}</div>
+      <div className="panel-head">
+        <span>{t('outline.title')}</span>
+        {foldable.length > 0 && (
+          <button
+            type="button"
+            className="outline-head-btn"
+            title={t(allCollapsed ? 'outline.expandAll' : 'outline.collapseAll')}
+            onClick={toggleAll}
+          >
+            <Icon name={allCollapsed ? 'expand' : 'collapse'} size={14} />
+          </button>
+        )}
+      </div>
       <div className="outline-list">
         {headings.length === 0 ? (
           <div className="outline-empty">{t('outline.empty')}</div>
         ) : (
-          headings.map((h, i) =>
-            view.visible[i] ? (
+          headings.map((h, i) => {
+            if (!view.visible[i]) return null
+            const canMove =
+              draggingIndexRef.current >= 0 &&
+              draggingIndexRef.current !== i &&
+              haveSameHeadingParent(headings, draggingIndexRef.current, i)
+            const dropClass =
+              dropTarget?.index === i ? ` drag-over-${dropTarget.placement}` : ''
+            return (
               <div
-                key={i}
+                key={`${h.charOffset}:${h.level}`}
                 ref={i === effectiveActive ? activeRef : undefined}
-                className={`outline-item lvl-${h.level}${i === effectiveActive ? ' active' : ''}`}
+                className={
+                  `outline-item lvl-${h.level}` +
+                  `${i === effectiveActive ? ' active' : ''}` +
+                  `${containedActive && i === effectiveActive ? ' contained-active' : ''}` +
+                  `${draggingIndex === i ? ' dragging' : ''}${dropClass}`
+                }
                 style={{ paddingLeft: 8 + (h.level - 1) * 12 }}
                 onClick={() => onJump(i, h)}
+                onDragOver={(event) => {
+                  if (!canMove) return
+                  event.preventDefault()
+                  event.dataTransfer.dropEffect = 'move'
+                  setDropTarget({ index: i, placement: placementFor(event) })
+                }}
+                onDrop={(event) => {
+                  if (!canMove) return
+                  event.preventDefault()
+                  const moved = onMoveHeading?.(
+                    draggingIndexRef.current,
+                    i,
+                    placementFor(event)
+                  )
+                  if (moved !== false) setCollapsed(new Set())
+                  clearDrag()
+                }}
                 title={h.text}
               >
+                {onMoveHeading && (
+                  <span
+                    className="outline-drag-handle"
+                    draggable
+                    title={t('outline.dragReorder')}
+                    onClick={(event) => event.stopPropagation()}
+                    onMouseDown={(event) => event.stopPropagation()}
+                    onDragStart={(event) => {
+                      draggingIndexRef.current = i
+                      setDraggingIndex(i)
+                      event.dataTransfer.effectAllowed = 'move'
+                      event.dataTransfer.setData('text/plain', String(i))
+                    }}
+                    onDragEnd={clearDrag}
+                  >
+                    <Icon name="grip-vertical" size={13} />
+                  </span>
+                )}
                 {view.hasChildren[i] ? (
                   <span
                     className={`outline-chevron${collapsed.has(i) ? '' : ' chevron-expanded'}`}
@@ -181,8 +181,8 @@ export default function Outline({ content, activeIndex = -1, onJump }) {
                 )}
                 <span className="outline-label">{h.text}</span>
               </div>
-            ) : null
-          )
+            )
+          })
         )}
       </div>
     </div>

@@ -31,6 +31,9 @@ export const PAGE_WIDTH_PRESETS = [
 export const FONT_SIZE_MIN = 12
 export const FONT_SIZE_MAX = 24
 export const DEFAULT_FONT_SIZE = 16
+export const SOURCE_FONT_OFFSET_MIN = -4
+export const SOURCE_FONT_OFFSET_MAX = 8
+export const DEFAULT_SOURCE_FONT_OFFSET = 0
 
 // Quick presets shown as a segmented control above the fine-tune slider.
 export const FONT_SIZE_PRESETS = [
@@ -84,6 +87,10 @@ export const PARA_SPACING_PRESETS = [
 // keep whatever they saved. DEFAULT_PAGE_WIDTH stays the numeric slider fallback.
 export const DEFAULT_PAGE_WIDTH_PREF = 'full'
 
+export const DEFAULT_USER_CSS_SNIPPETS = [
+  { id: 'default', name: '', enabled: true, css: '' }
+]
+
 export const DEFAULT_SETTINGS = {
   pageWidth: DEFAULT_PAGE_WIDTH_PREF,
   fontSize: DEFAULT_FONT_SIZE,
@@ -97,6 +104,8 @@ export const DEFAULT_SETTINGS = {
   fontWriteZh: '',
   fontWriteJa: '',
   fontMono: '',
+  sourceFontOffset: DEFAULT_SOURCE_FONT_OFFSET,
+  userCssSnippets: DEFAULT_USER_CSS_SNIPPETS,
   // Chromium's built-in spellchecker (red squiggles + right-click suggestions).
   // Off by default: CJK prose has no dictionaries and mixed-language documents
   // would light up with false positives.
@@ -114,6 +123,14 @@ export const DEFAULT_SETTINGS = {
   // habitually leave two blank lines before a heading would see their documents
   // suddenly loosen. Purely visual: the source bytes never change.
   blankLineSpacing: false,
+  // Fit wide Markdown tables into the writing column and wrap cell text. The
+  // default retains independently scrollable, readable-width columns.
+  tableAutoWrap: false,
+  // Desktop rich editor only. When hidden, the same common formatting actions
+  // are exposed from the right-click menu for a selected range.
+  selectionToolbar: true,
+  inlineMathDeleteMode: 'protect',
+  mobileReadOnly: false,
   // Saved-file snapshots are opt-in because they retain document content outside
   // the original folder. Desktop stores a bounded 30-day history in userData.
   localHistory: false,
@@ -141,6 +158,36 @@ function normalizeFontSize(s) {
   const n = Number(s)
   if (!Number.isFinite(n)) return DEFAULT_FONT_SIZE
   return Math.min(FONT_SIZE_MAX, Math.max(FONT_SIZE_MIN, Math.round(n)))
+}
+
+export function normalizeSourceFontOffset(value) {
+  const n = Number(value)
+  if (!Number.isFinite(n)) return DEFAULT_SOURCE_FONT_OFFSET
+  return Math.min(SOURCE_FONT_OFFSET_MAX, Math.max(SOURCE_FONT_OFFSET_MIN, Math.round(n)))
+}
+
+export function normalizeUserCssSnippets(value, legacyCss = '') {
+  const source = Array.isArray(value)
+    ? value
+    : legacyCss
+      ? [{ id: 'legacy', name: '', enabled: true, css: legacyCss }]
+      : DEFAULT_USER_CSS_SNIPPETS
+  const seen = new Set()
+  const snippets = []
+  for (const item of source.slice(0, 40)) {
+    if (!item || typeof item !== 'object') continue
+    let id = String(item.id || '').trim().slice(0, 80)
+    if (!id || seen.has(id)) id = `snippet-${snippets.length + 1}`
+    while (seen.has(id)) id += '-copy'
+    seen.add(id)
+    snippets.push({
+      id,
+      name: String(item.name || '').slice(0, 80),
+      enabled: item.enabled !== false,
+      css: String(item.css || '')
+    })
+  }
+  return snippets.length ? snippets : DEFAULT_USER_CSS_SNIPPETS.map((item) => ({ ...item }))
 }
 
 export function normalizeZoom(z) {
@@ -172,10 +219,16 @@ export function loadSettings() {
       fontWriteZh: normalizeFontName(raw.fontWriteZh ?? raw.fontWrite),
       fontWriteJa: normalizeFontName(raw.fontWriteJa ?? raw.fontWrite),
       fontMono: normalizeFontName(raw.fontMono),
+      sourceFontOffset: normalizeSourceFontOffset(raw.sourceFontOffset),
+      userCssSnippets: normalizeUserCssSnippets(raw.userCssSnippets, raw.userCss),
       spellcheck: raw.spellcheck === true,
       autosave: raw.autosave === true,
       defaultEditorMode: raw.defaultEditorMode === 'rich' ? 'rich' : 'keep',
       blankLineSpacing: raw.blankLineSpacing === true,
+      tableAutoWrap: raw.tableAutoWrap === true,
+      selectionToolbar: raw.selectionToolbar !== false,
+      inlineMathDeleteMode: raw.inlineMathDeleteMode === 'fast' ? 'fast' : 'protect',
+      mobileReadOnly: raw.mobileReadOnly === true,
       localHistory: raw.localHistory === true,
       showHiddenFiles: raw.showHiddenFiles === true
     }
@@ -213,6 +266,13 @@ export function applyFontSize(size) {
   document.documentElement.style.setProperty(
     '--editor-font-size',
     normalizeFontSize(size) + 'px'
+  )
+}
+
+export function applySourceFontOffset(value) {
+  document.documentElement.style.setProperty(
+    '--source-font-offset',
+    `${normalizeSourceFontOffset(value)}px`
   )
 }
 
@@ -257,4 +317,12 @@ export function applyParagraphSpacing(value) {
   // "standard" 0.8em preset → identical to the original look; >1 / <1 grows /
   // shrinks the whole vertical rhythm while preserving heading hierarchy).
   root.setProperty('--editor-para-scale', String(round1(v / DEFAULT_PARA_SPACING)))
+}
+
+export function applyTableAutoWrap(enabled) {
+  document.body.classList.toggle('hm-table-auto-wrap', enabled === true)
+}
+
+export function applySelectionToolbar(enabled) {
+  document.body.classList.toggle('hm-selection-toolbar-off', enabled === false)
 }

@@ -25,6 +25,10 @@ import {
 import { inlineRichStyles } from '../../../src/renderer/src/components/editor-copy.js'
 import { isRelativePath } from '../../../src/renderer/src/components/editor-images.js'
 import { enhanceKeepTables } from '../../../src/renderer/src/components/editor-tablescroll.js'
+import {
+  haveSameHeadingParent,
+  moveHeadingSection
+} from '../../../src/renderer/src/outline-reorder.js'
 // Find-in-document reuses the app's pure helpers (CSS Custom Highlight API — paints
 // ranges without mutating the DOM). We scope the search to #km-host and drop matches
 // inside hover affordances / hidden sections in runFind below.
@@ -52,6 +56,7 @@ import {
   applyZoom,
   applyLineHeight,
   applyParagraphSpacing,
+  applyTableAutoWrap,
   DEFAULT_SETTINGS,
   PAGE_WIDTH_PRESETS,
   PAGE_WIDTH_MIN,
@@ -2042,12 +2047,14 @@ function applyLayout(L) {
   applyZoom(L.zoom)
   applyLineHeight(L.lineHeight)
   applyParagraphSpacing(L.paragraphSpacing)
+  applyTableAutoWrap(L.tableAutoWrap)
 }
 function postLayout() {
   vscode.postMessage({ type: 'layout', layout: layout })
 }
 function setLayout(key, value) {
-  const renderOptionChanged = key === 'blankLineSpacing' && !!layout[key] !== !!value
+  const renderOptionChanged =
+    key === 'blankLineSpacing' && !!layout[key] !== !!value
   layout = { ...layout, [key]: value }
   applyLayout(layout)
   if (renderOptionChanged) rerender()
@@ -2351,6 +2358,13 @@ function openSettingsPop() {
       'blankLineSpacing'
     )
   )
+  pop.appendChild(
+    buildToggleRow(
+      t('settings.tableAutoWrap'),
+      t('settings.tableAutoWrapDesc'),
+      'tableAutoWrap'
+    )
+  )
   document.body.appendChild(pop)
   settingsPop = pop
   if (settingsBtn) settingsBtn.classList.add('active')
@@ -2473,17 +2487,79 @@ function openOutlinePop() {
     pop.appendChild(empty)
   } else {
     const minLvl = Math.min(...heads.map((h) => h.level))
-    heads.forEach((h) => {
+    let draggingIndex = -1
+    const clearDropState = () => {
+      pop.querySelectorAll('.km-ol-row').forEach((row) => {
+        row.classList.remove('dragging', 'drag-over-before', 'drag-over-after')
+      })
+    }
+    heads.forEach((h, index) => {
+      const row = document.createElement('div')
+      row.className = 'km-ol-row'
+      row.style.paddingLeft = 10 + (h.level - minLvl) * 14 + 'px'
       const item = document.createElement('button')
       item.type = 'button'
       item.className = 'km-ol-item'
-      item.style.paddingLeft = 10 + (h.level - minLvl) * 14 + 'px'
       item.textContent = plainHeading(h.text)
       item.onclick = () => {
         jumpToHeading(h.bi)
         closeOutlinePop()
       }
-      pop.appendChild(item)
+      const handle = document.createElement('span')
+      handle.className = 'km-ol-drag'
+      handle.draggable = true
+      handle.title = t('outline.dragReorder')
+      handle.setAttribute('aria-label', t('outline.dragReorder'))
+      handle.innerHTML =
+        '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M9 5h.01M9 12h.01M9 19h.01M15 5h.01M15 12h.01M15 19h.01"/></svg>'
+      handle.ondragstart = (event) => {
+        draggingIndex = index
+        row.classList.add('dragging')
+        event.dataTransfer.effectAllowed = 'move'
+        event.dataTransfer.setData('text/plain', String(index))
+      }
+      handle.ondragend = () => {
+        draggingIndex = -1
+        clearDropState()
+      }
+      row.ondragover = (event) => {
+        if (
+          draggingIndex < 0 ||
+          draggingIndex === index ||
+          !haveSameHeadingParent(heads, draggingIndex, index)
+        ) return
+        event.preventDefault()
+        const rect = row.getBoundingClientRect()
+        const placement = event.clientY < rect.top + rect.height / 2 ? 'before' : 'after'
+        clearDropState()
+        row.classList.add(`drag-over-${placement}`)
+        event.dataTransfer.dropEffect = 'move'
+      }
+      row.ondrop = (event) => {
+        if (
+          draggingIndex < 0 ||
+          draggingIndex === index ||
+          !haveSameHeadingParent(heads, draggingIndex, index)
+        ) return
+        event.preventDefault()
+        if (activeCellPop || activeBlockEdit) {
+          showToast(t('keep.finishDraft'))
+          return
+        }
+        const rect = row.getBoundingClientRect()
+        const placement = event.clientY < rect.top + rect.height / 2 ? 'before' : 'after'
+        const next = moveHeadingSection(lines.join('\n'), draggingIndex, index, placement)
+        if (!next) return
+        const old = lines.slice()
+        lines = next.split('\n').map(stripCR)
+        commit(old)
+        closeOutlinePop()
+        rerender()
+        openOutlinePop()
+        showToast(t('outline.reordered'))
+      }
+      row.append(handle, item)
+      pop.appendChild(row)
     })
   }
   document.body.appendChild(pop)
