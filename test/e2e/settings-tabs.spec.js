@@ -68,6 +68,32 @@ test('settings modal opens, autosave toggle flips and persists in settings stora
     // as their own durable Settings section.
     await expect(modal.locator('.hm-adjust-group')).toHaveCount(0)
     await expect(modal.locator('.hm-set-section-title', { hasText: '字体' })).toBeVisible()
+    await expect(modal.locator('.hm-css-snippets')).toHaveCount(0)
+    await expect(page.locator('#hm-user-css')).toHaveCount(0)
+
+    // Settings that do not affect every editor mode state their scope beside
+    // the label, including the editor-owned heading shortcuts.
+    await expect(
+      modal.locator('.hm-set-row', { hasText: '选中文字工具栏' }).locator('.hm-setting-scope')
+    ).toHaveText('仅 Milkdown')
+    await expect(
+      modal.locator('.hm-set-row', { hasText: '快速删除行内公式' }).locator('.hm-setting-scope')
+    ).toHaveText('仅 Milkdown')
+    await expect(
+      modal.locator('.hm-set-row', { hasText: '保留连续空行' }).locator('.hm-setting-scope')
+    ).toHaveText('仅保持模式')
+    await expect(
+      modal.locator('.hm-set-row', { hasText: '宽表自动换行' }).locator('.hm-setting-scope')
+    ).toHaveText('保持 / Milkdown')
+    await expect(
+      modal.locator('.hm-source-font-offset .hm-setting-scope')
+    ).toHaveText('仅源码')
+    await expect(modal.locator('.hm-set-theme-note')).toContainText(
+      'Typora 自定义主题只调整渲染正文'
+    )
+    await expect(
+      modal.locator('.hm-keyboard-row .hm-setting-scope', { hasText: '仅 Milkdown' })
+    ).toHaveCount(7)
 
     // Flip autosave on.
     const autosaveSwitch = modal
@@ -96,6 +122,9 @@ test('settings modal opens, autosave toggle flips and persists in settings stora
     await layoutButton.click()
     const layout = page.locator('.hm-layout-pop')
     await expect(layout.locator('.hm-adjust-group')).toHaveCount(5)
+    await expect(layout.locator('.hm-adjust-group .hm-setting-scope')).toHaveCount(2)
+    await expect(layout.locator('.hm-adjust-group .hm-setting-scope').first()).toHaveText('保持 / Milkdown')
+    await expect(layout.locator('.hm-layout-option .hm-setting-scope')).toHaveText('仅保持模式')
     const blankLines = layout.getByRole('switch', { name: '保留连续空行' })
     await expect(blankLines).toHaveAttribute('aria-checked', 'false')
     await blankLines.click()

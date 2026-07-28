@@ -95,7 +95,10 @@ function LayoutControl({ blankLineSpacing, onSetBlankLineSpacing, ...typographyP
           <div className="hm-pop-sep" />
           <div className="hm-layout-option">
             <div className="hm-layout-option-text">
-              <span className="hm-pop-title">{t('settings.blankLineSpacing')}</span>
+              <span className="hm-pop-title">
+                {t('settings.blankLineSpacing')}
+                <span className="hm-setting-scope">{t('settings.scope.keepOnly')}</span>
+              </span>
               <span className="hm-layout-option-desc">{t('settings.blankLineSpacingDesc')}</span>
             </div>
             <button

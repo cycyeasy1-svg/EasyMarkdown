@@ -45,9 +45,6 @@ describe('loadSettings / saveSettings', () => {
       fontWriteJa: 'Noto Sans JP',
       fontMono: 'Fira Code',
       sourceFontOffset: 2,
-      userCssSnippets: [
-        { id: 'notes', name: 'Notes', enabled: true, css: '.km-doc { color: red; }' }
-      ],
       spellcheck: true,
       autosave: true,
       defaultEditorMode: 'rich',
@@ -92,7 +89,6 @@ describe('loadSettings / saveSettings', () => {
       fontWriteJa: '',
       fontMono: '',
       sourceFontOffset: 0,
-      userCssSnippets: [{ id: 'default', name: '', enabled: true, css: '' }],
       spellcheck: false,
       autosave: false,
       defaultEditorMode: 'keep',
@@ -139,27 +135,22 @@ describe('loadSettings / saveSettings', () => {
     expect(loadSettings().inlineMathDeleteMode).toBe('fast')
     expect(loadSettings().localHistory).toBe(true)
   })
-  it('clamps source font offset and migrates legacy custom CSS', () => {
-    saveSettings({ sourceFontOffset: 99, userCss: '.km-doc { color: red; }' })
-    expect(loadSettings()).toMatchObject({
-      sourceFontOffset: 8,
-      userCssSnippets: [
-        { id: 'legacy', name: '', enabled: true, css: '.km-doc { color: red; }' }
-      ]
-    })
+  it('clamps source font offset', () => {
+    saveSettings({ sourceFontOffset: 99 })
+    expect(loadSettings().sourceFontOffset).toBe(8)
   })
-  it('normalizes duplicate CSS snippet ids and enable flags', () => {
-    saveSettings({
+  it('drops custom CSS data saved by the removed feature', () => {
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify({
+      userCss: '.km-doc { display: none; }',
       userCssSnippets: [
-        { id: 'same', name: 'A', css: 'a{}' },
-        { id: 'same', name: 'B', enabled: false, css: 'b{}' }
+        { id: 'legacy', enabled: true, css: 'button { display: none; }' }
       ]
-    })
-    const snippets = loadSettings().userCssSnippets
-    expect(snippets).toHaveLength(2)
-    expect(new Set(snippets.map((item) => item.id)).size).toBe(2)
-    expect(snippets[0].enabled).toBe(true)
-    expect(snippets[1].enabled).toBe(false)
+    }))
+    const settings = loadSettings()
+    expect(settings).not.toHaveProperty('userCss')
+    expect(settings).not.toHaveProperty('userCssSnippets')
+    saveSettings(settings)
+    expect(JSON.parse(localStorage.getItem(SETTINGS_KEY))).not.toHaveProperty('userCssSnippets')
   })
   it('normalizes defaultEditorMode to keep|rich', () => {
     saveSettings({ defaultEditorMode: 'weird' })

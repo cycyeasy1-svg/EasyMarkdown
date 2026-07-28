@@ -23,7 +23,7 @@ const round1 = (n) => Math.round(n * 10) / 10
 
 // One small reusable "presets + fine-tune slider" block used by the status-bar
 // Layout popover.
-export function AdjustGroup({ title, valueLabel, presets, activeIndex, onPick, pct, fromX, onSet }) {
+export function AdjustGroup({ title, scope, valueLabel, presets, activeIndex, onPick, pct, fromX, onSet }) {
   const { t } = useI18n()
   const trackRef = useRef(null)
   const [dragging, setDragging] = useState(false)
@@ -43,7 +43,10 @@ export function AdjustGroup({ title, valueLabel, presets, activeIndex, onPick, p
   return (
     <div className="hm-adjust-group">
       <div className="hm-pop-head">
-        <span className="hm-pop-title">{title}</span>
+        <span className="hm-pop-title">
+          {title}
+          {scope && <span className="hm-setting-scope">{scope}</span>}
+        </span>
         <span className="hm-pop-value">{valueLabel}</span>
       </div>
       <div className="hm-seg" style={{ '--seg-count': presets.length, '--seg-index': activeIndex }}>
@@ -165,6 +168,7 @@ export function TypographyGroups({
       <div className="hm-pop-sep" />
       <AdjustGroup
         title={t('settings.lineHeight')}
+        scope={t('settings.scope.keepAndMilkdown')}
         valueLabel={lineHeight.toFixed(2)}
         presets={LINE_HEIGHT_PRESETS.map((p) => ({
           ...p,
@@ -179,6 +183,7 @@ export function TypographyGroups({
       <div className="hm-pop-sep" />
       <AdjustGroup
         title={t('settings.paragraphSpacing')}
+        scope={t('settings.scope.keepAndMilkdown')}
         valueLabel={paragraphSpacing.toFixed(1) + ' em'}
         presets={PARA_SPACING_PRESETS.map((p) => ({
           ...p,

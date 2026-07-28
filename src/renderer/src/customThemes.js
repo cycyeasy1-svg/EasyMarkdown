@@ -7,7 +7,6 @@
 // hooks (added in Editor.jsx) so the theme's selectors match our DOM.
 
 let styleEl = null
-let userStyleEl = null
 
 export function applyCustomTheme(css) {
   if (!css) {
@@ -23,17 +22,4 @@ export function applyCustomTheme(css) {
   }
   styleEl.textContent = css
   document.body.classList.add('hm-has-custom-theme')
-}
-
-export function applyUserCss(snippets) {
-  const css = (Array.isArray(snippets) ? snippets : [])
-    .filter((snippet) => snippet?.enabled !== false && String(snippet?.css || '').trim())
-    .map((snippet) => String(snippet.css))
-    .join('\n\n')
-  if (!userStyleEl) {
-    userStyleEl = document.createElement('style')
-    userStyleEl.id = 'hm-user-css'
-    document.head.appendChild(userStyleEl)
-  }
-  userStyleEl.textContent = css
 }

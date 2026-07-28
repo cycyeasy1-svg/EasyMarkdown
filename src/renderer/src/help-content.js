@@ -192,13 +192,13 @@ Use **Review Changes** in Keep before saving when you want a source-line summary
     keywords: 'theme custom typora css font width size zoom line height language settings appearance',
     body: `## Fast layout adjustments
 
-The sliders button in the status bar contains editor width, font size, content zoom, line height, paragraph spacing, and Keep blank-line spacing. These are close to the document because they often change with reading context.
+The sliders button in the status bar contains editor width, font size, content zoom, line height, paragraph spacing, and Keep blank-line spacing. Line height and paragraph spacing apply to Keep and Milkdown; blank-line spacing is Keep-only. These are close to the document because they often change with reading context.
 
 ## Durable settings
 
-Open Settings with **Ctrl/Cmd+,** for the default editor, autosave, local history, spellcheck, writing fonts, built-in or custom themes, hidden files, default file association, and UI language.
+Open Settings with **Ctrl/Cmd+,** for the default editor, autosave, local history, spellcheck, writing fonts, built-in or custom themes, hidden files, default file association, and UI language. Options that apply to only one editor mode are labeled with their scope.
 
-EasyMarkdown includes warm light/dark themes and four restrained Morandi palettes. Typora-compatible CSS themes can be copied into the Themes folder; refresh the list after adding files. Theme assets referenced with relative URLs are resolved from the theme location.
+EasyMarkdown includes warm light/dark themes and four restrained Morandi palettes. Typora-compatible CSS themes can be copied into the Themes folder; refresh the list after adding files. Custom themes style the rendered Keep/Milkdown document, not source view or app chrome. Theme assets referenced with relative URLs are resolved from the theme location.
 
 The writing font is chosen separately for Latin, Chinese, Japanese, and code. Documents containing kana automatically use the Japanese stack, including PDF/HTML export and printing.`
   },

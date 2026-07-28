@@ -87,10 +87,6 @@ export const PARA_SPACING_PRESETS = [
 // keep whatever they saved. DEFAULT_PAGE_WIDTH stays the numeric slider fallback.
 export const DEFAULT_PAGE_WIDTH_PREF = 'full'
 
-export const DEFAULT_USER_CSS_SNIPPETS = [
-  { id: 'default', name: '', enabled: true, css: '' }
-]
-
 export const DEFAULT_SETTINGS = {
   pageWidth: DEFAULT_PAGE_WIDTH_PREF,
   fontSize: DEFAULT_FONT_SIZE,
@@ -105,7 +101,6 @@ export const DEFAULT_SETTINGS = {
   fontWriteJa: '',
   fontMono: '',
   sourceFontOffset: DEFAULT_SOURCE_FONT_OFFSET,
-  userCssSnippets: DEFAULT_USER_CSS_SNIPPETS,
   // Chromium's built-in spellchecker (red squiggles + right-click suggestions).
   // Off by default: CJK prose has no dictionaries and mixed-language documents
   // would light up with false positives.
@@ -166,30 +161,6 @@ export function normalizeSourceFontOffset(value) {
   return Math.min(SOURCE_FONT_OFFSET_MAX, Math.max(SOURCE_FONT_OFFSET_MIN, Math.round(n)))
 }
 
-export function normalizeUserCssSnippets(value, legacyCss = '') {
-  const source = Array.isArray(value)
-    ? value
-    : legacyCss
-      ? [{ id: 'legacy', name: '', enabled: true, css: legacyCss }]
-      : DEFAULT_USER_CSS_SNIPPETS
-  const seen = new Set()
-  const snippets = []
-  for (const item of source.slice(0, 40)) {
-    if (!item || typeof item !== 'object') continue
-    let id = String(item.id || '').trim().slice(0, 80)
-    if (!id || seen.has(id)) id = `snippet-${snippets.length + 1}`
-    while (seen.has(id)) id += '-copy'
-    seen.add(id)
-    snippets.push({
-      id,
-      name: String(item.name || '').slice(0, 80),
-      enabled: item.enabled !== false,
-      css: String(item.css || '')
-    })
-  }
-  return snippets.length ? snippets : DEFAULT_USER_CSS_SNIPPETS.map((item) => ({ ...item }))
-}
-
 export function normalizeZoom(z) {
   const n = Number(z)
   if (!Number.isFinite(n)) return DEFAULT_ZOOM
@@ -220,7 +191,6 @@ export function loadSettings() {
       fontWriteJa: normalizeFontName(raw.fontWriteJa ?? raw.fontWrite),
       fontMono: normalizeFontName(raw.fontMono),
       sourceFontOffset: normalizeSourceFontOffset(raw.sourceFontOffset),
-      userCssSnippets: normalizeUserCssSnippets(raw.userCssSnippets, raw.userCss),
       spellcheck: raw.spellcheck === true,
       autosave: raw.autosave === true,
       defaultEditorMode: raw.defaultEditorMode === 'rich' ? 'rich' : 'keep',

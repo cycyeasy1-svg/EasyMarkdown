@@ -128,7 +128,12 @@ export default function KeyboardSettings({
                 const rowIssue = issue?.commandId === command.id
                 return (
                   <div className={`hm-keyboard-row${rowIssue ? ' has-error' : ''}`} key={command.id}>
-                    <span>{titleFor(command, t)}</span>
+                    <span>
+                      {titleFor(command, t)}
+                      {command.editorOwned && (
+                        <span className="hm-setting-scope">{t('settings.scope.milkdownOnly')}</span>
+                      )}
+                    </span>
                     <button
                       type="button"
                       className={`hm-keyboard-recorder${recording === command.id ? ' recording' : ''}`}

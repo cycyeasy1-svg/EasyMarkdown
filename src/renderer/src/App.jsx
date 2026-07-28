@@ -51,7 +51,7 @@ import {
   extractMarkdownLinks,
   slugifyMarkdownAnchor
 } from '../../main/helpers.js'
-import { applyCustomTheme, applyUserCss } from './customThemes.js'
+import { applyCustomTheme } from './customThemes.js'
 import { preparePdfSource } from './pdf-source.js'
 import { useKeybindings } from './hooks/useKeybindings.js'
 import {
@@ -1318,9 +1318,6 @@ export default function App() {
   useEffect(() => {
     applySelectionToolbar(settings.selectionToolbar)
   }, [settings.selectionToolbar])
-  useEffect(() => {
-    applyUserCss(settings.userCssSnippets)
-  }, [settings.userCssSnippets])
   useEffect(() => {
     saveSettings(settings)
   }, [settings])

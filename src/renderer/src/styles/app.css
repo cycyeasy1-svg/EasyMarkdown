@@ -6452,6 +6452,13 @@ body.hm-has-custom-theme .km-doc {
 }
 .hm-set-text { min-width: 0; }
 .hm-set-label { font-size: 13px; color: var(--text); }
+.hm-setting-scope {
+  margin-left: 6px;
+  color: var(--faint);
+  font-size: 10px;
+  font-weight: 500;
+  white-space: nowrap;
+}
 .hm-set-desc { font-size: 11.5px; color: var(--faint); margin-top: 2px; line-height: 1.5; }
 .hm-font-row .hm-set-text { flex: 1 1 auto; }
 .hm-font-row .hm-set-label,
@@ -6520,86 +6527,6 @@ body.hm-has-custom-theme .km-doc {
   text-align: right;
 }
 .hm-source-font-offset input[type="range"] { width: 100%; accent-color: var(--accent); }
-.hm-css-snippets {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.hm-css-snippet-list {
-  overflow: hidden;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-}
-.hm-css-snippet-row {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  min-height: 32px;
-  padding: 2px 5px 2px 9px;
-  border-bottom: 1px solid var(--border-soft);
-}
-.hm-css-snippet-row:last-child { border-bottom: 0; }
-.hm-css-snippet-row.active { background: var(--accent-soft); }
-.hm-css-snippet-select {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  color: var(--text);
-  background: transparent;
-  text-align: left;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.hm-css-snippet-icon {
-  display: inline-grid;
-  place-items: center;
-  width: 25px;
-  height: 25px;
-  padding: 0;
-  color: var(--muted);
-  background: transparent;
-  border-radius: var(--radius-xs);
-}
-.hm-css-snippet-icon:hover:not(:disabled) { color: var(--text); background: var(--hover); }
-.hm-css-snippet-icon.danger:hover:not(:disabled) { color: var(--danger); }
-.hm-css-snippet-icon:disabled { opacity: 0.28; cursor: default; }
-.hm-css-snippet-actions { display: flex; gap: 7px; }
-.hm-css-snippet-editor {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  color: var(--muted);
-  font-size: 11.5px;
-}
-.hm-css-snippet-editor input {
-  flex: 1;
-  min-width: 0;
-  height: 30px;
-  padding: 0 9px;
-  color: var(--text);
-  background: var(--bg-editor);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-}
-.hm-css-snippet-code {
-  width: 100%;
-  min-height: 150px;
-  resize: vertical;
-  padding: 10px;
-  color: var(--text);
-  background: var(--bg-editor);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  font: 12px/1.55 var(--font-mono);
-  tab-size: 2;
-}
-.hm-css-snippet-editor input:focus,
-.hm-css-snippet-code:focus {
-  outline: none;
-  border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-soft);
-}
-
 /* Shortcut recorder: compact enough to scan, but every recorder remains a
    normal button so keyboard and assistive-technology users get the same flow. */
 .hm-keyboard-heading {
@@ -6804,6 +6731,13 @@ body.hm-table-auto-wrap .km-table td {
   gap: 8px;
   margin-top: 10px;
 }
+.hm-set-theme-note {
+  margin-top: 7px;
+  color: var(--faint);
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+.hm-set-theme-note .hm-setting-scope { margin: 0 6px 0 0; }
 .hm-set-theme-actions button {
   display: flex;
   align-items: center;

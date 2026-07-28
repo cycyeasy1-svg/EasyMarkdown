@@ -5,14 +5,23 @@ import { THEMES } from '../themes.js'
 import { fireToast } from '../ui.js'
 import { resolveDefaultFontName } from '../../../shared/fonts.js'
 import KeyboardSettings from './KeyboardSettings.jsx'
-import UserCssSnippets from './UserCssSnippets.jsx'
+
+// Make editor-mode applicability visible without turning every label into a heavy badge.
+function ScopeLabel({ label, scope }) {
+  return (
+    <>
+      {label}
+      {scope && <span className="hm-setting-scope">{scope}</span>}
+    </>
+  )
+}
 
 // One labeled row with a toggle switch on the right.
-function SwitchRow({ label, desc, checked, onChange }) {
+function SwitchRow({ label, desc, scope, checked, onChange }) {
   return (
     <div className="hm-set-row">
       <div className="hm-set-text">
-        <div className="hm-set-label">{label}</div>
+        <div className="hm-set-label"><ScopeLabel label={label} scope={scope} /></div>
         {desc && <div className="hm-set-desc">{desc}</div>}
       </div>
       <button
@@ -28,13 +37,25 @@ function SwitchRow({ label, desc, checked, onChange }) {
   )
 }
 
-function FontRow({ id, label, desc, value, defaultValue, fonts, resetLabel, onLoadFonts, onChange, onReset }) {
+function FontRow({
+  id,
+  label,
+  desc,
+  scope,
+  value,
+  defaultValue,
+  fonts,
+  resetLabel,
+  onLoadFonts,
+  onChange,
+  onReset
+}) {
   const displayValue = value || defaultValue
   const options = [...new Set([displayValue, defaultValue, ...(fonts || [])].filter(Boolean))]
   return (
     <div className="hm-set-row hm-font-row">
       <label className="hm-set-text" htmlFor={`hm-font-${id}`}>
-        <span className="hm-set-label">{label}</span>
+        <span className="hm-set-label"><ScopeLabel label={label} scope={scope} /></span>
         {desc && <span className="hm-set-desc">{desc}</span>}
       </label>
       <div className="hm-font-control">
@@ -226,6 +247,7 @@ export default function Settings({
               <SwitchRow
                 label={t('settings.spellcheck')}
                 desc={t('settings.spellcheckDesc')}
+                scope={t('settings.scope.spellcheckEditors')}
                 checked={settings.spellcheck}
                 onChange={(v) => updateSettings({ spellcheck: v })}
               />
@@ -233,12 +255,14 @@ export default function Settings({
             <SwitchRow
               label={t('settings.tableAutoWrap')}
               desc={t('settings.tableAutoWrapDesc')}
+              scope={t('settings.scope.keepAndMilkdown')}
               checked={settings.tableAutoWrap}
               onChange={(tableAutoWrap) => updateSettings({ tableAutoWrap })}
             />
             <SwitchRow
               label={t('settings.blankLineSpacing')}
               desc={t('settings.blankLineSpacingDesc')}
+              scope={t('settings.scope.keepOnly')}
               checked={settings.blankLineSpacing}
               onChange={(blankLineSpacing) => updateSettings({ blankLineSpacing })}
             />
@@ -246,6 +270,7 @@ export default function Settings({
               <SwitchRow
                 label={t('settings.selectionToolbar')}
                 desc={t('settings.selectionToolbarDesc')}
+                scope={t('settings.scope.milkdownOnly')}
                 checked={settings.selectionToolbar}
                 onChange={(selectionToolbar) => updateSettings({ selectionToolbar })}
               />
@@ -253,6 +278,7 @@ export default function Settings({
             <SwitchRow
               label={t('settings.inlineMathFastDelete')}
               desc={t('settings.inlineMathFastDeleteDesc')}
+              scope={t('settings.scope.milkdownOnly')}
               checked={settings.inlineMathDeleteMode === 'fast'}
               onChange={(fast) => updateSettings({
                 inlineMathDeleteMode: fast ? 'fast' : 'protect'
@@ -280,6 +306,7 @@ export default function Settings({
                   id="en"
                   label={t('settings.fontEnglish')}
                   desc={t('settings.fontEnglishDesc')}
+                  scope={t('settings.scope.keepAndMilkdown')}
                   value={settings.fontWriteEn}
                   defaultValue={defaultEnglishFont}
                   fonts={fontFamilies}
@@ -292,6 +319,7 @@ export default function Settings({
                   id="zh"
                   label={t('settings.fontChinese')}
                   desc={t('settings.fontChineseDesc')}
+                  scope={t('settings.scope.keepAndMilkdown')}
                   value={settings.fontWriteZh}
                   defaultValue={defaultChineseFont}
                   fonts={fontFamilies}
@@ -304,6 +332,7 @@ export default function Settings({
                   id="ja"
                   label={t('settings.fontJapanese')}
                   desc={t('settings.fontJapaneseDesc')}
+                  scope={t('settings.scope.keepAndMilkdown')}
                   value={settings.fontWriteJa}
                   defaultValue={defaultJapaneseFont}
                   fonts={fontFamilies}
@@ -362,11 +391,20 @@ export default function Settings({
                 <Icon name="globe" size={13} /> {t('theme.getMore')}
               </button>
             </div>
+            <div className="hm-set-theme-note">
+              <span className="hm-setting-scope">{t('settings.scope.keepAndMilkdown')}</span>
+              {t('theme.customScopeDesc')}
+            </div>
             {caps.nativeMenus && (
               <div className="hm-source-font-offset">
                 <div className="hm-set-row">
                   <label className="hm-set-text" htmlFor="hm-source-font-offset">
-                    <span className="hm-set-label">{t('settings.sourceFontOffset')}</span>
+                    <span className="hm-set-label">
+                      <ScopeLabel
+                        label={t('settings.sourceFontOffset')}
+                        scope={t('settings.scope.sourceOnly')}
+                      />
+                    </span>
                     <span className="hm-set-desc">{t('settings.sourceFontOffsetDesc')}</span>
                   </label>
                   <output>{settings.sourceFontOffset > 0 ? '+' : ''}{settings.sourceFontOffset}px</output>
@@ -383,18 +421,6 @@ export default function Settings({
               </div>
             )}
           </div>
-
-          {caps.nativeMenus && (
-            <div className="hm-set-section">
-              <div className="hm-set-section-title">{t('settings.customCss')}</div>
-              <p className="hm-set-section-desc">{t('settings.customCssDesc')}</p>
-              <UserCssSnippets
-                snippets={settings.userCssSnippets}
-                onChange={(userCssSnippets) => updateSettings({ userCssSnippets })}
-                t={t}
-              />
-            </div>
-          )}
 
           {/* ── System (default Markdown opener) ── */}
           {(caps.defaultOpener || caps.folderWorkspace) && (

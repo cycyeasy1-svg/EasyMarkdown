@@ -47,10 +47,10 @@ Cycle the status-bar view button to **Source + Keep** to edit raw Markdown besid
 - **Find / Replace** (\`Ctrl+F\` / \`Ctrl+H\`) — search and replace (one or all), or click the mode button to switch to **Go to line** and jump by line number.
 - **Workspace search** (\`Ctrl+Shift+F\`) — search across every file in the open folder, with case-sensitive, whole-word and regex options; click a hit to jump straight to that line.
 - **Navigation history** — outline, link, search-result, line-number, file, and tab jumps enter one back/forward history. Use \`Alt+←\` / \`Alt+→\` (Option on macOS), mouse side buttons, or the command palette to return to the previous document position.
-- **Settings panel** (\`Ctrl+,\`) — editing, fonts, appearance, language and system options in one place. Search and remap keyboard shortcuts with conflict checks; adjust source font size, wide-table wrapping and the selection toolbar; or turn on autosave, spellcheck, hidden files and the opt-in **Persistent local history**.
+- **Settings panel** (\`Ctrl+,\`) — editing, fonts, appearance, language and system options in one place. Search and remap keyboard shortcuts with conflict checks; adjust source font size, wide-table wrapping and the Milkdown selection toolbar; or turn on autosave, spellcheck, hidden files and the opt-in **Persistent local history**. Mode-specific options are labeled with their scope.
 - **Typography and focus** — the status-bar layout control gathers page width, font size, zoom, line height and paragraph spacing. \`Ctrl/Cmd+K\`, then \`Z\`, enters Zen mode without unloading the editor.
 - **Export & print** — the PDF studio (\`Ctrl+Shift+E\`) previews final pagination and controls paper, margins, scale, page breaks, contents, bookmarks, headers/footers and page ranges. HTML export (\`Ctrl+Shift+H\`) embeds images in one self-contained file; system print remains \`Ctrl+Alt+P\`.
-- **Themes** — Warm Light / Dark plus four **Morandi** palettes (Sage, Rose, Mist, Dusk), Typora-compatible custom \`.css\` themes, and ordered custom CSS snippets that can be enabled independently.
+- **Themes** — Warm Light / Dark plus four **Morandi** palettes (Sage, Rose, Mist, Dusk), with support for Typora-compatible custom \`.css\` themes.
 - **Languages** — English / 中文 / 日本語, switchable anytime (bottom-right); the app menu follows along.
 - **Japanese typography** — a document containing kana switches to a Japanese font stack, so its kanji render with Japanese glyph forms; PDF/HTML export and printing do the same.
 - **Images** — paste or drop an image in Milkdown mode and it is saved into an \`assets/\` folder next to the document, inserted as a relative path.
@@ -127,10 +127,10 @@ const ZH = `# EasyMarkdown 使用说明 📝
 - **查找 / 替换**（\`Ctrl+F\` / \`Ctrl+H\`）—— 文本检索与替换（单个或全部），或点模式按钮切到**按行号定位**，输入行号跳转。
 - **工作区全文搜索**（\`Ctrl+Shift+F\`）—— 在打开的文件夹内跨文件搜索，支持区分大小写、全词匹配与正则，点结果直接跳到对应行。
 - **跳转历史** —— 大纲、链接、搜索结果、行号、文件和标签跳转统一进入前进/后退历史。用 \`Alt+←\` / \`Alt+→\`（macOS 为 Option）、鼠标侧键或命令面板，可回到刚才的文档位置。
-- **设置面板**（\`Ctrl+,\`）—— 集中管理编辑、字体、外观、语言与系统选项。可搜索并自定义快捷键，自动检查冲突；也可调整源码字号、宽表自动换行、选中文字工具栏，或开启自动保存、拼写检查、隐藏文件与「持久化本地历史」。
+- **设置面板**（\`Ctrl+,\`）—— 集中管理编辑、字体、外观、语言与系统选项。可搜索并自定义快捷键，自动检查冲突；也可调整源码字号、宽表自动换行、Milkdown 选中文字工具栏，或开启自动保存、拼写检查、隐藏文件与「持久化本地历史」。仅特定模式生效的选项会直接标注适用范围。
 - **排版与专注** —— 状态栏排版入口集中编辑宽度、字号、缩放、行间距与段落间距。按 \`Ctrl/Cmd+K\` 后再按 \`Z\` 可进入 Zen 专注模式，且不会卸载编辑器。
 - **导出与打印** —— PDF 工作室（\`Ctrl+Shift+E\`）可预览最终分页，并设置纸张、页边距、缩放、分页方式、目录、书签、页眉页脚与页面范围。HTML 导出（\`Ctrl+Shift+H\`）会生成图片内嵌的单文件；系统打印仍为 \`Ctrl+Alt+P\`。
-- **多套主题** —— 暖光 / 暖夜，外加四套**莫兰迪**配色（灰绿、豆沙、雾蓝、暮）；支持 Typora 兼容的自定义 \`.css\` 主题，也可叠加多个能够独立启用和排序的自定义 CSS 片段。
+- **多套主题** —— 暖光 / 暖夜，外加四套**莫兰迪**配色（灰绿、豆沙、雾蓝、暮）；支持 Typora 兼容的自定义 \`.css\` 主题。
 - **多语言** —— 英文 / 中文 / 日文随时切换（右下角），应用菜单一并跟随。
 - **日文排版** —— 含假名的文档自动切换到日文字体，其中的汉字按日文字形显示；导出 PDF / HTML 与打印同样生效。
 - **图片** —— 在 Milkdown 模式下粘贴或拖入图片，会自动存进文档旁的 \`assets/\` 并插入相对路径。
@@ -207,10 +207,10 @@ const JA = `# EasyMarkdown 使い方ガイド 📝
 - **検索 / 置換**（\`Ctrl+F\` / \`Ctrl+H\`）—— テキストの検索と置換（1 件 / 全件）、またはモードボタンで**行番号ジャンプ**に切り替え。
 - **ワークスペース全文検索**（\`Ctrl+Shift+F\`）—— 開いているフォルダ内をファイル横断で検索。大文字小文字の区別・単語単位・正規表現に対応し、結果をクリックすると該当行へ移動します。
 - **移動履歴** —— アウトライン、リンク、検索結果、行番号、ファイル、タブの移動を 1 つの戻る／進む履歴に記録します。\`Alt+←\` / \`Alt+→\`（macOS は Option）、マウス側面ボタン、またはコマンドパレットで直前の文書位置へ戻れます。
-- **設定パネル**（\`Ctrl+,\`）—— 編集、フォント、外観、言語、システム設定をまとめて管理します。ショートカットの検索・変更と競合チェック、ソース表示の文字サイズ、幅広い表の折り返し、選択ツールバーを設定でき、自動保存、スペルチェック、隠しファイル、端末内だけに保持する「永続ローカル履歴」も有効にできます。
+- **設定パネル**（\`Ctrl+,\`）—— 編集、フォント、外観、言語、システム設定をまとめて管理します。ショートカットの検索・変更と競合チェック、ソース表示の文字サイズ、幅広い表の折り返し、Milkdown の選択ツールバーを設定でき、自動保存、スペルチェック、隠しファイル、端末内だけに保持する「永続ローカル履歴」も有効にできます。特定モードだけに適用される項目には対象範囲を表示します。
 - **組版と集中** —— ステータスバーの組版から編集幅、文字サイズ、ズーム、行間、段落間隔を調整できます。\`Ctrl/Cmd+K\` に続けて \`Z\` を押すと、エディタを再読み込みせず集中モードへ入ります。
 - **書き出しと印刷** —— PDF スタジオ（\`Ctrl+Shift+E\`）では最終的な改ページをプレビューし、用紙、余白、拡大率、改ページ、目次、しおり、ヘッダー／フッター、ページ範囲を設定できます。HTML（\`Ctrl+Shift+H\`）は画像を埋め込んだ自己完結の単一ファイルとして出力し、システム印刷は \`Ctrl+Alt+P\` です。
-- **テーマ** —— 暖かいライト / ダークに加え 4 種の **モランディ** パレット（セージ・ローズ・ミスト・ダスク）、Typora 互換のカスタム \`.css\` テーマ、個別に有効化・並べ替えできる複数のカスタム CSS スニペットに対応します。
+- **テーマ** —— 暖かいライト / ダークに加え 4 種の **モランディ** パレット（セージ・ローズ・ミスト・ダスク）と、Typora 互換のカスタム \`.css\` テーマに対応します。
 - **多言語** —— 英語 / 中文 / 日本語をいつでも切り替え（右下）。アプリのメニューも追従します。
 - **日本語組版** —— 仮名を含む文書は自動的に日本語フォントへ切り替わり、漢字が日本語の字形で表示されます。PDF / HTML の書き出しと印刷にも同様に適用されます。
 - **画像** —— Milkdown モードで画像を貼り付け／ドロップすると、文書の隣の \`assets/\` に保存され、相対パスとして挿入されます。
