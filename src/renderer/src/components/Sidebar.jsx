@@ -1074,6 +1074,7 @@ function Sidebar({ workspaces, activePath, openTabPaths, openTabPathsRaw, onOpen
         role="tree"
         aria-label={t('side.treeLabel')}
         aria-multiselectable="false"
+        onScroll={closeMenu}
       >
         {roots.map((ws) => renderRoot(ws))}
       </div>

@@ -144,6 +144,12 @@ test('file tree supports roving keyboard focus, ARIA, rename, delete and context
     })
     expect(bounds.rowTop).toBeGreaterThanOrEqual(bounds.treeTop)
     expect(bounds.rowBottom).toBeLessThanOrEqual(bounds.treeBottom + 1)
+
+    // A context menu is anchored to the viewport, so scrolling the tree dismisses it.
+    await page.locator('.tree-row[role="treeitem"]').last().click({ button: 'right' })
+    await expect(menu).toBeVisible()
+    await tree.evaluate((element) => element.scrollTo({ top: 0 }))
+    await expect(menu).toHaveCount(0)
   } finally {
     await cleanup()
     rmSync(dir, { recursive: true, force: true })
