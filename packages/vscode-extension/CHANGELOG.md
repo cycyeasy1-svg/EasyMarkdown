@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.5.0
+<!-- head: c13ccd1 -->
+
+- **Reorder sections from the outline** — drag sibling headings to move each
+  heading together with its complete section, while preserving the document
+  hierarchy and source content.
+- **Optional wrapping for wide tables** — fit every column into the writing
+  area and wrap cell text instead of scrolling sideways.
+- **More natural lower-level headings** — H6 headings now preserve their
+  original casing and use normal letter spacing.
+
 ## 1.4.1
 <!-- head: 5d779a4 -->
 

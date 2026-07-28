@@ -23,7 +23,8 @@ minimal line-range edit, so VSCode owns dirty state, undo/redo and save.
   drag-to-resize and auto-fit, temporary hide/restore controls, a sticky
   floating header for wide tables with selection and context-menu actions, rich
   copy (cell / row / column / table), keyboard cell navigation, and rectangular
-  TSV paste from spreadsheets.
+  TSV paste from spreadsheets. An optional fit-and-wrap mode keeps every column
+  inside the writing area instead of scrolling sideways.
 - **Task lists** — `- [ ]` / `- [x]` render as real checkboxes; a click toggles
   exactly that source line.
 - **Block structure editing** — insert a block above/below, duplicate it, or
@@ -42,7 +43,7 @@ minimal line-range edit, so VSCode owns dirty state, undo/redo and save.
   count badge appears in Keep and opens the native Problems view.
 - **Heading fold** — collapse/expand a heading's whole section.
 - **Outline** — a heading navigator; jump to any heading (auto-expands folded
-  sections).
+  sections), or drag sibling headings to move their complete sections.
 - **Find & replace** — `Ctrl+F` / `Cmd+F` in-document search with match count and
   next/prev; the chevron opens a replace row (replace one / all, source-based and
   zero-diff).
