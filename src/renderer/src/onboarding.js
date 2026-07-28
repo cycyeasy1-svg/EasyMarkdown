@@ -43,14 +43,14 @@ Cycle the status-bar view button to **Source + Keep** to edit raw Markdown besid
 - **Tabs** — a single click in the file tree uses one replaceable preview tab; editing or double-clicking keeps it open. \`Ctrl+Tab\` shows recently used tabs, and \`Ctrl+Shift+T\` reopens the last closed file. Tabs remain reorderable and pinnable; overflow arrows appear only when the strip is full.
 - **Folder workspace** — the file tree supports arrow keys, Enter, F2, Delete, Shift+F10, cut and paste. Turn on **Show hidden files** when dotfiles should appear; \`.git\` and \`node_modules\` remain excluded. Refresh a collapsed folder to rescan it.
 - **Command palette** (\`Ctrl+P\`) — choose a scope for files, commands, current/workspace headings, line numbers, or help. The \`>\`, \`@\`, \`#\`, \`:\`, and \`?\` prefixes remain available for quick scope changes.
-- **Outline panel** — click a heading to jump; follows your edits live.
+- **Outline panel** — click a heading to jump. With multiple panes it follows the last active editor; drag a same-level heading to move its entire section, including child headings.
 - **Find / Replace** (\`Ctrl+F\` / \`Ctrl+H\`) — search and replace (one or all), or click the mode button to switch to **Go to line** and jump by line number.
 - **Workspace search** (\`Ctrl+Shift+F\`) — search across every file in the open folder, with case-sensitive, whole-word and regex options; click a hit to jump straight to that line.
 - **Navigation history** — outline, link, search-result, line-number, file, and tab jumps enter one back/forward history. Use \`Alt+←\` / \`Alt+→\` (Option on macOS), mouse side buttons, or the command palette to return to the previous document position.
-- **Settings panel** (\`Ctrl+,\`) — editing, fonts, appearance, language and system options in one place. Choose English, Chinese, Japanese and code fonts; turn on autosave, spellcheck, hidden files, or the opt-in **Persistent local history**, which keeps bounded previous versions only on this device.
+- **Settings panel** (\`Ctrl+,\`) — editing, fonts, appearance, language and system options in one place. Search and remap keyboard shortcuts with conflict checks; adjust source font size, wide-table wrapping and the selection toolbar; or turn on autosave, spellcheck, hidden files and the opt-in **Persistent local history**.
 - **Typography and focus** — the status-bar layout control gathers page width, font size, zoom, line height and paragraph spacing. \`Ctrl/Cmd+K\`, then \`Z\`, enters Zen mode without unloading the editor.
-- **Export & print** — PDF (\`Ctrl+Shift+E\`), HTML (\`Ctrl+Shift+H\`, a self-contained single file with images embedded), and system print (\`Ctrl+Alt+P\`).
-- **Themes** — Warm Light / Dark plus four **Morandi** palettes (Sage, Rose, Mist, Dusk), and Typora-compatible custom \`.css\` themes.
+- **Export & print** — the PDF studio (\`Ctrl+Shift+E\`) previews final pagination and controls paper, margins, scale, page breaks, contents, bookmarks, headers/footers and page ranges. HTML export (\`Ctrl+Shift+H\`) embeds images in one self-contained file; system print remains \`Ctrl+Alt+P\`.
+- **Themes** — Warm Light / Dark plus four **Morandi** palettes (Sage, Rose, Mist, Dusk), Typora-compatible custom \`.css\` themes, and ordered custom CSS snippets that can be enabled independently.
 - **Languages** — English / 中文 / 日本語, switchable anytime (bottom-right); the app menu follows along.
 - **Japanese typography** — a document containing kana switches to a Japanese font stack, so its kanji render with Japanese glyph forms; PDF/HTML export and printing do the same.
 - **Images** — paste or drop an image in Milkdown mode and it is saved into an \`assets/\` folder next to the document, inserted as a relative path.
@@ -59,6 +59,8 @@ Cycle the status-bar view button to **Source + Keep** to edit raw Markdown besid
 - **Help center** — press \`F1\` for searchable English, Chinese and Japanese guidance, shortcuts, workflows and troubleshooting.
 
 ## Keyboard shortcuts
+
+These are the defaults. Open **Settings → Keyboard shortcuts** to search, remap, clear or restore them; conflicts are checked before saving.
 
 | Action | Shortcut |
 | --- | --- |
@@ -121,14 +123,14 @@ const ZH = `# EasyMarkdown 使用说明 📝
 - **标签页** —— 文件树单击使用一个可替换的预览标签，双击或开始编辑后转为普通标签。\`Ctrl+Tab\` 显示最近使用的标签，\`Ctrl+Shift+T\` 恢复最近关闭的文件；标签仍可拖拽排序与固定，放不下时才显示前后切换按钮。
 - **文件夹工作区** —— 文件树支持方向键、Enter、F2、Delete、Shift+F10 以及剪切粘贴移动。需要查看点文件时可开启「显示隐藏文件」；\`.git\` 与 \`node_modules\` 始终排除。折叠目录可右键刷新。
 - **命令面板**（\`Ctrl+P\`）—— 可选择文件、命令、当前/工作区标题、行号或帮助范围；\`>\`、\`@\`、\`#\`、\`:\`、\`?\` 快速前缀继续保留。
-- **大纲面板** —— 点标题跳转，随编辑实时更新。
+- **大纲面板** —— 点标题跳转；分栏时跟随最后操作的编辑区。拖动同级标题可连同正文与子标题一起调整章节顺序。
 - **查找 / 替换**（\`Ctrl+F\` / \`Ctrl+H\`）—— 文本检索与替换（单个或全部），或点模式按钮切到**按行号定位**，输入行号跳转。
 - **工作区全文搜索**（\`Ctrl+Shift+F\`）—— 在打开的文件夹内跨文件搜索，支持区分大小写、全词匹配与正则，点结果直接跳到对应行。
 - **跳转历史** —— 大纲、链接、搜索结果、行号、文件和标签跳转统一进入前进/后退历史。用 \`Alt+←\` / \`Alt+→\`（macOS 为 Option）、鼠标侧键或命令面板，可回到刚才的文档位置。
-- **设置面板**（\`Ctrl+,\`）—— 集中管理编辑、字体、外观、语言与系统选项。可分别选择英文、中文、日文和代码字体，并开启自动保存、拼写检查、隐藏文件或「持久化本地历史」；历史有容量上限且只留在当前设备。
+- **设置面板**（\`Ctrl+,\`）—— 集中管理编辑、字体、外观、语言与系统选项。可搜索并自定义快捷键，自动检查冲突；也可调整源码字号、宽表自动换行、选中文字工具栏，或开启自动保存、拼写检查、隐藏文件与「持久化本地历史」。
 - **排版与专注** —— 状态栏排版入口集中编辑宽度、字号、缩放、行间距与段落间距。按 \`Ctrl/Cmd+K\` 后再按 \`Z\` 可进入 Zen 专注模式，且不会卸载编辑器。
-- **导出与打印** —— 导出 PDF（\`Ctrl+Shift+E\`）、导出 HTML（\`Ctrl+Shift+H\`，单文件自包含、图片一并内嵌）、系统打印（\`Ctrl+Alt+P\`）。
-- **多套主题** —— 暖光 / 暖夜，外加四套**莫兰迪**配色（灰绿、豆沙、雾蓝、暮），并支持 Typora 兼容的自定义 \`.css\` 主题。
+- **导出与打印** —— PDF 工作室（\`Ctrl+Shift+E\`）可预览最终分页，并设置纸张、页边距、缩放、分页方式、目录、书签、页眉页脚与页面范围。HTML 导出（\`Ctrl+Shift+H\`）会生成图片内嵌的单文件；系统打印仍为 \`Ctrl+Alt+P\`。
+- **多套主题** —— 暖光 / 暖夜，外加四套**莫兰迪**配色（灰绿、豆沙、雾蓝、暮）；支持 Typora 兼容的自定义 \`.css\` 主题，也可叠加多个能够独立启用和排序的自定义 CSS 片段。
 - **多语言** —— 英文 / 中文 / 日文随时切换（右下角），应用菜单一并跟随。
 - **日文排版** —— 含假名的文档自动切换到日文字体，其中的汉字按日文字形显示；导出 PDF / HTML 与打印同样生效。
 - **图片** —— 在 Milkdown 模式下粘贴或拖入图片，会自动存进文档旁的 \`assets/\` 并插入相对路径。
@@ -137,6 +139,8 @@ const ZH = `# EasyMarkdown 使用说明 📝
 - **帮助中心** —— 按 \`F1\` 打开可搜索的中、英、日三语指南，查看快捷键、工作流程和常见问题。
 
 ## 快捷键
+
+以下为默认快捷键。可在**设置 → 键盘快捷键**中搜索、修改、清除或恢复；保存前会自动检查冲突。
 
 | 操作 | 快捷键 |
 | --- | --- |
@@ -199,14 +203,14 @@ const JA = `# EasyMarkdown 使い方ガイド 📝
 - **タブ** —— ファイルツリーのシングルクリックは置換可能なプレビュータブを使い、ダブルクリックまたは編集で通常タブになります。\`Ctrl+Tab\` は最近使ったタブを表示し、\`Ctrl+Shift+T\` は閉じたファイルを復元します。ドラッグ並べ替えとピン留めも利用できます。
 - **フォルダワークスペース** —— ファイルツリーは矢印、Enter、F2、Delete、Shift+F10、切り取り／貼り付けに対応します。「隠しファイルを表示」でドットファイルを表示できますが、\`.git\` と \`node_modules\` は常に除外されます。
 - **コマンドパレット**（\`Ctrl+P\`）—— ファイル、コマンド、現在／ワークスペースの見出し、行番号、ヘルプから検索範囲を選べます。\`>\`、\`@\`、\`#\`、\`:\`、\`?\` の接頭辞も引き続き使えます。
-- **アウトラインパネル** —— 見出しをクリックでジャンプ。編集に追従。
+- **アウトラインパネル** —— 見出しをクリックして移動できます。分割表示では最後に操作した編集ペインに追従し、同じ階層の見出しをドラッグすると、本文と子見出しを含むセクション全体を並べ替えられます。
 - **検索 / 置換**（\`Ctrl+F\` / \`Ctrl+H\`）—— テキストの検索と置換（1 件 / 全件）、またはモードボタンで**行番号ジャンプ**に切り替え。
 - **ワークスペース全文検索**（\`Ctrl+Shift+F\`）—— 開いているフォルダ内をファイル横断で検索。大文字小文字の区別・単語単位・正規表現に対応し、結果をクリックすると該当行へ移動します。
 - **移動履歴** —— アウトライン、リンク、検索結果、行番号、ファイル、タブの移動を 1 つの戻る／進む履歴に記録します。\`Alt+←\` / \`Alt+→\`（macOS は Option）、マウス側面ボタン、またはコマンドパレットで直前の文書位置へ戻れます。
-- **設定パネル**（\`Ctrl+,\`）—— 編集、フォント、外観、言語、システム設定をまとめて管理します。英語・中国語・日本語・コードのフォントを個別に選び、自動保存、スペルチェック、隠しファイル、端末内だけに保持する「永続ローカル履歴」を有効にできます。
+- **設定パネル**（\`Ctrl+,\`）—— 編集、フォント、外観、言語、システム設定をまとめて管理します。ショートカットの検索・変更と競合チェック、ソース表示の文字サイズ、幅広い表の折り返し、選択ツールバーを設定でき、自動保存、スペルチェック、隠しファイル、端末内だけに保持する「永続ローカル履歴」も有効にできます。
 - **組版と集中** —— ステータスバーの組版から編集幅、文字サイズ、ズーム、行間、段落間隔を調整できます。\`Ctrl/Cmd+K\` に続けて \`Z\` を押すと、エディタを再読み込みせず集中モードへ入ります。
-- **書き出しと印刷** —— PDF（\`Ctrl+Shift+E\`）、HTML（\`Ctrl+Shift+H\`、画像を埋め込んだ自己完結の単一ファイル）、システム印刷（\`Ctrl+Alt+P\`）。
-- **テーマ** —— 暖かいライト / ダークに加え 4 種の **モランディ** パレット（セージ・ローズ・ミスト・ダスク）、Typora 互換のカスタム \`.css\` テーマにも対応。
+- **書き出しと印刷** —— PDF スタジオ（\`Ctrl+Shift+E\`）では最終的な改ページをプレビューし、用紙、余白、拡大率、改ページ、目次、しおり、ヘッダー／フッター、ページ範囲を設定できます。HTML（\`Ctrl+Shift+H\`）は画像を埋め込んだ自己完結の単一ファイルとして出力し、システム印刷は \`Ctrl+Alt+P\` です。
+- **テーマ** —— 暖かいライト / ダークに加え 4 種の **モランディ** パレット（セージ・ローズ・ミスト・ダスク）、Typora 互換のカスタム \`.css\` テーマ、個別に有効化・並べ替えできる複数のカスタム CSS スニペットに対応します。
 - **多言語** —— 英語 / 中文 / 日本語をいつでも切り替え（右下）。アプリのメニューも追従します。
 - **日本語組版** —— 仮名を含む文書は自動的に日本語フォントへ切り替わり、漢字が日本語の字形で表示されます。PDF / HTML の書き出しと印刷にも同様に適用されます。
 - **画像** —— Milkdown モードで画像を貼り付け／ドロップすると、文書の隣の \`assets/\` に保存され、相対パスとして挿入されます。
@@ -215,6 +219,8 @@ const JA = `# EasyMarkdown 使い方ガイド 📝
 - **ヘルプセンター** —— \`F1\` で検索可能な英語・中国語・日本語ガイドを開き、ショートカット、ワークフロー、トラブル対処を確認できます。
 
 ## キーボードショートカット
+
+以下は初期設定です。**設定 → キーボードショートカット**から検索、変更、解除、初期化ができ、保存前に競合を確認します。
 
 | 操作 | ショートカット |
 | --- | --- |
