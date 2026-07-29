@@ -453,6 +453,36 @@ body.dark .km-doc mark.hm-hl-blue { background: #2f4a6b; }
   margin: calc(2em * var(--editor-para-scale, 1)) 0;
 }
 
+/* Sanitized raw HTML uses the same wrapper classes as the desktop app's rich and
+   Keep editors. Wide HTML tables scroll horizontally instead of widening the
+   whole webview; inline fragments retain their document-provided presentation. */
+.hm-html-block {
+  margin: calc(1.2em * var(--editor-para-scale, 1)) 0;
+  overflow-x: auto;
+}
+.hm-html-block table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.hm-html-block th,
+.hm-html-block td {
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  text-align: left;
+  vertical-align: top;
+}
+.hm-html-block th {
+  background: var(--hover-elevated, var(--border-soft));
+  color: var(--text-strong);
+  font-weight: 700;
+}
+.hm-html-block img {
+  max-width: 100%;
+}
+.hm-html-inline {
+  display: inline;
+}
+
 .km-table-frame {
   position: relative;
   margin: calc(1.2em * var(--editor-para-scale, 1)) 0;

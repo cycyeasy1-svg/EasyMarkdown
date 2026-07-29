@@ -29,6 +29,12 @@
 import MarkdownIt from 'markdown-it'
 
 import { isRelativePath, resolveToFileUrl } from './components/editor-images.js'
+import {
+  findRenderableBlockHtmlEnd,
+  isRenderableBlockHtml,
+  matchRenderableInlineHtml,
+  sanitizeHtmlFragment
+} from './html-sanitize.js'
 import { HIGHLIGHT_STICKY_RE, MARK_HTML_STICKY_RE } from './highlight-syntax.js'
 
 // ── language sniff (per-document writing font) ──
@@ -90,14 +96,11 @@ function safeImgSrc(rawSrc, baseDir) {
 // specs instead: https://spec.commonmark.org/ + https://github.github.com/gfm/.
 //
 // Every option below is load-bearing:
-//   html: false    keep mode paints with innerHTML, so raw HTML in the document must
-//                  never reach the DOM. Three fragments are still honored, explicitly:
-//                  a literal `<br>` (how a GFM table cell encodes a line break — see
-//                  editor-tablebreak.js) is split off before parsing, and
-//                  `<mark class="hm-hl-…">` (how the rich editor stringifies a red or
-//                  blue highlight — editor-highlight.js), plus an empty `<a id|name>`
-//                  document anchor. The latter accepts no other attributes, so event
-//                  handlers / hrefs still remain escaped text. Nothing else gets through.
+//   html: false    markdown-it never passes arbitrary source HTML to innerHTML.
+//                  Recognized balanced inline fragments and block containers are
+//                  claimed by explicit rules below, rebuilt through the shared
+//                  allow-list sanitizer, and only then emitted. Literal `<br>`, rich
+//                  highlights, and empty document anchors have dedicated rules too.
 //   linkify        GFM autolinks a bare `https://…`. fuzzyLink stays OFF: it also
 //                  linkifies any bare `word.tld`, and `.md` is a real ccTLD, so every
 //                  `README.md` mentioned in prose turned into a hyperlink.
@@ -134,6 +137,36 @@ md.renderer.rules.hm_empty_anchor = (tokens, idx) => {
   const attr = token.attrGet('id') != null ? 'id' : 'name'
   return '<a ' + attr + '="' + escapeAttr(token.attrGet(attr) || '') + '"></a>'
 }
+
+// A literal `<br>` is how a GFM table cell round-trips a line break. Make it a
+// token instead of splitting the raw string before parsing, so `<span>a<br>b</span>`
+// can be claimed and sanitized as one balanced inline HTML fragment.
+md.inline.ruler.before('html_inline', 'hm_br', (state, silent) => {
+  if (state.src.charCodeAt(state.pos) !== 0x3c /* < */) return false
+  const match = state.src.slice(state.pos).match(/^<br\s*\/?>/i)
+  if (!match) return false
+  if (!silent) state.push('hm_br', 'br', 0)
+  state.pos += match[0].length
+  return true
+})
+md.renderer.rules.hm_br = () => '<br>'
+
+// Render a balanced formatting fragment such as `<span style="color:red">x</span>`.
+// The custom token prevents Markdown syntax inside raw HTML from being interpreted;
+// the DOM-free sanitizer makes this same output safe in Electron and VSCode.
+md.inline.ruler.before('html_inline', 'hm_safe_inline_html', (state, silent) => {
+  if (state.src.charCodeAt(state.pos) !== 0x3c /* < */) return false
+  const match = matchRenderableInlineHtml(state.src, state.pos)
+  if (!match) return false
+  if (!silent) {
+    const token = state.push('hm_safe_inline_html', '', 0)
+    token.content = match.html
+  }
+  state.pos = match.end
+  return true
+})
+md.renderer.rules.hm_safe_inline_html = (tokens, idx) =>
+  '<span class="hm-html-inline">' + sanitizeHtmlFragment(tokens[idx].content) + '</span>'
 
 // `==highlight==` and its colored `<mark class="hm-hl-…">` form. Registered as an
 // inline RULE, not a pre-pass on the raw string: markdown-it runs the `backticks`
@@ -187,15 +220,10 @@ md.renderer.rules.link_open = (tokens, idx) => {
 }
 
 // Render one block's inline content to HTML. `baseDir` (the document's folder)
-// resolves relative image paths. A literal `<br>` in the source is split out first
-// and re-joined after: `html:false` would otherwise escape it, and it's the only
-// way a GFM table cell can hold a line break. Callers also use it to join a
-// blockquote's / paragraph's lines.
+// resolves relative image paths. Literal `<br>` and balanced safe HTML fragments
+// are handled by the explicit rules above; every other raw tag remains escaped.
 export function inline(text, baseDir) {
-  return String(text)
-    .split(/<br\s*\/?>/i)
-    .map((seg) => md.renderInline(seg, { baseDir }))
-    .join('<br>')
+  return md.renderInline(String(text), { baseDir })
 }
 
 const TABLE_COL_MIN_EM = 6
@@ -361,6 +389,15 @@ export function parseDoc(lines) {
       out.push({ type: 'mathblock', start, end: i - 1 })
       continue
     }
+    // Balanced raw-HTML block. The exact line range is retained for zero-diff
+    // editing; rendering later rebuilds only allowed tags/attributes. This covers
+    // complex tables with rowspan/colspan that cannot be represented as GFM.
+    const htmlEnd = isRenderableBlockHtml(line) ? findRenderableBlockHtmlEnd(lines, i) : -1
+    if (htmlEnd >= i) {
+      out.push({ type: 'html', start: i, end: htmlEnd })
+      i = htmlEnd + 1
+      continue
+    }
     // Heading
     const hm = line.match(/^(#{1,6})\s+(.*)$/)
     if (hm) {
@@ -509,6 +546,7 @@ export function parseDoc(lines) {
         !/^\s*>\s?/.test(lines[i]) &&
         !/^\s*```/.test(lines[i]) &&
         !/^\s*\$\$/.test(lines[i]) &&
+        !isRenderableBlockHtml(lines[i]) &&
         !(
           lines[i].includes('|') &&
           i + 1 < lines.length &&
@@ -945,6 +983,15 @@ export function renderBlockInner(b, bi, viewLines, opts = {}) {
       '<h' + b.level + ' id="km-h-' + bi + '" class="km-heading">' + collapseBtn + inline(b.text, baseDir) + '</h' + b.level + '>'
   } else if (b.type === 'paragraph') {
     inner = '<p>' + viewLines.slice(b.start, b.end + 1).map((l) => inline(l, baseDir)).join('<br>') + '</p>'
+  } else if (b.type === 'html') {
+    const source = viewLines.slice(b.start, b.end + 1).join('\n')
+    inner =
+      '<div class="hm-html-block">' +
+      sanitizeHtmlFragment(source, {
+        resolveImageSrc: (src) =>
+          baseDir && isRelativePath(src) ? resolveToFileUrl(baseDir, src) : src
+      }) +
+      '</div>'
   } else if (b.type === 'code') {
     const body = viewLines.slice(b.start + 1, b.end).join('\n')
     // A ```mermaid fence renders as a live diagram (filled by KeepEditor after

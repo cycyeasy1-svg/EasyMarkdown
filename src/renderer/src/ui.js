@@ -45,3 +45,37 @@ export const copyToClipboard = async (text, doneMsg) => {
     return false
   }
 }
+
+// Rich Keep copies need both HTML (Word/Excel) and plain text (editors/sheets).
+// Desktop uses Electron because the packaged file:// renderer and the scoped
+// permission handler can reject the Web Clipboard API. Browser/mobile builds
+// retain the native API fallback.
+export const copyRichToClipboard = async (html, text = '') => {
+  if (window.api?.copyRich) {
+    try {
+      if (await window.api.copyRich(html, text)) return true
+    } catch {
+      // Continue to the browser/mobile fallback below.
+    }
+  }
+  if (navigator.clipboard?.write && typeof ClipboardItem === 'function') {
+    try {
+      await navigator.clipboard.write([
+        new ClipboardItem({
+          'text/html': new Blob([html], { type: 'text/html' }),
+          'text/plain': new Blob([text], { type: 'text/plain' })
+        })
+      ])
+      return true
+    } catch {
+      // Some platforms expose rich writes but only permit plain text.
+    }
+  }
+  try {
+    if (!navigator.clipboard?.writeText) return false
+    await navigator.clipboard.writeText(text)
+    return true
+  } catch {
+    return false
+  }
+}

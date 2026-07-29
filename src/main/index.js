@@ -1317,6 +1317,14 @@ ipcMain.handle('clipboard:writeText', (event, text) => {
   return true
 })
 
+ipcMain.handle('clipboard:writeRich', (event, payload) => {
+  if (!mainWindow || event.sender.id !== mainWindow.webContents.id) return false
+  const text = String(payload?.text ?? '')
+  const html = typeof payload?.html === 'string' ? payload.html : ''
+  clipboard.write(html ? { text, html } : { text })
+  return true
+})
+
 ipcMain.handle('permissions:allowLocalFonts', (event) => {
   if (!mainWindow || event.sender.id !== mainWindow.webContents.id) return false
   localFontGrant = createLocalFontGrant(event.sender.id)

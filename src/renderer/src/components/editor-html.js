@@ -1,19 +1,10 @@
 // Raw-HTML rendering for Milkdown's `html` node + block-type conversion.
 
-// Block-level tags whose HTML we render visually as a block (rather than show as
-// source). Targeted at the common case — HTML tables pasted into Markdown — plus a
-// few other safe block containers.
-const RENDER_BLOCK_RE =
-  /^\s*<(table|thead|tbody|tfoot|tr|td|th|div|details|summary|figure|figcaption|section|article|dl|center)[\s/>]/i
-
-// Inline formatting tags we render *inline*. Milkdown emits inline HTML as
-// SEPARATE open/close `html` nodes, so these only render correctly once the
-// `mergeInlineHtmlRemarkPlugin` (below) has merged a balanced `<tag>…</tag>` run
-// into ONE node — i.e. the value carries a matching close tag. A lone, unbalanced
-// `<span>` (no close) falls through to the escaped-text fallback so it can't break
-// layout. Keep this set in sync with INLINE_HTML_TAGS.
-const RENDER_INLINE_RE =
-  /^\s*<(span|font|b|i|u|s|strike|em|strong|small|big|sub|sup|mark|kbd|abbr|ins|del|cite|q|samp|var|time)[\s/>]/i
+import {
+  isRenderableBlockHtml,
+  isRenderableInlineHtml,
+  sanitizeHtmlFragment
+} from '../html-sanitize.js'
 
 // Decode HTML entities (&nbsp;, &amp;, &#160;…) to their characters for *display*
 // of raw HTML we don't render. A <textarea> is a rawtext element: assigning
@@ -27,34 +18,17 @@ function decodeEntities(s) {
   return ta.value
 }
 
-// Strip <script>/<style> and inline event handlers so rendering local HTML can't
-// run code. Tables/fragments parse correctly inside a <template>.
-function sanitizeHtml(html) {
-  const tpl = document.createElement('template')
-  tpl.innerHTML = html
-  tpl.content.querySelectorAll('script, style').forEach((el) => el.remove())
-  tpl.content.querySelectorAll('*').forEach((el) => {
-    for (const attr of [...el.attributes]) {
-      if (/^on/i.test(attr.name)) el.removeAttribute(attr.name)
-      else if (/^(href|src)$/i.test(attr.name) && /^\s*javascript:/i.test(attr.value)) {
-        el.removeAttribute(attr.name)
-      }
-    }
-  })
-  return tpl.innerHTML
-}
-
 // ProseMirror node view for Milkdown's `html` node. Renders recognized block HTML
 // as a real DOM block, balanced inline fragments inline, and leaves anything else
 // as entity-decoded source text.
 export function renderHtmlNodeView(node) {
   const value = node.attrs?.value || ''
-  if (RENDER_BLOCK_RE.test(value)) {
+  if (isRenderableBlockHtml(value)) {
     const dom = document.createElement('div')
     dom.className = 'hm-html-block'
     dom.setAttribute('data-type', 'html')
     dom.contentEditable = 'false'
-    dom.innerHTML = sanitizeHtml(value)
+    dom.innerHTML = sanitizeHtmlFragment(value)
     // The node is an atom with no editable content; ignore inner DOM mutations so
     // ProseMirror doesn't try to reconcile the rendered HTML.
     return { dom, ignoreMutation: () => true, stopEvent: () => false }
@@ -62,12 +36,12 @@ export function renderHtmlNodeView(node) {
   // Balanced inline fragment (merged into one node, so it carries a close tag) →
   // render inline. Without a close tag it's a lone open tag we couldn't pair, so
   // fall through to text rather than emit an empty element.
-  if (RENDER_INLINE_RE.test(value) && /<\/[a-z]/i.test(value)) {
+  if (isRenderableInlineHtml(value)) {
     const span = document.createElement('span')
     span.className = 'hm-html-inline'
     span.setAttribute('data-type', 'html')
     span.contentEditable = 'false'
-    span.innerHTML = sanitizeHtml(value)
+    span.innerHTML = sanitizeHtmlFragment(value)
     return { dom: span, ignoreMutation: () => true, stopEvent: () => false }
   }
   // Not something we render — show the raw markup as text, but decode HTML

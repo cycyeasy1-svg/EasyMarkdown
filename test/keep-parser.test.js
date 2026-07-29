@@ -153,9 +153,16 @@ describe('inline', () => {
     // `.md` is a real ccTLD — fuzzyLink would turn every filename in prose into a link.
     expect(inline('see README.md now')).toBe('see README.md now')
   })
-  it('escapes raw inline HTML instead of injecting it', () => {
+  it('renders allow-listed inline HTML while leaving executable tags escaped', () => {
     expect(inline('<u>u</u> <script>x</script>')).toBe(
-      '&lt;u&gt;u&lt;/u&gt; &lt;script&gt;x&lt;/script&gt;'
+      '<span class="hm-html-inline"><u>u</u></span> &lt;script&gt;x&lt;/script&gt;'
+    )
+  })
+  it('keeps balanced inline styles and line breaks inside the sanitized fragment', () => {
+    expect(
+      inline('<span style="color: #f00; padding: 2px; position: fixed">a<br>b</span>')
+    ).toBe(
+      '<span class="hm-html-inline"><span style="color: #f00; padding: 2px">a<br>b</span></span>'
     )
   })
   it('unescapes a GFM-escaped pipe inside a table cell', () => {
@@ -227,6 +234,27 @@ describe('parseDoc', () => {
     expect(t.type).toBe('table')
     expect(t.headers).toEqual(['a', 'b'])
     expect(t.dataRows).toEqual([{ lineIdx: 2, cells: ['1', '2'] }])
+  })
+  it('maps a balanced raw HTML table to one source-backed block', () => {
+    const lines = [
+      '<table border="1">',
+      '  <thead><tr><th rowspan="2">A</th></tr></thead>',
+      '  <tbody><tr><td><span style="color:red">B</span></td></tr></tbody>',
+      '</table>',
+      '',
+      'after'
+    ]
+    expect(parseDoc(lines)).toEqual([
+      { type: 'html', start: 0, end: 3 },
+      { type: 'paragraph', start: 5, end: 5 }
+    ])
+  })
+  it('leaves an unbalanced raw HTML opener as escaped paragraph text', () => {
+    const lines = ['<table>']
+    const blocks = parseDoc(lines)
+    expect(blocks.every((block) => block.type === 'paragraph')).toBe(true)
+    expect(renderDoc(lines).html).toContain('&lt;table&gt;')
+    expect(renderDoc(lines).html).not.toContain('<table>')
   })
   it('parses blockquotes, hr and lists', () => {
     expect(parseDoc(['> quote'])[0].type).toBe('quote')
@@ -305,7 +333,6 @@ describe('table column width hints', () => {
     expect(width).toBeGreaterThan(22)
     expect(width).toBeGreaterThanOrEqual(Array.from(header).length + 5)
   })
-
   it('sizes links from their rendered labels instead of hidden Markdown destinations', () => {
     const plain = estimateTableColumnWidths(['Column'], [{ cells: ['短'] }])[0]
     const nestedDestination = estimateTableColumnWidths(
@@ -378,6 +405,46 @@ describe('table column width hints', () => {
 
     expect(html.match(/<tr data-ri=/g)).toHaveLength(3)
     expect(html).not.toContain('data-km-rendered-rows')
+  })
+})
+
+describe('raw HTML block rendering', () => {
+  it('renders rowspan/colspan tables and presentation styles', () => {
+    const lines = [
+      '<table border="1">',
+      '<thead><tr><th rowspan="2">NO</th><th colspan="2">Common</th></tr></thead>',
+      '<tbody><tr><td><span style="background-color:#FFFF00;color:#111">Ready</span><img src="./assets/a.png" alt="A"></td></tr></tbody>',
+      '</table>'
+    ]
+    const html = renderBlockInner(parseDoc(lines)[0], 0, lines, { baseDir: 'C:\\docs' })
+    expect(html).toContain('<div class="hm-html-block"><table border="1">')
+    expect(html).toContain('<th rowspan="2">NO</th>')
+    expect(html).toContain('<th colspan="2">Common</th>')
+    expect(html).toContain(
+      '<span style="background-color: #FFFF00; color: #111">Ready</span>'
+    )
+    expect(html).toContain('<img src="file:///C:/docs/assets/a.png" alt="A">')
+  })
+
+  it('removes executable attributes and unsafe CSS while escaping blocked tags', () => {
+    const lines = [
+      '<div onclick="alert(1)">',
+      '<span style="color:red;position:fixed;background-image:url(javascript:x)" onmouseover="x">safe</span>',
+      '<a href="jav&#x61;script:alert(1)">bad link</a>',
+      '<script>alert(1)</script><iframe src="https://example.com"></iframe>',
+      '</div>'
+    ]
+    const html = renderBlockInner(parseDoc(lines)[0], 0, lines, {})
+    expect(html).toContain('<div>')
+    expect(html).toContain('<span style="color: red">safe</span>')
+    expect(html).toContain('<a>bad link</a>')
+    expect(html).not.toContain('onclick=')
+    expect(html).not.toContain('onmouseover=')
+    expect(html).not.toContain('position:')
+    expect(html).not.toContain('<script>')
+    expect(html).not.toContain('<iframe')
+    expect(html).toContain('&lt;script&gt;')
+    expect(html).toContain('&lt;iframe')
   })
 })
 

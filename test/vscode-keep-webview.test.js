@@ -109,6 +109,36 @@ describe('VSCode Keep webview interactions', () => {
     expect(scroll).toHaveBeenCalledWith({ behavior: 'smooth', block: 'start' })
   })
 
+  it('renders sanitized raw HTML tables and inline styles in the webview', async () => {
+    send({
+      type: 'init',
+      text: [
+        '<table border="1" onclick="alert(1)">',
+        '<thead><tr><th rowspan="2">NO</th><th colspan="2">Common</th></tr></thead>',
+        '<tbody><tr><td><span style="background-color:#FFFF00;position:fixed" onmouseover="x">Ready</span></td></tr></tbody>',
+        '<script>alert(1)</script>',
+        '</table>'
+      ].join('\n'),
+      lang: 'en',
+      langPref: 'en',
+      theme: 'auto'
+    })
+    await waitForPaint()
+
+    const table = document.querySelector('.hm-html-block table')
+    expect(table).not.toBeNull()
+    expect(table.getAttribute('border')).toBe('1')
+    expect(table.hasAttribute('onclick')).toBe(false)
+    expect(table.querySelector('th')?.getAttribute('rowspan')).toBe('2')
+    expect(table.querySelectorAll('th')[1]?.getAttribute('colspan')).toBe('2')
+    const badge = table.querySelector('span')
+    expect(badge?.textContent).toBe('Ready')
+    expect(badge?.style.backgroundColor).toBe('#FFFF00')
+    expect(badge?.style.position).toBe('')
+    expect(badge?.hasAttribute('onmouseover')).toBe(false)
+    expect(table.querySelector('script')).toBeNull()
+  })
+
   it('persists the Keep viewport without dropping an unfinished draft', async () => {
     state.draft = { version: 1, kind: 'block', value: 'unfinished' }
     const scroller = document.querySelector('.editor-scroll')

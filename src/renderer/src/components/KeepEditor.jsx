@@ -31,6 +31,7 @@ import {
 import ZoomLightbox from './ZoomLightbox.jsx'
 import { ensureEmbedZoomButtons, zoomItemFromButton } from './editor-zoom.js'
 import { internalLinkTarget, parseInternalDocLink } from '../link-navigation.js'
+import { copyRichToClipboard } from '../ui.js'
 
 // Wrapper style for rich-text copy (mirrors the Crepe editor's onCopy payload) so
 // pasted output keeps a sensible default font in apps that ignore external CSS.
@@ -1670,19 +1671,7 @@ function KeepEditor({
     }
     // Low-level: put a rich (html) + plain payload on the clipboard.
     const writeClipboard = (html, plain) => {
-      const text = plain || ''
-      try {
-        navigator.clipboard
-          .write([
-            new ClipboardItem({
-              'text/html': new Blob([html], { type: 'text/html' }),
-              'text/plain': new Blob([text], { type: 'text/plain' })
-            })
-          ])
-          .catch(() => navigator.clipboard.writeText(text).catch(() => {}))
-      } catch {
-        navigator.clipboard?.writeText?.(text).catch(() => {})
-      }
+      void copyRichToClipboard(html, plain || '')
     }
     // Clone a node, drop editor-only chrome, inline styles → { html, text }.
     const richHtml = (node) => {
@@ -1710,7 +1699,7 @@ function KeepEditor({
     const cellPlain = (c) => {
       if (!c) return ''
       const cl = c.cloneNode(true)
-      cl.querySelectorAll('.km-filter-btn').forEach((el) => el.remove())
+      cl.querySelectorAll('.km-src-edit, .km-filter-btn, button').forEach((el) => el.remove())
       cl.querySelectorAll('br').forEach((br) => br.replaceWith(' '))
       return (cl.textContent || '').trim()
     }

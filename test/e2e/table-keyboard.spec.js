@@ -51,6 +51,103 @@ test('Keep table supports keyboard navigation, editing, filtering and context ac
   }
 })
 
+test('Keep table context menu keeps source, layout and structural actions wired', async () => {
+  const { page, cleanup } = await openTableFixture()
+  try {
+    const table = page.locator('.km-doc table.km-table[data-ti="0"]')
+    const firstCell = table.locator('tbody tr[data-ri="0"] td[data-ci="0"]')
+    const firstHeader = table.locator('thead th[data-ci="0"]')
+    const rows = table.locator('tbody tr')
+    const columns = table.locator('thead th')
+    const undo = page.locator('.status-history-btn.undo')
+    const choose = async (target, label) => {
+      await target.click({ button: 'right' })
+      await page
+        .locator('.km-table-menu')
+        .getByRole('button', { name: label, exact: true })
+        .click()
+    }
+    const undoTo = async (locator, count) => {
+      await expect(undo).toBeEnabled()
+      await undo.click()
+      await expect(locator).toHaveCount(count)
+    }
+
+    await choose(firstCell, '在上方插入行')
+    await expect(rows).toHaveCount(5)
+    await expect(rows.first().locator('td[data-ci="0"]')).toHaveAttribute('data-raw', '')
+    await undoTo(rows, 4)
+
+    await choose(firstCell, '在下方插入行')
+    await expect(rows).toHaveCount(5)
+    await expect(rows.nth(1).locator('td[data-ci="0"]')).toHaveAttribute('data-raw', '')
+    await undoTo(rows, 4)
+
+    await choose(firstHeader, '插入行')
+    await expect(rows).toHaveCount(5)
+    await expect(rows.first().locator('td[data-ci="0"]')).toHaveAttribute('data-raw', '')
+    await undoTo(rows, 4)
+
+    await choose(firstCell, '在左侧插入列')
+    await expect(columns).toHaveCount(3)
+    await expect(columns.first()).toHaveAttribute('data-raw', '')
+    await undoTo(columns, 2)
+
+    await choose(firstCell, '在右侧插入列')
+    await expect(columns).toHaveCount(3)
+    await expect(columns.nth(1)).toHaveAttribute('data-raw', '')
+    await undoTo(columns, 2)
+
+    await choose(firstCell, '删除本行')
+    await expect(rows).toHaveCount(3)
+    await expect(table.locator('tbody')).not.toContainText('apple')
+    await undoTo(rows, 4)
+
+    await choose(firstCell, '删除本列')
+    await expect(columns).toHaveCount(1)
+    await expect(columns.first()).toHaveAttribute('data-raw', 'color')
+    await firstCell.click({ button: 'right' })
+    await expect(
+      page.locator('.km-table-menu').getByRole('button', { name: '删除本列', exact: true })
+    ).toHaveClass(/disabled/)
+    await page.keyboard.press('Escape')
+    await undoTo(columns, 2)
+
+    const widths = () => table.locator('col').evaluateAll((cols) => cols.map((col) => col.style.width))
+    const parserWidths = await widths()
+    const firstWidth = () => table.locator('col').first().evaluate((col) => col.style.width)
+    const initialFirstWidth = parserWidths[0]
+    const firstResize = firstHeader.locator(':scope > .km-col-resize')
+    await firstResize.focus()
+    await firstResize.press('ArrowRight')
+    await expect.poll(firstWidth).not.toBe(initialFirstWidth)
+    await choose(firstCell, '本列宽度自适应')
+    await expect.poll(firstWidth).toBe(initialFirstWidth)
+
+    await firstResize.focus()
+    await firstResize.press('ArrowRight')
+    const secondResize = table.locator('thead th[data-ci="1"] > .km-col-resize')
+    await secondResize.focus()
+    await secondResize.press('ArrowRight')
+    await expect.poll(widths).not.toEqual(parserWidths)
+    await choose(firstCell, '全部列宽自适应')
+    await expect.poll(widths).toEqual(parserWidths)
+
+    await choose(firstCell, '隐藏“fruit”列')
+    await expect(firstHeader).toBeHidden()
+    const hiddenColumns = page.locator('.km-table-hidden-columns').first()
+    await expect(hiddenColumns).toContainText('已隐藏 1 列')
+    await hiddenColumns.click()
+    await page.locator('.km-column-pop-item[data-ci="0"]').click()
+    await expect(firstHeader).toBeVisible()
+
+    await choose(firstCell, '在此打开源码')
+    await expect(page.locator('textarea.source-editor:visible')).toBeVisible()
+  } finally {
+    await cleanup()
+  }
+})
+
 test('Keep table keyboard navigation reveals cells below the floating header', async () => {
   const { page, cleanup } = await openTableFixture()
   try {
@@ -91,7 +188,7 @@ test('Keep table keyboard navigation reveals cells below the floating header', a
 })
 
 test('Keep floating table header supports selection and the table context menu', async () => {
-  const { page, cleanup } = await openTableFixture()
+  const { app, page, cleanup } = await openTableFixture()
   try {
     const table = page.locator('.km-doc table.km-table[data-ti="0"]')
     const target = table.locator('tbody tr[data-ri="2"] td[data-ci="0"]')
@@ -113,6 +210,12 @@ test('Keep floating table header supports selection and the table context menu',
 
     await floatingContent.click({ button: 'right' })
     await expect(page.locator('.km-table-menu')).toBeVisible()
+    await app.evaluate(({ clipboard }) => clipboard.writeText('clipboard-not-written'))
+    await page
+      .locator('.km-table-menu')
+      .getByRole('button', { name: '复制当前单元格', exact: true })
+      .click()
+    await expect.poll(() => app.evaluate(({ clipboard }) => clipboard.readText())).toBe('fruit')
   } finally {
     await cleanup()
   }
