@@ -235,6 +235,219 @@ body.hm-full-width .km-doc {
   background: var(--hover-elevated);
   border-color: var(--accent);
 }
+.km-format-editor {
+  width: 100%;
+  min-width: 0;
+}
+.km-format-toolbar {
+  position: relative;
+  display: flex;
+  width: 100%;
+  min-height: 35px;
+  align-items: center;
+  padding: 4px 6px;
+  border: 1px solid var(--border);
+  border-bottom: 0;
+  border-radius: var(--radius-md) var(--radius-md) 0 0;
+  background: color-mix(in srgb, var(--bg-elevated) 94%, var(--accent) 6%);
+  user-select: none;
+}
+.km-format-editor:focus-within .km-format-toolbar {
+  border-color: var(--accent);
+}
+.km-format-group {
+  display: flex;
+  max-width: 100%;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 2px;
+}
+.km-format-btn {
+  position: relative;
+  display: inline-flex;
+  width: 29px;
+  height: 27px;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  cursor: pointer;
+}
+.km-format-btn:hover:not(:disabled),
+.km-format-btn:focus-visible,
+.km-format-btn.active {
+  color: var(--text-strong);
+  background: var(--hover-elevated);
+}
+.km-format-btn.active {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 42%, transparent);
+}
+.km-format-btn:focus-visible,
+.km-format-swatch:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.km-format-btn:disabled,
+.km-format-swatch:disabled {
+  cursor: default;
+  opacity: 0.38;
+}
+.km-format-glyph {
+  position: relative;
+  display: inline-flex;
+  min-width: 16px;
+  height: 20px;
+  align-items: center;
+  justify-content: center;
+  color: inherit;
+  font-family: var(--font-write);
+  font-size: 17px;
+  line-height: 1;
+}
+.km-format-glyph-bold { font-weight: 800; }
+.km-format-glyph-italic {
+  font-family: Georgia, 'Times New Roman', serif;
+  font-style: italic;
+  font-weight: 700;
+}
+.km-format-glyph-strike {
+  font-family: Georgia, 'Times New Roman', serif;
+  text-decoration: line-through;
+  text-decoration-thickness: 1.5px;
+}
+.km-format-glyph-underline {
+  font-family: Georgia, 'Times New Roman', serif;
+  text-decoration: underline;
+  text-decoration-thickness: 1.5px;
+  text-underline-offset: 2px;
+}
+.km-format-glyph-highlight,
+.km-format-glyph-color {
+  padding-bottom: 3px;
+  font-size: 16px;
+  font-weight: 650;
+}
+.km-format-glyph-bar {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 3px;
+  border-radius: 2px;
+  background: #e7c94e;
+}
+.km-format-separator {
+  width: 1px;
+  height: 19px;
+  margin: 0 3px;
+  background: var(--border-soft);
+}
+.km-format-color-wrap {
+  position: relative;
+}
+.km-format-color-trigger {
+  width: 35px;
+  padding-right: 7px;
+}
+.km-format-color-trigger::after {
+  content: '';
+  position: absolute;
+  right: 4px;
+  bottom: 6px;
+  width: 0;
+  height: 0;
+  border: 3px solid transparent;
+  border-top-color: currentColor;
+}
+.km-format-color-trigger[data-color='default'] .km-format-glyph-bar {
+  background: currentColor;
+}
+.km-format-color-trigger:not([data-color='default']) .km-format-glyph-bar {
+  background: var(--km-format-color);
+}
+.km-format-palette {
+  position: absolute;
+  z-index: 12;
+  top: calc(100% + 5px);
+  right: -4px;
+  width: 212px;
+  padding: 8px 9px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-elevated);
+  box-shadow: var(--shadow-lg);
+}
+.km-format-palette[hidden] {
+  display: none;
+}
+.km-format-default-color {
+  display: flex;
+  width: 100%;
+  height: 31px;
+  align-items: center;
+  gap: 8px;
+  padding: 0 7px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-size: 12px;
+  text-align: left;
+}
+.km-format-default-color:hover:not(:disabled),
+.km-format-default-color.active {
+  border-color: var(--accent-soft);
+  background: var(--hover);
+}
+.km-format-default-chip {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 18px;
+  border: 1px solid color-mix(in srgb, currentColor 30%, var(--border));
+  border-radius: 3px;
+  background: currentColor;
+}
+.km-format-palette-section {
+  margin-top: 8px;
+  padding-top: 7px;
+  border-top: 1px solid var(--border-soft);
+}
+.km-format-palette-heading {
+  margin: 0 2px 6px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+}
+.km-format-palette-grid {
+  display: grid;
+  grid-template-columns: repeat(var(--km-format-columns), 26px);
+  justify-content: space-between;
+  gap: 5px 0;
+}
+.km-format-swatch {
+  position: relative;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid color-mix(in srgb, var(--border) 75%, transparent);
+  border-radius: 4px;
+  background: var(--km-format-color);
+  cursor: pointer;
+}
+.km-format-swatch:hover:not(:disabled),
+.km-format-swatch.active {
+  box-shadow:
+    0 0 0 2px var(--bg-elevated),
+    0 0 0 4px var(--accent);
+}
+.km-format-toolbar + .km-src-editor,
+.km-format-toolbar + .km-cp-input {
+  border-radius: 0 0 var(--radius-md) var(--radius-md);
+}
 .km-src-editor {
   width: 100%;
   font-family: var(--font-mono);
@@ -331,16 +544,52 @@ body.hm-full-width .km-doc {
 }
 /* `==highlight==` and the colored `<mark class="hm-hl-…">` form. Mirrors app.css. */
 .km-doc mark {
-  color: inherit;
+  color: inherit !important;
   padding: 0.05em 0.15em;
   border-radius: 2px;
-  background: #fff3a3;
+  background: #fff3a3 !important;
 }
-.km-doc mark.hm-hl-red { background: #ffc6c6; }
-.km-doc mark.hm-hl-blue { background: #bcd9ff; }
-body.dark .km-doc mark { background: #7a6c12; }
-body.dark .km-doc mark.hm-hl-red { background: #7a3434; }
-body.dark .km-doc mark.hm-hl-blue { background: #2f4a6b; }
+.km-doc mark.hm-hl-red { background: #ffc6c6 !important; }
+.km-doc mark.hm-hl-blue { background: #bcd9ff !important; }
+body:is(.dark, .vscode-dark, .vscode-high-contrast, .hm-theme-warm-dark) .km-doc mark {
+  background: #7a6c12 !important;
+}
+body:is(.dark, .vscode-dark, .vscode-high-contrast, .hm-theme-warm-dark)
+  .km-doc mark.hm-hl-red {
+  background: #7a3434 !important;
+}
+body:is(.dark, .vscode-dark, .vscode-high-contrast, .hm-theme-warm-dark)
+  .km-doc mark.hm-hl-blue {
+  background: #2f4a6b !important;
+}
+/* Palette colors get a render-only semantic class in keep-parser.js. The
+   important fallback protects the user's explicit document color from VSCode
+   themes that force a color on every nested span. */
+.hm-text-color-ink { --hm-text-color: #24211f; }
+.hm-text-color-slate { --hm-text-color: #475569; }
+.hm-text-color-gray { --hm-text-color: #6b7280; }
+.hm-text-color-silver { --hm-text-color: #9ca3af; }
+.hm-text-color-red-light { --hm-text-color: #ef7d87; }
+.hm-text-color-orange-light { --hm-text-color: #e99a5c; }
+.hm-text-color-gold-light { --hm-text-color: #d6aa2e; }
+.hm-text-color-green-light { --hm-text-color: #65a978; }
+.hm-text-color-blue-light { --hm-text-color: #6c9fd0; }
+.hm-text-color-purple-light { --hm-text-color: #aa83cb; }
+.hm-text-color-red { --hm-text-color: #d94b5b; }
+.hm-text-color-orange { --hm-text-color: #c96a2b; }
+.hm-text-color-gold { --hm-text-color: #a97800; }
+.hm-text-color-green { --hm-text-color: #25845f; }
+.hm-text-color-blue { --hm-text-color: #3378c5; }
+.hm-text-color-purple { --hm-text-color: #8559b5; }
+.hm-text-color-red-dark { --hm-text-color: #8f2635; }
+.hm-text-color-orange-dark { --hm-text-color: #8d451e; }
+.hm-text-color-gold-dark { --hm-text-color: #735300; }
+.hm-text-color-green-dark { --hm-text-color: #1f5f43; }
+.hm-text-color-blue-dark { --hm-text-color: #205493; }
+.hm-text-color-purple-dark { --hm-text-color: #5d3c80; }
+.km-doc .hm-text-color > span {
+  color: var(--hm-text-color) !important;
+}
 .km-doc a {
   color: var(--accent);
   text-decoration: none;

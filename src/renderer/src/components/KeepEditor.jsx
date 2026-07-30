@@ -17,6 +17,11 @@ import {
   prepareBlockInsertion,
   detectDocLang
 } from '../keep-parser.js'
+import {
+  createKeepFormatToolbar,
+  keepBlockSupportsFormatting,
+  refreshKeepFormatToolbar
+} from '../keep-format.js'
 import { inlineRichStyles } from './editor-copy.js'
 import { dirOf } from './editor-images.js'
 import { getMermaidSvg, peekMermaidSvg } from './editor-mermaid.js'
@@ -999,10 +1004,13 @@ function KeepEditor({
         const cancel = document.createElement('button')
         cancel.type = 'button'
         cancel.textContent = T('edit.cancel')
+        const editSurface = document.createElement('div')
+        editSurface.className = 'km-format-editor'
+        editSurface.append(createKeepFormatToolbar(ta, { t: T }), ta)
         // Confirm first, cancel after — same button order as the block source editor.
         act.appendChild(ok)
         act.appendChild(cancel)
-        pop.appendChild(ta)
+        pop.appendChild(editSurface)
         pop.appendChild(act)
         document.body.appendChild(pop)
         // `anchor` is the (possibly floating-header) element to position under; it
@@ -1055,8 +1063,14 @@ function KeepEditor({
         cancel.textContent = tRef.current('edit.cancel')
         act.appendChild(ok)
         act.appendChild(cancel)
+        const editSurface = document.createElement('div')
+        editSurface.className = 'km-format-editor'
+        if (keepBlockSupportsFormatting(b.type)) {
+          editSurface.appendChild(createKeepFormatToolbar(ta, { t: tRef.current }))
+        }
+        editSurface.appendChild(ta)
         blockDiv.innerHTML = ''
-        blockDiv.appendChild(ta)
+        blockDiv.appendChild(editSurface)
         blockDiv.appendChild(act)
         ta.focus()
         activeBlockEditRef.current = { ta, b, originalRaw: raw }
@@ -1101,7 +1115,10 @@ function KeepEditor({
         cancel.type = 'button'
         cancel.textContent = tRef.current('edit.cancel')
         actions.append(ok, cancel)
-        container.append(ta, actions)
+        const editSurface = document.createElement('div')
+        editSurface.className = 'km-format-editor'
+        editSurface.append(createKeepFormatToolbar(ta, { t: tRef.current }), ta)
+        container.append(editSurface, actions)
         const at = where === 'above' ? b.start : b.end + 1
         if (where === 'above') blockDiv.before(container)
         else blockDiv.after(container)
@@ -2788,9 +2805,17 @@ function KeepEditor({
     host?.querySelectorAll('.km-src-actions .ok').forEach((button) => {
       button.disabled = readOnly
     })
+    host?.querySelectorAll('.km-format-toolbar button').forEach((button) => {
+      button.disabled = readOnly
+    })
     cellPop?.querySelectorAll('.ok').forEach((button) => {
       button.disabled = readOnly
     })
+    cellPop?.querySelectorAll('.km-format-toolbar button').forEach((button) => {
+      button.disabled = readOnly
+    })
+    refreshKeepFormatToolbar(host, tRef.current)
+    refreshKeepFormatToolbar(cellPop, tRef.current)
   }, [readOnly])
 
   // Hot-swap the static "edit source" labels when the UI language changes. The
@@ -2806,6 +2831,10 @@ function KeepEditor({
       const span = btn.querySelector('span')
       if (span) span.textContent = label
     })
+    refreshKeepFormatToolbar(host, tRef.current)
+    document
+      .querySelectorAll('.km-cell-pop .km-format-toolbar')
+      .forEach((toolbar) => refreshKeepFormatToolbar(toolbar, tRef.current))
     ensureEmbedZoomButtons(host, tRef.current)
     tableScrollRef.current?.refreshLabels(tRef.current)
   }, [lang])

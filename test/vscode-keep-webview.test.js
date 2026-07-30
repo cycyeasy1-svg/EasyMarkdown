@@ -117,7 +117,9 @@ describe('VSCode Keep webview interactions', () => {
         '<thead><tr><th rowspan="2">NO</th><th colspan="2">Common</th></tr></thead>',
         '<tbody><tr><td><span style="background-color:#FFFF00;position:fixed" onmouseover="x">Ready</span></td></tr></tbody>',
         '<script>alert(1)</script>',
-        '</table>'
+        '</table>',
+        '',
+        '<span style="color: #205493">Blue</span> and ==marked=='
       ].join('\n'),
       lang: 'en',
       langPref: 'en',
@@ -137,6 +139,10 @@ describe('VSCode Keep webview interactions', () => {
     expect(badge?.style.position).toBe('')
     expect(badge?.hasAttribute('onmouseover')).toBe(false)
     expect(table.querySelector('script')).toBeNull()
+    expect(document.querySelector('.km-doc .hm-text-color-blue-dark > span')?.textContent).toBe(
+      'Blue'
+    )
+    expect(document.querySelector('.km-doc mark.hm-hl-yellow')?.textContent).toBe('marked')
   })
 
   it('persists the Keep viewport without dropping an unfinished draft', async () => {
@@ -185,6 +191,93 @@ describe('VSCode Keep webview interactions', () => {
     expect(countFor('red')).toBe('(2)')
     expect(countFor('purple')).toBe('(1)')
     expect(countFor('yellow')).toBeUndefined()
+  })
+
+  it('formats a block draft through the shared Keep toolbar before posting a minimal edit', async () => {
+    send({
+      type: 'init',
+      text: '# Title\n\nbody text',
+      lang: 'en',
+      langPref: 'en',
+      theme: 'auto'
+    })
+    await waitForPaint()
+
+    document.querySelector('.km-block[data-bi="1"] .km-src-edit').click()
+    const editor = document.querySelector('.km-src-editor')
+    const toolbar = document.querySelector('.km-format-toolbar')
+    expect(toolbar).not.toBeNull()
+    editor.setSelectionRange(0, editor.value.length)
+    editor.dispatchEvent(new Event('select'))
+    toolbar.querySelector('.km-format-bold').click()
+
+    expect(editor.value).toBe('**body text**')
+    toolbar.querySelector('.km-format-color-trigger').click()
+    expect(toolbar.querySelectorAll('.km-format-swatch')).toHaveLength(22)
+    expect(
+      [...toolbar.querySelectorAll('.km-format-palette-heading')].map((item) => item.textContent)
+    ).toEqual(['Neutral colors', 'Theme colors'])
+    toolbar.querySelector('.km-color-blue-dark').click()
+    expect(editor.value).toBe('**<span style="color: #205493">body text</span>**')
+    toolbar.querySelector('.km-format-highlight').click()
+    expect(editor.value).toBe(
+      '**<mark class="hm-hl-yellow"><span style="color: #205493">body text</span></mark>**'
+    )
+
+    document.querySelector('.km-src-actions .ok').click()
+    expect(posts.filter((message) => message.type === 'replaceLines').at(-1)).toMatchObject({
+      startLine: 2,
+      endLine: 2,
+      lines: [
+        '**<mark class="hm-hl-yellow"><span style="color: #205493">body text</span></mark>**'
+      ]
+    })
+  })
+
+  it('renders legacy and creates new formatting after Windows path separators', async () => {
+    const visualLine =
+      String.raw`E:\AI\20260715\医療・介護\LifeEventMedicalCareDetailComponent\E2Eテスト仕様書_T04.md`
+    const legacyLine =
+      String.raw`E:\AI\20260715\<span style="color: #d94b5b">医療・介護</span>\LifeEventMedicalCareDetailComponent\==E2Eテスト仕様書==_T04.md`
+    send({
+      type: 'init',
+      text: `${legacyLine}\n\n${visualLine}`,
+      lang: 'ja',
+      langPref: 'ja',
+      theme: 'auto'
+    })
+    await waitForPaint()
+
+    const legacyBlock = document.querySelector('.km-block[data-bi="0"]')
+    expect(legacyBlock.querySelector('p')?.textContent).toBe(visualLine)
+    expect(legacyBlock.querySelector('.hm-text-color-red > span')?.textContent).toBe('医療・介護')
+    expect(legacyBlock.querySelector('mark.hm-hl-yellow')?.textContent).toBe('E2Eテスト仕様書')
+
+    document.querySelector('.km-block[data-bi="1"] .km-src-edit').click()
+    const editor = document.querySelector('.km-src-editor')
+    const toolbar = document.querySelector('.km-format-toolbar')
+    const select = (text) => {
+      const start = editor.value.indexOf(text)
+      editor.focus()
+      editor.setSelectionRange(start, start + text.length)
+      editor.dispatchEvent(new Event('select', { bubbles: true }))
+    }
+
+    select('医療・介護')
+    toolbar.querySelector('.km-format-color-trigger').click()
+    toolbar.querySelector('.km-color-red').click()
+    select('E2Eテスト仕様書')
+    toolbar.querySelector('.km-format-highlight').click()
+
+    const formattedLine =
+      String.raw`E:\AI\20260715&#92;<span style="color: #d94b5b">医療・介護</span>\LifeEventMedicalCareDetailComponent&#92;==E2Eテスト仕様書==_T04.md`
+    expect(editor.value).toBe(formattedLine)
+    document.querySelector('.km-src-actions .ok').click()
+    expect(posts.filter((message) => message.type === 'replaceLines').at(-1)).toMatchObject({
+      startLine: 2,
+      endLine: 2,
+      lines: [formattedLine]
+    })
   })
 
   it('supports keyboard table work, TSV paste, draft rebase, and guarded source switching', async () => {

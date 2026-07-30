@@ -36,6 +36,7 @@ import {
   sanitizeHtmlFragment
 } from './html-sanitize.js'
 import { HIGHLIGHT_STICKY_RE, MARK_HTML_STICKY_RE } from './highlight-syntax.js'
+import { keepTextColorByValue } from './keep-format-colors.js'
 
 // ── language sniff (per-document writing font) ──
 // Kana is a definitive Japanese signal (Han characters are shared with Chinese,
@@ -112,6 +113,49 @@ md.normalizeLink = (url) => url
 md.normalizeLinkText = (text) => text
 md.linkify.set({ fuzzyLink: false, fuzzyEmail: false, fuzzyIP: false })
 
+function hasWindowsDrivePrefix(source, position) {
+  const lineStart = source.lastIndexOf('\n', position - 1) + 1
+  // Include the current slash so `E:\<span…>` (formatting the first path
+  // component) is covered as well as wrappers deeper in the path.
+  const prefix = source.slice(lineStart, position + 1)
+  let lastDrive = -1
+  for (const match of prefix.matchAll(/[a-z]:\\/gi)) lastDrive = match.index
+  return lastDrive >= 0
+}
+
+function isLegacyPathFormatAt(source, position) {
+  HIGHLIGHT_STICKY_RE.lastIndex = position
+  if (HIGHLIGHT_STICKY_RE.test(source)) return true
+  MARK_HTML_STICKY_RE.lastIndex = position
+  if (MARK_HTML_STICKY_RE.test(source)) return true
+
+  const html = matchRenderableInlineHtml(source, position)?.html || ''
+  const color =
+    html.match(/^<span\s+style="color:\s*(#[0-9a-f]{6})"\s*>/i)?.[1] || ''
+  return !!keepTextColorByValue(color)
+}
+
+// A toolbar wrapper inserted directly after a Windows path separator used to
+// become `\<span…>` / `\==…==`. CommonMark treats that slash as an escape and
+// rendered the wrapper literally. New edits encode that separator as `&#92;`,
+// but recognize those already-saved toolbar forms in a drive path as well so the
+// user's current document starts rendering correctly without a source rewrite.
+md.inline.ruler.before('escape', 'hm_windows_path_format', (state, silent) => {
+  if (
+    state.src.charCodeAt(state.pos) !== 0x5c /* \ */ ||
+    !hasWindowsDrivePrefix(state.src, state.pos) ||
+    !isLegacyPathFormatAt(state.src, state.pos + 1)
+  ) {
+    return false
+  }
+  if (!silent) {
+    const token = state.push('text', '', 0)
+    token.content = '\\'
+  }
+  state.pos += 1
+  return true
+})
+
 // Explicit document anchors are common in generated design docs, including inside
 // GFM table cells: `<a id="def-bhv-001"></a>[BHV-001](…#def-bhv-001)`.
 // With html:false markdown-it correctly escapes arbitrary raw HTML, but that also
@@ -165,8 +209,19 @@ md.inline.ruler.before('html_inline', 'hm_safe_inline_html', (state, silent) => 
   state.pos = match.end
   return true
 })
-md.renderer.rules.hm_safe_inline_html = (tokens, idx) =>
-  '<span class="hm-html-inline">' + sanitizeHtmlFragment(tokens[idx].content) + '</span>'
+md.renderer.rules.hm_safe_inline_html = (tokens, idx) => {
+  const safe = sanitizeHtmlFragment(tokens[idx].content)
+  const rootStyle = safe.match(/^<span\b[^>]*\bstyle="([^"]*)"/i)?.[1] || ''
+  const colorValue =
+    rootStyle.match(/(?:^|;)\s*color\s*:\s*(#[0-9a-f]{6})(?:\s*;|$)/i)?.[1] || ''
+  const color = keepTextColorByValue(colorValue)
+  // The semantic render-only class gives the app and the VSCode webview a
+  // stylesheet-level `!important` fallback. This keeps a document color visible
+  // even when a user/VSCode theme force-colors nested spans; the saved Markdown
+  // remains the portable `<span style="color: …">` form.
+  const colorClass = color ? ` hm-text-color hm-text-color-${color.id}` : ''
+  return `<span class="hm-html-inline${colorClass}">${safe}</span>`
+}
 
 // `==highlight==` and its colored `<mark class="hm-hl-…">` form. Registered as an
 // inline RULE, not a pre-pass on the raw string: markdown-it runs the `backticks`
@@ -189,7 +244,12 @@ md.inline.ruler.before('emphasis', 'hm_highlight', (state, silent) => {
     // Parse the content as inline markdown, so `==**a**==` highlights bold text
     // instead of showing literal asterisks. The syntax regex forbids `=` inside the
     // content, so a highlight can never nest inside a highlight — no recursion.
-    state.md.inline.parse(content, state.md, state.env, state.tokens)
+    // Parse into a temporary array first. Writing recursively into `state.tokens`
+    // corrupts the current delimiter stack when an HTML highlight is nested in
+    // emphasis (the opening <mark> can be rewritten as a <strong> token).
+    const children = []
+    state.md.inline.parse(content, state.md, state.env, children)
+    state.tokens.push(...children)
     state.push('highlight_close', 'mark', -1)
   }
   state.pos += m[0].length

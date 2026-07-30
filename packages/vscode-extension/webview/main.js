@@ -22,6 +22,10 @@ import {
   toggleTaskLine,
   prepareBlockInsertion
 } from '../../../src/renderer/src/keep-parser.js'
+import {
+  createKeepFormatToolbar,
+  keepBlockSupportsFormatting
+} from '../../../src/renderer/src/keep-format.js'
 import { inlineRichStyles } from '../../../src/renderer/src/components/editor-copy.js'
 import { isRelativePath } from '../../../src/renderer/src/components/editor-images.js'
 import { enhanceKeepTables } from '../../../src/renderer/src/components/editor-tablescroll.js'
@@ -1223,9 +1227,12 @@ function openCellPop(td, anchorEl, initialValue) {
     const cancel = document.createElement('button')
     cancel.type = 'button'
     cancel.textContent = t('edit.cancel')
+    const editSurface = document.createElement('div')
+    editSurface.className = 'km-format-editor'
+    editSurface.append(createKeepFormatToolbar(ta, { t }), ta)
     act.appendChild(ok)
     act.appendChild(cancel)
-    pop.appendChild(ta)
+    pop.appendChild(editSurface)
     pop.appendChild(act)
     document.body.appendChild(pop)
     activeCellPop = {
@@ -1283,8 +1290,14 @@ function startBlockEdit(bi, initialValue) {
     cancel.textContent = t('edit.cancel')
     act.appendChild(ok)
     act.appendChild(cancel)
+    const editSurface = document.createElement('div')
+    editSurface.className = 'km-format-editor'
+    if (keepBlockSupportsFormatting(b.type)) {
+      editSurface.appendChild(createKeepFormatToolbar(ta, { t }))
+    }
+    editSurface.appendChild(ta)
     blockDiv.innerHTML = ''
-    blockDiv.appendChild(ta)
+    blockDiv.appendChild(editSurface)
     blockDiv.appendChild(act)
     ta.focus()
     activeBlockEdit = {
@@ -1338,7 +1351,10 @@ function startBlockInsert(bi, where, initialValue = '', atOverride) {
     cancel.type = 'button'
     cancel.textContent = t('edit.cancel')
     act.append(ok, cancel)
-    container.append(ta, act)
+    const editSurface = document.createElement('div')
+    editSurface.className = 'km-format-editor'
+    editSurface.append(createKeepFormatToolbar(ta, { t }), ta)
+    container.append(editSurface, act)
     const at = Number.isInteger(atOverride) ? atOverride : where === 'above' ? b.start : b.end + 1
     if (where === 'above') blockDiv.before(container)
     else blockDiv.after(container)

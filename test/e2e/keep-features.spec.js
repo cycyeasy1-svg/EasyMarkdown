@@ -126,6 +126,159 @@ test('Save FAB clears the dirty state and writes the edit to disk', async () => 
   }
 })
 
+test('Keep formatting toolbar edits block and table-cell selections without widening the diff', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'em-format-toolbar-'))
+  const file = join(dir, 'format-toolbar.md')
+  writeFileSync(
+    file,
+    '# Title\n\nbody text\n\n| A |\n| --- |\n| cell |\n',
+    'utf8'
+  )
+
+  const { page, cleanup } = await launchApp([file])
+  try {
+    await page.locator('.tab', { hasText: 'format-toolbar.md' }).click()
+    await expect(page.locator('.km-doc')).toBeVisible()
+
+    // Block edit: the toolbar keeps the textarea selection while pointer clicks
+    // generate Markdown + safe inline HTML around it.
+    await page.locator('.km-block', { has: page.locator('p', { hasText: 'body text' }) })
+      .locator('.km-src-edit')
+      .click()
+    const blockEditor = page.locator('.km-src-editor')
+    await blockEditor.selectText()
+    await page.locator('.km-format-bold').click()
+    await expect(blockEditor).toHaveValue('**body text**')
+    await page.locator('.km-format-color-trigger').click()
+    await page.locator('.km-color-blue').click()
+    await expect(blockEditor).toHaveValue(
+      '**<span style="color: #3378c5">body text</span>**'
+    )
+    await page.locator('.km-format-highlight').click()
+    await expect(blockEditor).toHaveValue(
+      '**<mark class="hm-hl-yellow"><span style="color: #3378c5">body text</span></mark>**'
+    )
+    await page.locator('.km-src-actions .ok').click()
+    const formatted = page.locator('.km-doc p strong mark')
+    await expect(formatted).toHaveText('body text')
+    await expect(formatted).toHaveCSS('background-color', 'rgb(255, 243, 163)')
+    const colored = formatted.locator('.hm-text-color-blue > span')
+    await expect(colored).toHaveCSS('color', 'rgb(51, 120, 197)')
+
+    // Table-cell edit uses the same toolbar but still commits through the
+    // one-cell/one-line Keep patch.
+    await page.locator('.km-table tbody td', { hasText: 'cell' }).dblclick()
+    const cellPop = page.locator('.km-cell-pop')
+    await expect(cellPop.locator('.km-format-toolbar')).toBeVisible()
+    const cellEditor = cellPop.locator('textarea')
+    await cellEditor.selectText()
+    await cellPop.locator('.km-format-underline').click()
+    await expect(cellEditor).toHaveValue('<u>cell</u>')
+    await cellPop.locator('.km-format-strike').click()
+    await expect(cellEditor).toHaveValue('~~<u>cell</u>~~')
+    await cellPop.locator('.km-cp-actions .ok').click()
+    await expect(page.locator('.km-table tbody td s u')).toHaveText('cell')
+
+    await page.locator('.hm-save-fab').click()
+    await expect.poll(() => readFileSync(file, 'utf8')).toBe(
+      [
+        '# Title',
+        '',
+        '**<mark class="hm-hl-yellow"><span style="color: #3378c5">body text</span></mark>**',
+        '',
+        '| A |',
+        '| --- |',
+        '| ~~<u>cell</u>~~ |',
+        ''
+      ].join('\n')
+    )
+  } finally {
+    await cleanup()
+    try {
+      rmSync(dir, { recursive: true, force: true })
+    } catch {
+      /* best effort */
+    }
+  }
+})
+
+test('Keep renders and formats color/highlight directly after Windows path separators', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'em-format-windows-path-'))
+  const file = join(dir, 'format-windows-path.md')
+  const visualLine =
+    String.raw`E:\AI\20260715\医療・介護\LifeEventMedicalCareDetailComponent\E2Eテスト仕様書_T04.md`
+  const legacyLine =
+    String.raw`E:\AI\20260715\<span style="color: #d94b5b">医療・介護</span>\LifeEventMedicalCareDetailComponent\==E2Eテスト仕様書==_T04.md`
+  writeFileSync(file, `${legacyLine}\n\n${visualLine}\n`, 'utf8')
+
+  const { page, cleanup } = await launchApp([file])
+  try {
+    await page.locator('.tab', { hasText: 'format-windows-path.md' }).click()
+    await expect(page.locator('.km-doc')).toBeVisible()
+
+    // Documents saved by the earlier toolbar used `\<span…>` / `\==…==`.
+    // They must render immediately without rewriting the user's source.
+    const legacyBlock = page.locator('.km-block').first()
+    await expect(legacyBlock.locator('p')).toHaveText(visualLine)
+    await expect(legacyBlock.locator('.hm-text-color-red > span')).toHaveCSS(
+      'color',
+      'rgb(217, 75, 91)'
+    )
+    await expect(legacyBlock.locator('mark.hm-hl-yellow')).toHaveCSS(
+      'background-color',
+      'rgb(255, 243, 163)'
+    )
+
+    const editableBlock = page.locator('.km-block').filter({
+      has: page.locator('p', { hasText: visualLine })
+    }).last()
+    await editableBlock.locator('.km-src-edit').click()
+    const editor = page.locator('.km-src-editor')
+    const select = async (text) => {
+      await editor.evaluate((el, selectedText) => {
+        const start = el.value.indexOf(selectedText)
+        el.focus()
+        el.setSelectionRange(start, start + selectedText.length)
+        el.dispatchEvent(new Event('select', { bubbles: true }))
+      }, text)
+    }
+
+    await select('医療・介護')
+    await page.locator('.km-format-color-trigger').click()
+    await page.locator('.km-color-red').click()
+    await select('E2Eテスト仕様書')
+    await page.locator('.km-format-highlight').click()
+
+    const formattedLine =
+      String.raw`E:\AI\20260715&#92;<span style="color: #d94b5b">医療・介護</span>\LifeEventMedicalCareDetailComponent&#92;==E2Eテスト仕様書==_T04.md`
+    await expect(editor).toHaveValue(formattedLine)
+    await page.locator('.km-src-actions .ok').click()
+
+    const renderedBlock = page.locator('.km-block').last()
+    await expect(renderedBlock.locator('p')).toHaveText(visualLine)
+    await expect(renderedBlock.locator('.hm-text-color-red > span')).toHaveCSS(
+      'color',
+      'rgb(217, 75, 91)'
+    )
+    await expect(renderedBlock.locator('mark.hm-hl-yellow')).toHaveCSS(
+      'background-color',
+      'rgb(255, 243, 163)'
+    )
+
+    await page.locator('.hm-save-fab').click()
+    await expect.poll(() => readFileSync(file, 'utf8')).toBe(
+      `${legacyLine}\n\n${formattedLine}\n`
+    )
+  } finally {
+    await cleanup()
+    try {
+      rmSync(dir, { recursive: true, force: true })
+    } catch {
+      /* best effort */
+    }
+  }
+})
+
 test('dirty Keep mode asks to save before Milkdown and both directions use the app dialog', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'em-mode-switch-'))
   const file = join(dir, 'mode-switch.md')

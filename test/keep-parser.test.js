@@ -165,6 +165,64 @@ describe('inline', () => {
       '<span class="hm-html-inline"><span style="color: #f00; padding: 2px">a<br>b</span></span>'
     )
   })
+  it('adds a render-only fallback class for a toolbar text color', () => {
+    expect(inline('<span style="color: #3378c5">blue</span>')).toBe(
+      '<span class="hm-html-inline hm-text-color hm-text-color-blue">' +
+        '<span style="color: #3378c5">blue</span></span>'
+    )
+    expect(inline('<span style="color: #8F2635">dark red</span>')).toContain(
+      'hm-text-color-red-dark'
+    )
+  })
+  it('renders toolbar color and highlight after a Windows-path separator', () => {
+    expect(
+      inline(
+        String.raw`E:\docs&#92;<span style="color: #d94b5b">医療</span>\file.md`
+      )
+    ).toBe(
+      'E:\\docs\\' +
+        '<span class="hm-html-inline hm-text-color hm-text-color-red">' +
+        '<span style="color: #d94b5b">医療</span></span>' +
+        '\\file.md'
+    )
+    expect(inline(String.raw`E:\docs&#92;==E2E仕様書==\file.md`)).toBe(
+      'E:\\docs\\' +
+        '<mark class="hm-highlight hm-hl-yellow">E2E仕様書</mark>' +
+        '\\file.md'
+    )
+  })
+  it('renders already-saved toolbar wrappers escaped by a Windows-path separator', () => {
+    expect(
+      inline(
+        String.raw`E:\AI\20260715\<span style="color: #d94b5b">医療・介護</span>\LifeEvent.md`
+      )
+    ).toBe(
+      'E:\\AI\\20260715\\' +
+        '<span class="hm-html-inline hm-text-color hm-text-color-red">' +
+        '<span style="color: #d94b5b">医療・介護</span></span>' +
+        '\\LifeEvent.md'
+    )
+    expect(
+      inline(String.raw`E:\AI\20260715\医療・介護\LifeEvent\==E2Eテスト仕様書==\T04.md`)
+    ).toBe(
+      'E:\\AI\\20260715\\医療・介護\\LifeEvent\\' +
+        '<mark class="hm-highlight hm-hl-yellow">E2Eテスト仕様書</mark>' +
+        '\\T04.md'
+    )
+    expect(
+      inline(String.raw`E:\<span style="color: #d94b5b">医療・介護</span>\T04.md`)
+    ).toContain('<span style="color: #d94b5b">医療・介護</span>')
+    expect(inline(String.raw`E:\==E2Eテスト仕様書==\T04.md`)).toContain(
+      '<mark class="hm-highlight hm-hl-yellow">E2Eテスト仕様書</mark>'
+    )
+
+    // Keep ordinary CommonMark escapes unchanged when no Windows drive path
+    // precedes the toolbar-looking text.
+    expect(inline(String.raw`plain\==literal==`)).toBe('plain==literal==')
+    expect(inline(String.raw`plain\<span style="color: #d94b5b">literal</span>`)).toBe(
+      'plain&lt;span style=&quot;color: #d94b5b&quot;&gt;literal&lt;/span&gt;'
+    )
+  })
   it('unescapes a GFM-escaped pipe inside a table cell', () => {
     expect(inline('a \\| b')).toBe('a | b')
   })
@@ -183,6 +241,17 @@ describe('inline', () => {
   it('renders the colored <mark class="hm-hl-…"> form the rich editor writes', () => {
     expect(inline('<mark class="hm-hl-red">红</mark>')).toBe(
       '<mark class="hm-highlight hm-hl-red">红</mark>'
+    )
+  })
+  it('keeps an HTML highlight correctly nested with emphasis and a text color', () => {
+    expect(
+      inline(
+        '**<mark class="hm-hl-yellow"><span style="color: #3378c5">text</span></mark>**'
+      )
+    ).toBe(
+      '<strong><mark class="hm-highlight hm-hl-yellow">' +
+        '<span class="hm-html-inline hm-text-color hm-text-color-blue">' +
+        '<span style="color: #3378c5">text</span></span></mark></strong>'
     )
   })
   it('never highlights inside a code span, or across === / CriticMarkup', () => {
