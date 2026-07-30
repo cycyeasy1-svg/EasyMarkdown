@@ -1,8 +1,15 @@
 # Changelog
 
 ## 1.5.0
-<!-- head: c13ccd1 -->
+<!-- head: a685811 -->
 
+- **Format text without leaving Keep** — apply bold, italic, strikethrough,
+  underline, highlights, and text colors from a toolbar while editing blocks,
+  inserting content, or changing table cells, while retaining source-backed
+  minimal edits.
+- **Safe rendering for raw HTML** — display sanitized inline and block HTML,
+  including complex tables with row and column spans, while removing scripts,
+  event handlers, and layout-breaking styles.
 - **Reorder sections from the outline** — drag sibling headings to move each
   heading together with its complete section, while preserving the document
   hierarchy and source content.
@@ -10,6 +17,8 @@
   area and wrap cell text instead of scrolling sideways.
 - **More natural lower-level headings** — H6 headings now preserve their
   original casing and use normal letter spacing.
+- **Fix: floating table headers stay aligned after pane resizing** — resync
+  their position and width after resizing the VSCode sidebar or a split pane.
 
 ## 1.4.1
 <!-- head: 5d779a4 -->

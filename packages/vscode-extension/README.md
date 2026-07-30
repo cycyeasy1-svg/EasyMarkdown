@@ -16,9 +16,15 @@ minimal line-range edit, so VSCode owns dirty state, undo/redo and save.
 - **Draft-safe editing** — unfinished cell and block edits survive tab hiding and
   webview restoration. Switching to source or saving asks before discarding a
   draft, while external edits are rebased only when the source anchor is safe.
+- **Inline formatting toolbar** — apply bold, italic, strikethrough, underline,
+  highlights, and text colors while editing or inserting blocks or table cells,
+  without leaving Keep.
 - **Faithful inline Markdown** — GFM strikethrough, underscore emphasis,
   autolinks, link titles, escaped punctuation and `==highlight==` render in the
   keep view without changing the source.
+- **Safe raw HTML** — sanitized inline and block HTML renders in Keep, including
+  complex tables with row and column spans; scripts, event handlers, and
+  layout-breaking styles are removed.
 - **Tables** — Excel-style per-column filters, add/remove rows & columns,
   drag-to-resize and auto-fit, temporary hide/restore controls, a sticky
   floating header for wide tables with selection and context-menu actions, rich
