@@ -525,6 +525,10 @@ export function enhanceKeepTables(
         ? new ResizeObserver(() => {
             syncTopWidth()
             syncWidths()
+            // Resizing the sidebar/split panes changes the table wrapper without
+            // firing `window.resize`. Reposition and resize the fixed overlay too,
+            // otherwise its outer viewport keeps the geometry from before the drag.
+            updateFloat()
           })
         : { observe() {}, disconnect() {} }
     ro.observe(table)

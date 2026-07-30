@@ -187,6 +187,51 @@ test('Keep table keyboard navigation reveals cells below the floating header', a
   }
 })
 
+test('Keep floating table header tracks sidebar resizing', async () => {
+  const { page, cleanup } = await openTableFixture()
+  try {
+    const table = page.locator('.km-doc table.km-table[data-ti="0"]')
+    const target = table.locator('tbody tr[data-ri="2"] td[data-ci="0"]')
+    await target.evaluate((cell) => {
+      const scroller = cell.closest('.editor-scroll')
+      const gap = cell.getBoundingClientRect().top - scroller.getBoundingClientRect().top
+      scroller.scrollTop += gap
+      scroller.dispatchEvent(new Event('scroll'))
+    })
+    await expect(page.locator('.km-float-header.km-visible')).toBeVisible()
+
+    const alignmentGap = () =>
+      page.evaluate(() => {
+        const wrap = document.querySelector('.km-doc table.km-table[data-ti="0"]')?.closest('.km-table-wrap')
+        const floating = document.querySelector('.km-float-header.km-visible')
+        if (!wrap || !floating) return Number.POSITIVE_INFINITY
+        const wrapRect = wrap.getBoundingClientRect()
+        const floatingRect = floating.getBoundingClientRect()
+        return Math.max(
+          Math.abs(floatingRect.left - (wrapRect.left + wrap.clientLeft)),
+          Math.abs(floatingRect.width - wrap.clientWidth)
+        )
+      })
+    await expect.poll(alignmentGap).toBeLessThanOrEqual(1)
+
+    const sidebar = page.locator('.pane-left')
+    const widthBefore = await sidebar.evaluate((element) => element.getBoundingClientRect().width)
+    const dividerBox = await page.locator('.hm-sidebar-divider').boundingBox()
+    expect(dividerBox).not.toBeNull()
+    await page.mouse.move(dividerBox.x + dividerBox.width / 2, dividerBox.y + dividerBox.height / 2)
+    await page.mouse.down()
+    await page.mouse.move(dividerBox.x + dividerBox.width / 2 + 120, dividerBox.y + dividerBox.height / 2)
+    await page.mouse.up()
+
+    await expect
+      .poll(() => sidebar.evaluate((element) => element.getBoundingClientRect().width))
+      .toBeGreaterThan(widthBefore + 100)
+    await expect.poll(alignmentGap).toBeLessThanOrEqual(1)
+  } finally {
+    await cleanup()
+  }
+})
+
 test('Keep floating table header supports selection and the table context menu', async () => {
   const { app, page, cleanup } = await openTableFixture()
   try {

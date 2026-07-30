@@ -44,7 +44,7 @@ function makeTable({ rows = 8, columns = 4 } = {}) {
   wrap.appendChild(table)
   host.appendChild(wrap)
   document.body.appendChild(host)
-  return { host, table }
+  return { host, wrap, table, thead }
 }
 
 afterEach(() => {
@@ -113,6 +113,76 @@ describe('keep-table initialization performance guards', () => {
     )
     expect(menuEvent.defaultPrevented).toBe(true)
     expect(clonedTh.classList.contains('km-cell-selected')).toBe(true)
+    controls.destroy()
+  })
+
+  it('resizes and repositions a visible floating header when its wrapper changes', () => {
+    let resizeCallback
+    class ResizeObserverMock {
+      constructor(callback) {
+        resizeCallback = callback
+      }
+      observe() {}
+      disconnect() {}
+    }
+    vi.stubGlobal('ResizeObserver', ResizeObserverMock)
+
+    const { host, wrap, table, thead } = makeTable({ rows: 2, columns: 3 })
+    let wrapWidth = 520
+    let wrapLeft = 280
+    Object.defineProperties(wrap, {
+      clientWidth: { configurable: true, get: () => wrapWidth },
+      clientLeft: { configurable: true, get: () => 1 }
+    })
+    Object.defineProperties(table, {
+      offsetWidth: { configurable: true, get: () => 720 },
+      scrollWidth: { configurable: true, get: () => 720 }
+    })
+    vi.spyOn(host, 'getBoundingClientRect').mockReturnValue({
+      top: 60,
+      bottom: 700,
+      left: 0,
+      right: 0,
+      width: 0,
+      height: 640
+    })
+    vi.spyOn(thead, 'getBoundingClientRect').mockReturnValue({
+      top: 20,
+      bottom: 52,
+      left: wrapLeft,
+      right: wrapLeft + wrapWidth,
+      width: wrapWidth,
+      height: 32
+    })
+    vi.spyOn(table, 'getBoundingClientRect').mockReturnValue({
+      top: 20,
+      bottom: 900,
+      left: wrapLeft,
+      right: wrapLeft + 720,
+      width: 720,
+      height: 880
+    })
+    vi.spyOn(wrap, 'getBoundingClientRect').mockImplementation(() => ({
+      top: 20,
+      bottom: 900,
+      left: wrapLeft,
+      right: wrapLeft + wrapWidth,
+      width: wrapWidth,
+      height: 880
+    }))
+
+    const controls = enhanceKeepTables(host, host)
+    const floating = document.querySelector('.km-float-header')
+    expect(floating.classList.contains('km-visible')).toBe(true)
+    expect(floating.style.left).toBe('281px')
+    expect(floating.style.width).toBe('520px')
+
+    wrapWidth = 360
+    wrapLeft = 440
+    resizeCallback()
+
+    expect(floating.style.left).toBe('441px')
+    expect(floating.style.width).toBe('360px')
     controls.destroy()
   })
 })
