@@ -26,6 +26,8 @@ Keep and Milkdown are the two **editor modes**. **Source view** (\`Ctrl+/\`) is 
 
 - **Edit a table cell** — click to select, move with arrows or \`Tab\`, and press \`Enter\` / \`F2\` (double-click still works). In the multi-line editor, \`Ctrl/Cmd+Enter\` confirms and \`Esc\` cancels. \`Alt+↓\` opens the column filter; \`Shift+F10\` opens table actions.
 - **Edit content (block source)** — for a paragraph, heading, list or quote, click the **Edit content** button at the block's top-right, change the raw text in the box, and confirm. Only that block's lines are replaced.
+- **Format text while editing** — block, insertion, and table-cell editors provide a toolbar for bold, italic, strikethrough, underline, highlight, and text color. Only the selected text in that draft is changed.
+- **Safe HTML and rich copy** — Keep renders filtered raw HTML, including complex tables with merged cells. Copying a selection, cell, row, column, or table provides both rich and plain text so formatting and grids survive in Word, Excel, and similar apps.
 - **Tasks and block structure** — click a GFM task checkbox to toggle \`[ ]\` / \`[x]\`. Right-click a non-table block to insert above/below, duplicate, or delete it; the same actions are in the command palette.
 - **Add / remove table rows & columns** — *right-click* a cell: insert row above / below, delete row, insert column left / right, delete column (the last column is protected).
 - **Excel-style column filter** — click the **▼** on a column header, then check values or search to temporarily hide rows. Multiple columns combine with AND; the status bar shows \`Filtered X/Y\` — click it to clear every filter at once (right-click a table to clear just that one). **Display only — it never touches the file or affects saving.**
@@ -106,6 +108,8 @@ const ZH = `# EasyMarkdown 使用说明 📝
 
 - **编辑表格单元格** —— 单击选中，方向键或 \`Tab\` 移动，\`Enter\` / \`F2\` 编辑（仍支持双击）。多行编辑框中用 \`Ctrl/Cmd+Enter\` 确认、\`Esc\` 取消；\`Alt+↓\` 打开列筛选，\`Shift+F10\` 打开表格操作。
 - **内容编辑（改源码）** —— 段落、标题、列表、引用等块，点块右上角的 **内容编辑** 按钮，在文本框里改原文后确认，只替换该块所在的行。
+- **编辑时设置文字格式** —— 内容块、插入块和表格单元格编辑框提供粗体、斜体、删除线、下划线、高亮和文字颜色工具栏，只修改当前草稿中选中的文字。
+- **安全 HTML 与富文本复制** —— 保持模式可显示经过过滤的原生 HTML，包括带合并单元格的复杂表格。复制选区、单元格、行、列或整表时会同时提供富文本与纯文本，让 Word、Excel 等应用尽量保留样式和表格结构。
 - **任务与内容块结构** —— GFM 任务框可直接点击切换 \`[ ]\` / \`[x]\`。右键非表格内容块可在上方/下方插入、复制或删除；命令面板也提供同样操作。
 - **表格行列增删** —— 在单元格上**右键**：上方/下方插入行、删除本行、左侧/右侧插入列、删除本列（最后一列受保护，不能删）。
 - **Excel 式列筛选** —— 点表头的 **▼**，勾选取值或搜索，临时隐藏不需要的行。多列之间为 AND；状态栏显示「筛选 X/Y」，点它可一键清除全部筛选（表格右键也能只清除该表）。**仅影响显示，绝不写入文件、不影响保存。**
@@ -186,6 +190,8 @@ const JA = `# EasyMarkdown 使い方ガイド 📝
 
 - **表セルの編集** —— クリックで選択し、矢印キーまたは \`Tab\` で移動、\`Enter\` / \`F2\` で編集します（ダブルクリックも利用可）。複数行入力欄では \`Ctrl/Cmd+Enter\` で確定、\`Esc\` で取消。\`Alt+↓\` で列フィルター、\`Shift+F10\` で表操作を開きます。
 - **内容を編集（ソース編集）** —— 段落・見出し・リスト・引用などのブロックは、右上の **内容を編集** ボタンから原文を書き換えて確定します。そのブロックの行だけが置換されます。
+- **編集中のインライン書式** —— 内容ブロック、挿入ブロック、表セルの編集欄には、太字・斜体・取り消し線・下線・ハイライト・文字色のツールバーがあります。現在の下書きで選択した文字だけを変更します。
+- **安全な HTML とリッチコピー** —— キープモードは、結合セルを含む複雑な表など、フィルター済みの生 HTML を描画できます。選択範囲、セル、行、列、表全体をコピーするとリッチテキストとプレーンテキストの両方が用意され、Word や Excel などで書式や表構造を保ちやすくなります。
 - **タスクとブロック構造** —— GFM タスクチェックボックスはクリックで \`[ ]\` / \`[x]\` を切り替えられます。表以外のブロックを右クリックすると、上/下への挿入、複製、削除ができ、コマンドパレットからも実行できます。
 - **表の行・列の追加／削除** —— セルを**右クリック**：上に/下に行を挿入、行を削除、左に/右に列を挿入、列を削除（最後の 1 列は保護され削除できません）。
 - **Excel 風の列フィルタ** —— 列ヘッダの **▼** をクリックし、値のチェックや検索で行を一時的に隠します。複数列は AND。ステータスバーに「絞り込み X/Y」と表示され、クリックすると全フィルタを一括解除できます（表を右クリックすればその表だけ解除）。**表示専用で、ファイルには一切触れず、保存にも影響しません。**
