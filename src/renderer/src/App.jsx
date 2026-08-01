@@ -53,6 +53,7 @@ import {
   ZOOM_STEP,
   DEFAULT_ZOOM
 } from './settings.js'
+import { planEditorResidency, sameEditorIdSet } from './editor-residency.js'
 import {
   attachmentLinkMarkdown,
   extractMarkdownLinks,
@@ -968,11 +969,15 @@ export default function App() {
       /* quota / serialization failure — skip this snapshot */
     }
   }, [])
-  // Lazy mounting: a rich (Crepe) editor is only created once its tab has been
-  // activated, then kept mounted so later tab switches stay instant. This keeps
-  // startup/session-restore fast — only the active tab spins up an editor
-  // instead of every restored tab parsing its whole document at once.
+  // Lazy mounting: an editor is only created once its tab has been activated.
+  // Clean Keep editors may later hibernate outside a small MRU warm set; editors
+  // carrying drafts/history/filter state and every Milkdown editor stay mounted.
+  // This keeps both session restore and long-running workspaces bounded.
   const [mountedIds, setMountedIds] = useState(() => new Set())
+  const editorResidencyMruRef = useRef([])
+  const hibernatedEditorStateRef = useRef({})
+  const editorViewportStateRef = useRef({})
+  const editorViewportRafsRef = useRef(new Map())
   // Tab ids the user explicitly chose to render richly despite being "heavy"
   // (would otherwise open in the fast plain-text editor to avoid a long freeze).
   const [richForced, setRichForced] = useState(() => new Set())
@@ -1140,6 +1145,19 @@ export default function App() {
     for (const id of Object.keys(editorApis.current)) {
       if (!live.has(id)) delete editorApis.current[id]
     }
+    for (const id of Object.keys(hibernatedEditorStateRef.current)) {
+      if (!live.has(id)) delete hibernatedEditorStateRef.current[id]
+    }
+    for (const id of Object.keys(editorViewportStateRef.current)) {
+      if (!live.has(id)) delete editorViewportStateRef.current[id]
+    }
+    for (const [id, raf] of editorViewportRafsRef.current) {
+      if (!live.has(id)) {
+        cancelAnimationFrame(raf)
+        editorViewportRafsRef.current.delete(id)
+      }
+    }
+    editorResidencyMruRef.current = editorResidencyMruRef.current.filter((id) => live.has(id))
     // Forget mount records for closed tabs (so the Set doesn't grow unbounded).
     setMountedIds((prev) => {
       let changed = false
@@ -1204,9 +1222,13 @@ export default function App() {
     }
   }, [tabs])
 
-  // Mark the active tab as mounted (and keep it mounted thereafter).
+  // Mark the active tab as mounted and move it to the front of the warm-set MRU.
   useEffect(() => {
     if (activeId == null) return
+    editorResidencyMruRef.current = [
+      activeId,
+      ...editorResidencyMruRef.current.filter((id) => id !== activeId)
+    ]
     setMountedIds((prev) => (prev.has(activeId) ? prev : new Set(prev).add(activeId)))
   }, [activeId])
 
@@ -1237,6 +1259,8 @@ export default function App() {
   useEffect(() => () => {
     clearTimeout(sourceSplitContentTimerRef.current)
     if (sourceSplitPreviewRafRef.current) cancelAnimationFrame(sourceSplitPreviewRafRef.current)
+    for (const raf of editorViewportRafsRef.current.values()) cancelAnimationFrame(raf)
+    editorViewportRafsRef.current.clear()
   }, [])
 
   useEffect(() => {
@@ -1262,8 +1286,57 @@ export default function App() {
   // The right-pane tab must be mounted too (it's a second visible editor).
   useEffect(() => {
     if (splitId == null) return
+    editorResidencyMruRef.current = [
+      splitId,
+      ...editorResidencyMruRef.current.filter((id) => id !== splitId)
+    ]
     setMountedIds((prev) => (prev.has(splitId) ? prev : new Set(prev).add(splitId)))
   }, [splitId])
+
+  // Bound the resident Keep DOM after several tabs have been visited. Only a
+  // clean, state-free, non-visible Keep tab is eligible; Milkdown and any tab
+  // with edits/drafts/history/filters remain mounted without a limit. Capture
+  // viewport/navigation context before unmount so returning to a sleeping reader
+  // lands at the same place instead of jumping to the document start.
+  useEffect(() => {
+    const { residentIds, hibernateIds } = planEditorResidency({
+      mountedIds,
+      tabs,
+      recentIds: editorResidencyMruRef.current,
+      protectedIds: [activeId, splitId, sourcePreviewId].filter((id) => id != null),
+      milkdownIds: milkdownForced,
+      draftIds: keepDraftIds,
+      historyById: keepHistoryState,
+      filtersById: keepFilters
+    })
+    if (sameEditorIdSet(mountedIds, residentIds)) return
+
+    for (const id of hibernateIds) {
+      const api = editorApis.current[id]
+      const viewport = editorViewportStateRef.current[id] || {}
+      if (api) {
+        hibernatedEditorStateRef.current[id] = {
+          scrollTop: Number.isFinite(viewport.scrollTop)
+            ? viewport.scrollTop
+            : api.getScroller?.()?.scrollTop || 0,
+          rawOffset: viewport.rawOffset,
+          context: api.captureNavigationContext?.() || null
+        }
+        delete editorApis.current[id]
+      }
+    }
+    setMountedIds(residentIds)
+  }, [
+    activeId,
+    keepDraftIds,
+    keepFilters,
+    keepHistoryState,
+    milkdownForced,
+    mountedIds,
+    sourcePreviewId,
+    splitId,
+    tabs
+  ])
 
   // Drop the split when its tab is gone, or it collapsed onto the active tab
   // (e.g. the user clicked the right-pane's tab in the strip).
@@ -2424,8 +2497,23 @@ export default function App() {
           }
         },
         onPreviewScroll: (e) => {
+          if (e.target !== e.currentTarget) return
+          const viewport = editorViewportStateRef.current[id] || {}
+          viewport.scrollTop = e.currentTarget.scrollTop
+          editorViewportStateRef.current[id] = viewport
+          if (!editorViewportRafsRef.current.has(id)) {
+            const raf = requestAnimationFrame(() => {
+              editorViewportRafsRef.current.delete(id)
+              const rawOffset = editorApis.current[id]?.navigationOffsetFromViewportTop?.()
+              if (Number.isFinite(rawOffset)) {
+                const latest = editorViewportStateRef.current[id] || {}
+                latest.rawOffset = rawOffset
+                editorViewportStateRef.current[id] = latest
+              }
+            })
+            editorViewportRafsRef.current.set(id, raf)
+          }
           if (
-            e.target !== e.currentTarget ||
             !sourceSplitRef.current ||
             sourcePreviewIdRef.current !== id ||
             sourceSplitPreviewRafRef.current
@@ -2438,6 +2526,26 @@ export default function App() {
         },
         onReady: (api) => {
           editorApis.current[id] = api
+          const hibernated = hibernatedEditorStateRef.current[id]
+          if (hibernated) {
+            delete hibernatedEditorStateRef.current[id]
+            requestAnimationFrame(() => {
+              if (editorApis.current[id] !== api) return
+              api.restoreNavigationContext?.(hibernated.context)
+              if (Number.isFinite(hibernated.rawOffset)) {
+                api.restoreMarkdownOffset?.(hibernated.rawOffset, false)
+              }
+              const restoreScrollTop = () => {
+                if (editorApis.current[id] !== api) return
+                const scroller = api.getScroller?.()
+                if (scroller) scroller.scrollTop = Math.max(0, hibernated.scrollTop || 0)
+              }
+              restoreScrollTop()
+              // Keep's first paint may finish a progressive batch after onReady.
+              // Reapply once after layout so that batch cannot reset the reader.
+              requestAnimationFrame(restoreScrollTop)
+            })
+          }
           const waiters = editorReadyWaitersRef.current.get(id)
           if (waiters) {
             editorReadyWaitersRef.current.delete(id)

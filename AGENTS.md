@@ -82,11 +82,14 @@ docs/                  architecture / features / implementation-notes / developm
   `crepe.editor.view` is `undefined` in this Milkdown version.
 - **Crepe content callback**: register `crepe.on(markdownUpdated)` **before**
   `crepe.create()`, or changes never fire (saves would write stale content).
-- **Lazy-mounted editors**: a rich tab's `<Editor>` is created only on its first
-  activation, then kept mounted (`mountedIds` in `App.jsx`). This keeps startup /
-  session-restore fast (restoring N tabs spins up one editor, not N). Code that
-  needs a tab's editor API (`editorApis[id]`) must activate the tab first — see
-  `exportPathToPdf`, which opens/activates then waits for `getDocHTML`.
+- **Lazy-mounted editors and Keep residency**: an editor is created only on its
+  first activation. Milkdown and stateful Keep tabs stay mounted; clean inactive
+  Keep tabs with no draft, Undo/Redo, or table filter are capped to the three most
+  recently used readers (`editor-residency.js`). Hibernation captures/restores
+  navigation context and scroll position. Code that needs a tab's editor API
+  (`editorApis[id]`) must activate the tab first — see `exportPathToPdf`, which
+  opens/activates then waits for `getDocHTML`. Do not discard dirty/stateful tabs
+  or remove the visible-id race guard in `planEditorResidency`.
 - **Preview tabs**: a file-tree single click uses the one replaceable preview
   slot; double-click / Enter opens permanently. Editing, pinning, dragging,
   splitting, or changing editor mode promotes the preview before the action.

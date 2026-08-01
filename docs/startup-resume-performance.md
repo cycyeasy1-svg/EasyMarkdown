@@ -342,10 +342,108 @@ minify によりディスク読み込み・解析対象は縮小するが、単�
 - 初回 cold start はほぼ横ばいである。第3次対応では署名済み packaged build を対象に ETW/WPA または Process Monitor と Chrome trace を同時採取し、CPU、hard page fault、ディスク I/O、GPU、Defender のどこで停止しているかを切り分ける。
 - i18n locale 分割と Crepe CSS 遅延化は、同期 API および cascade 順序の互換性設計を伴うため今回の範囲から除外した。効果を見積もってから独立対応する。
 
-## 9. 参考資料
+## 9. 第3次対応の実施記録
+
+### 実施状態
+
+- 状態: 第1波完了
+- 実施日: 2026-08-01
+- 目的: 長時間稼働・多数タブ利用後の renderer 常駐量を抑え、Windows が最小化中に working set / GPU resource を退避した後の復帰負荷を減らす。
+
+### 対応前の追加基準値
+
+12 個の中規模 Markdown（各 120 sections）を開き、全タブを一度ずつ表示して Keep editor を mount した。別に onboarding の Milkdown editor が 1 個存在する条件である。
+
+| 指標 | 対応前 |
+| --- | ---: |
+| 常駐 Keep editor | 12 |
+| 全 editor | 13 |
+| DOM nodes | 44,290 |
+| renderer working set | 341.6 MB |
+| renderer private bytes | 388.3 MB |
+| 5 秒最小化後の復帰 2 rAF | 110.3 ms |
+
+process memory は OS の trim、GPU cache、計測順序による変動が大きい。常駐 editor 数と DOM nodes を主指標、working set/private bytes を補助指標として扱う。
+
+### 実装内容
+
+1. [`editor-residency.js`](../src/renderer/src/editor-residency.js)
+   - 非表示 Keep editor の resident plan を純粋関数として分離した。
+   - active/split/source-preview を常時保護し、clean な非活動 Keep reader は直近 3 個だけを warm set として保持する。
+   - dirty、未確定 draft、Undo/Redo、table filter を持つ Keep editor、および全 Milkdown editor は上限なしで保持する。
+   - activation 登録と pruning が同じ React commit で競合しても、新しい visible editor が古い `mountedIds` snapshot で消されない race guard を設けた。
+2. [`App.jsx`](../src/renderer/src/App.jsx)
+   - resident plan に従って安全な Keep reader のみを unmount する。
+   - hibernate 前に scroll position、Markdown viewport offset、collapsed heading、table navigation context を保存し、再 mount 後に復元する。
+   - editor API と viewport capture の rAF をタブ close 時に破棄し、registry 自体が増え続けないようにした。
+3. [`perf-resume.mjs`](../scripts/perf-resume.mjs)
+   - 12 文書を順番に訪問し、常駐 editor/DOM/process memory、5 秒最小化後の 2 rAF、hibernate reader の reopen、scroll restore を測る再現可能な benchmark を追加した。
+   - `npm run perf:resume` は budget check 付き、`npm run perf:resume:measure` は計測のみで実行できる。
+4. テスト
+   - resident plan の安全条件と visible-id race を単体テスト化した。
+   - clean reader の hibernate/scroll restore、および Undo history を持つ Keep editor が resident のままであることを Electron E2E で固定した。
+5. [`AGENTS.md`](../AGENTS.md)
+   - lazy mount の load-bearing rule を、新しい Keep resident policy と visible-id race guard を含む内容へ更新した。
+
+### 対応後の計測
+
+対応前と同じ 12 文書条件で 3 回計測した。構造指標は 3 回とも同一である。
+
+| 指標 | 対応前 | 対応後 | 評価 |
+| --- | ---: | ---: | --- |
+| 常駐 Keep editor | 12 | 4 | 66.7% 減 |
+| 全 editor | 13 | 5 | 61.5% 減 |
+| DOM nodes | 44,290 | 16,354 | 63.1% 減 |
+| 復帰 2 rAF | 110.3 ms（1 sample） | 70.7 / 75.8 / 87.4 ms | 平均 78.0 ms |
+| hibernate reader reopen | 未計測 | 231.7 / 234.9 / 294.8 ms | 平均 253.8 ms |
+| scroll restore ratio | 未計測 | 0.701 / 0.701 / 0.701 | 復元確認 |
+
+対応後の renderer working set は最小化前 51.9～350.9 MB、最小化中 60.5～113.5 MB、復帰直後 80.3～129.0 MB と大きく変動した。Windows の trim timing に依存するため削減率は算出しないが、保持する DOM/Blink 構造そのものは約 63% 減っている。利用者が休眠済み reader へ戻る場合は約 0.23～0.30 秒の再構築コストが発生する。直近 3 reader を warm に残すことで、通常の隣接タブ往復は従来どおり即時である。
+
+### 大規模文書性能
+
+900 × 24（21,624 cells）の `perf-app` を再実行し、全 budget check が pass した。
+
+| 指標 | 計測値 |
+| --- | ---: |
+| first rows | 135.6 ms |
+| table open wall | 1,302.7 ms |
+| table Task | 1,154.5 ms |
+| max Long Task | 220 ms |
+| Total Blocking Time | 284 ms |
+
+単一 sample ではあるが、既存 budget 内であり、resident policy による active large document 操作の明確な回帰は認められない。
+
+### 検証結果
+
+- `npm run lint`: pass
+- `npm test`: 52 files / 453 tests pass
+- resident policy E2E: 2 cases pass
+- 関連 E2E: 45 cases pass（Keep draft/history、Milkdown、split、preview、tab history、local history を含む）
+- `npm run build`: pass
+- `npm run build:mobile`: pass
+- `perf-resume --runs=3`: 15/15 budget checks pass
+- `perf-app --no-check --runs=1`: 全 check pass
+
+### Electron 更新・署名・実機 trace の判断
+
+- 実測 runtime は Electron 34.5.8 である。2026-08-01 時点の公式サポート対象は最新 3 stable major の 41/42/43 であり、34 はサポート外である。
+- 34 から現行 43 への変更は 9 major を跨ぎ、Chromium、Node.js、preload、window chrome、GPU、macOS の回帰面が大きい。今回の resident policy と混在させると原因比較も困難になるため、独立した compatibility batch で段階的に実施する。
+- Windows code signing は証明書と外部権限が必要であり、本対応だけでは完結しない。署名済み installer と未署名 unpacked build の Defender 初回差は未計測である。
+- 検証機には `wpr.exe` が存在するが、WPA/Process Monitor は PATH 上にない。数秒停止を実機で再現できる場合は、Windows ADK の WPA を用意し、`perf-resume` と同時に ETW、Chrome trace、hard page fault、disk I/O、GPU、Defender を採取する。
+
+### 残課題
+
+- 本対応は多数の既読 Keep tab に対して有効である。一つの巨大 active document 自体の resident size は削減しない。
+- Milkdown editor は Undo/selection state を安全に外部化できていないため hibernate 対象外である。Milkdown を多数常駐させる利用形態では別設計が必要になる。
+- Electron 43 系への更新、Windows code signing、実機 ETW 分析は、それぞれ独立して回帰確認・権限・環境準備を必要とする。
+
+## 10. 参考資料
 
 - [Electron Performance](https://www.electronjs.org/docs/latest/tutorial/performance)
 - [Electron BrowserWindow](https://www.electronjs.org/docs/latest/api/browser-window)
+- [Electron Releases and support policy](https://www.electronjs.org/docs/latest/tutorial/electron-timelines)
+- [Electron stable releases](https://releases.electronjs.org/?channel=stable)
 - [Windows app performance: disk and memory](https://learn.microsoft.com/en-us/windows/apps/develop/performance/disk-memory)
 - [Troubleshoot Microsoft Defender Antivirus performance](https://learn.microsoft.com/en-us/defender-endpoint/troubleshoot-performance-issues)
 - [Electron Release Schedule](https://releases.electronjs.org/schedule)
