@@ -426,9 +426,11 @@ export function scrollRangeIntoView(range, scroller) {
   const rect = range.getBoundingClientRect()
   const sr = scroller.getBoundingClientRect()
   if (!rect.height && !rect.width) return
-  if (rect.top < sr.top + 12 || rect.bottom > sr.bottom - 12) {
-    scroller.scrollTop += (rect.top + rect.bottom) / 2 - (sr.top + sr.bottom) / 2
-  }
+  // Find navigation is an explicit location change, so keep the active hit at
+  // the visual centre even when it was already technically visible. Merely
+  // revealing the parent element can leave the text against the top edge (or
+  // underneath the find bar / a sticky Keep table header).
+  scroller.scrollTop += (rect.top + rect.bottom) / 2 - (sr.top + sr.bottom) / 2
 }
 export function matchIndices(text, query) {
   return findMatchesInText(text, query).matches.map((m) => m.index)

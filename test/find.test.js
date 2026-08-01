@@ -1,12 +1,13 @@
 // Find-helper logic: matching/replacement, location-aware result starts, and
 // source-line → block-index mapping. CSS Custom Highlight painting itself stays
 // in the E2E layer.
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import {
   matchIndices,
   findMatchesInText,
   findRangeIndexFromStart,
-  replaceMatchesInText
+  replaceMatchesInText,
+  scrollRangeIntoView
 } from '../src/renderer/src/find.js'
 import { docBlocks, blockIndexForLine } from '../src/renderer/src/find-blocks.js'
 
@@ -72,6 +73,28 @@ describe('findRangeIndexFromStart', () => {
     expect(
       findRangeIndexFromStart(ranges, { kind: 'viewport', scroller, scrollTop: 100 })
     ).toBe(1)
+  })
+})
+
+describe('scrollRangeIntoView', () => {
+  it('centres the active match even when it is already visible', () => {
+    const scrollIntoView = vi.fn()
+    const scroller = {
+      scrollTop: 100,
+      getBoundingClientRect: () => ({ top: 0, bottom: 200 })
+    }
+    const range = {
+      startContainer: {
+        nodeType: 3,
+        parentElement: { scrollIntoView }
+      },
+      getBoundingClientRect: () => ({ top: 40, bottom: 60, width: 50, height: 20 })
+    }
+
+    scrollRangeIntoView(range, scroller)
+
+    expect(scrollIntoView).toHaveBeenCalledWith({ block: 'nearest', inline: 'nearest' })
+    expect(scroller.scrollTop).toBe(50)
   })
 })
 
