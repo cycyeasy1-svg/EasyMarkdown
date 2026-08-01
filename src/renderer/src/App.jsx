@@ -4,32 +4,39 @@ import { memo, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMem
 // `.md` default is the lightweight source-backed KeepEditor. Loading it lazily
 // keeps that heavy code (and its memory) out of startup for the common case.
 const Editor = lazy(() => import('./components/Editor.jsx'))
+const KeepEditor = lazy(() => import('./components/KeepEditor.jsx'))
 const HelpCenter = lazy(() => import('./components/HelpCenter.jsx'))
 const PdfExportStudio = lazy(() => import('./components/pdf-export/PdfExportStudio.jsx'))
-import KeepEditor from './components/KeepEditor.jsx'
+const CommandPalette = lazy(() => import('./components/CommandPalette.jsx'))
+const KeepChangeReview = lazy(() => import('./components/KeepChangeReview.jsx'))
+const LinkIntelligencePanel = lazy(() => import('./components/LinkIntelligencePanel.jsx'))
+const LinkUpdateDialog = lazy(() => import('./components/LinkUpdateDialog.jsx'))
+const LocalHistoryDialog = lazy(() => import('./components/LocalHistoryDialog.jsx'))
+const ModeSwitchDialog = lazy(() => import('./components/ModeSwitchDialog.jsx'))
+const Outline = lazy(() => import('./components/Outline.jsx'))
+const RenameModal = lazy(() => import('./components/RenameModal.jsx'))
+const SearchPanel = lazy(() => import('./components/SearchPanel.jsx'))
+const Settings = lazy(() => import('./components/Settings.jsx'))
+const TabSwitcher = lazy(() => import('./components/TabSwitcher.jsx'))
+const UpdateToast = lazy(() => import('./components/UpdateToast.jsx'))
+let findBlocksModule
+const blockIndexForLineAsync = async (content, line) => {
+  findBlocksModule ||= import('./find-blocks.js')
+  const { blockIndexForLine } = await findBlocksModule
+  return blockIndexForLine(content, line)
+}
 import Sidebar from './components/Sidebar.jsx'
 import Tabs from './components/Tabs.jsx'
-import Outline, { parseHeadingDetails } from './components/Outline.jsx'
+import { parseHeadingDetails } from './outline-model.js'
 import { moveHeadingSection } from './outline-reorder.js'
 import StatusBar from './components/StatusBar.jsx'
 import SaveFab from './components/SaveFab.jsx'
-import CommandPalette from './components/CommandPalette.jsx'
-import TabSwitcher from './components/TabSwitcher.jsx'
 import { Icon } from './components/icons.jsx'
 import { THEMES, DEFAULT_THEME, applyTheme } from './themes.js'
 import { I18nProvider, translate, DEFAULT_LANG } from './i18n.jsx'
 import { welcomeDoc } from './onboarding.js'
 import Welcome from './components/Welcome.jsx'
 import WindowControls from './components/WindowControls.jsx'
-import UpdateToast from './components/UpdateToast.jsx'
-import RenameModal from './components/RenameModal.jsx'
-import ModeSwitchDialog from './components/ModeSwitchDialog.jsx'
-import KeepChangeReview from './components/KeepChangeReview.jsx'
-import LocalHistoryDialog from './components/LocalHistoryDialog.jsx'
-import Settings from './components/Settings.jsx'
-import SearchPanel from './components/SearchPanel.jsx'
-import LinkIntelligencePanel from './components/LinkIntelligencePanel.jsx'
-import LinkUpdateDialog from './components/LinkUpdateDialog.jsx'
 import {
   loadSettings,
   saveSettings,
@@ -71,7 +78,6 @@ import {
   scrollRangeIntoView,
   findMatchesInText,
   replaceMatchesInText,
-  blockIndexForLine,
   revealSourceFindMatch
 } from './find.js'
 import {
@@ -5330,7 +5336,7 @@ export default function App() {
   // containing top-level block (`.km-block[data-bi]` / Nth .ProseMirror child).
   // `commit` (Enter/next/prev) is allowed to steal focus to show a text selection;
   // live typing (commit=false) only scrolls so the find input keeps focus.
-  const runLineJump = useCallback((raw, commit = false) => {
+  const runLineJump = useCallback(async (raw, commit = false) => {
     const str = String(raw ?? '').trim()
     findQueryRef.current = str
     saveFindSession({ query: str, mode: 'line', activeIdx: -1, inSelection: false })
@@ -5360,9 +5366,11 @@ export default function App() {
       return
     }
     const tab = tabsRef.current.find((x) => x.id === activeIdRef.current)
+    const requestedTabId = tab?.id || null
     const content = tab?.content ?? ''
     const n = parseInt(str, 10)
-    const { bi, total } = blockIndexForLine(content, Number.isFinite(n) ? n : 1)
+    const { bi, total } = await blockIndexForLineAsync(content, Number.isFinite(n) ? n : 1)
+    if (findQueryRef.current !== str || activeIdRef.current !== requestedTabId) return
     if (!str || !Number.isFinite(n)) { lineBiRef.current = -1; setFind((f) => ({ ...f, matches: total, active: 0 })); return }
     if (commit) rememberNavigationRef.current()
     lineBiRef.current = bi
@@ -5549,7 +5557,7 @@ export default function App() {
     if (!tabId || !line) return
     rememberNavigationRef.current()
     let tries = 0
-    const attempt = () => {
+    const attempt = async () => {
       if (waitActive && activeIdRef.current !== tabId) {
         if (tries++ < 16) setTimeout(attempt, 70)
         return
@@ -5572,7 +5580,11 @@ export default function App() {
         return
       }
       const content = tabsRef.current.find((x) => x.id === tabId)?.content ?? ''
-      const { bi } = blockIndexForLine(content, line)
+      const { bi } = await blockIndexForLineAsync(content, line)
+      if (waitActive && activeIdRef.current !== tabId) {
+        if (tries++ < 16) setTimeout(attempt, 70)
+        return
+      }
       Object.values(editorApis.current).forEach((api) => api?.ensureRendered?.()) // flush keep chunks
       const root = richRoot()
       const block =
@@ -5939,43 +5951,49 @@ export default function App() {
                 showHiddenFiles={settings.showHiddenFiles}
               />
             ) : sidebarMode === 'search' ? (
-              <SearchPanel
-                workspaces={workspaces}
-                onOpenResult={openSearchResult}
-                onAddFolder={openFolder}
-                focusNonce={searchFocusNonce}
-                showHiddenFiles={settings.showHiddenFiles}
-              />
+              <Suspense fallback={<div className="hm-panel-loading">{t('keep.loading')}</div>}>
+                <SearchPanel
+                  workspaces={workspaces}
+                  onOpenResult={openSearchResult}
+                  onAddFolder={openFolder}
+                  focusNonce={searchFocusNonce}
+                  showHiddenFiles={settings.showHiddenFiles}
+                />
+              </Suspense>
             ) : sidebarMode === 'links' ? (
-              <LinkIntelligencePanel
-                view={linkPanel.view}
-                onSetView={(view) => setLinkPanel((prev) => ({ ...prev, view }))}
-                docPath={linkPanel.docPath}
-                problems={linkPanel.problems}
-                diagnosing={linkPanel.diagnosing}
-                referenceGroups={linkPanel.referenceGroups}
-                referencesRunning={linkPanel.referencesRunning}
-                referenceLabel={linkPanel.referenceLabel}
-                filesScanned={linkPanel.filesScanned}
-                truncated={linkPanel.truncated}
-                onRefresh={() => diagnoseLinksForTab(
-                  tabsRef.current.find((item) => item.id === activeIdRef.current)
-                )}
-                onFindCurrentReferences={() => findCurrentReferencesRef.current()}
-                onOpenResult={openSearchResult}
-              />
+              <Suspense fallback={<div className="hm-panel-loading">{t('keep.loading')}</div>}>
+                <LinkIntelligencePanel
+                  view={linkPanel.view}
+                  onSetView={(view) => setLinkPanel((prev) => ({ ...prev, view }))}
+                  docPath={linkPanel.docPath}
+                  problems={linkPanel.problems}
+                  diagnosing={linkPanel.diagnosing}
+                  referenceGroups={linkPanel.referenceGroups}
+                  referencesRunning={linkPanel.referencesRunning}
+                  referenceLabel={linkPanel.referenceLabel}
+                  filesScanned={linkPanel.filesScanned}
+                  truncated={linkPanel.truncated}
+                  onRefresh={() => diagnoseLinksForTab(
+                    tabsRef.current.find((item) => item.id === activeIdRef.current)
+                  )}
+                  onFindCurrentReferences={() => findCurrentReferencesRef.current()}
+                  onOpenResult={openSearchResult}
+                />
+              </Suspense>
             ) : (
-              <Outline
-                key={outlineId || 'outline-empty'}
-                content={outlineTab?.content || ''}
-                activeIndex={activeHeading}
-                onJump={jumpToHeading}
-                onMoveHeading={
-                  !isMobile && outlineTab && !isPlainTextDoc(outlineTab)
-                    ? moveOutlineHeading
-                    : undefined
-                }
-              />
+              <Suspense fallback={<div className="hm-panel-loading">{t('keep.loading')}</div>}>
+                <Outline
+                  key={outlineId || 'outline-empty'}
+                  content={outlineTab?.content || ''}
+                  activeIndex={activeHeading}
+                  onJump={jumpToHeading}
+                  onMoveHeading={
+                    !isMobile && outlineTab && !isPlainTextDoc(outlineTab)
+                      ? moveOutlineHeading
+                      : undefined
+                  }
+                />
+              </Suspense>
             )
           )}
         </aside>
@@ -6211,25 +6229,34 @@ export default function App() {
                     onMouseDownCapture={h.onPaneFocus}
                     onScrollCapture={h.onPreviewScroll}
                   >
-                    <KeepEditor
-                      inView={previewVisible}
-                      initialContent={tab.content}
-                      docPath={tab.path}
-                      blankLineSpacing={settings.blankLineSpacing}
-                      onChange={h.onChange}
-                      onReady={h.onReady}
-                      onFilterChange={h.onFilterChange}
-                      onDraftChange={h.onDraftChange}
-                      onHistoryChange={h.onHistoryChange}
-                      onCommit={h.onCommit}
-                      onOpenSource={openSourceAtLine}
-                      onOpenDocLink={openDocLink}
-                      onFindReferences={onKeepFindReferences}
-                      onRenameHeading={onKeepRenameHeading}
-                      sourceSplitMode={sourceSplit && dualPreview}
-                      onLocateSource={h.onLocateSource}
-                      readOnly={mobileReadOnly}
-                    />
+                    <Suspense
+                      fallback={(
+                        <div className="hm-editor-module-loading" role="status">
+                          <span className="hm-editor-module-spinner" aria-hidden="true" />
+                          {t('keep.loading')}
+                        </div>
+                      )}
+                    >
+                      <KeepEditor
+                        inView={previewVisible}
+                        initialContent={tab.content}
+                        docPath={tab.path}
+                        blankLineSpacing={settings.blankLineSpacing}
+                        onChange={h.onChange}
+                        onReady={h.onReady}
+                        onFilterChange={h.onFilterChange}
+                        onDraftChange={h.onDraftChange}
+                        onHistoryChange={h.onHistoryChange}
+                        onCommit={h.onCommit}
+                        onOpenSource={openSourceAtLine}
+                        onOpenDocLink={openDocLink}
+                        onFindReferences={onKeepFindReferences}
+                        onRenameHeading={onKeepRenameHeading}
+                        sourceSplitMode={sourceSplit && dualPreview}
+                        onLocateSource={h.onLocateSource}
+                        readOnly={mobileReadOnly}
+                      />
+                    </Suspense>
                   </div>
                 ]
               }
@@ -6454,23 +6481,27 @@ export default function App() {
         </button>
       )}
 
-      <Settings
-        open={settingsOpen}
-        onClose={() => setSettingsOpen(false)}
-        settings={settings}
-        updateSettings={updateSettings}
-        theme={theme}
-        setTheme={pickBuiltinTheme}
-        customThemes={customThemes}
-        customTheme={customTheme}
-        onPickCustom={setCustomTheme}
-        onRefreshThemes={refreshThemes}
-        onOpenThemesFolder={onOpenThemesFolder}
-        onGetMoreThemes={onGetMoreThemes}
-        onClearLocalHistory={clearAllLocalHistory}
-        onOpenHelp={openHelp}
-        keybindings={keybindings}
-      />
+      {settingsOpen && (
+        <Suspense fallback={null}>
+          <Settings
+            open
+            onClose={() => setSettingsOpen(false)}
+            settings={settings}
+            updateSettings={updateSettings}
+            theme={theme}
+            setTheme={pickBuiltinTheme}
+            customThemes={customThemes}
+            customTheme={customTheme}
+            onPickCustom={setCustomTheme}
+            onRefreshThemes={refreshThemes}
+            onOpenThemesFolder={onOpenThemesFolder}
+            onGetMoreThemes={onGetMoreThemes}
+            onClearLocalHistory={clearAllLocalHistory}
+            onOpenHelp={openHelp}
+            keybindings={keybindings}
+          />
+        </Suspense>
+      )}
 
       {pdfRequest && (
         <Suspense fallback={<div className="hm-pdf-loading">{t('pdf.generatingPreview')}</div>}>
@@ -6490,29 +6521,35 @@ export default function App() {
         onSave={onStatusSave}
       />
 
-      <CommandPalette
-        open={paletteOpen}
-        onClose={onPaletteClose}
-        commands={commands}
-        files={files}
-        headings={paletteHeadings}
-        recentFiles={recents}
-        lineCount={paletteLineCount}
-        loadWorkspaceHeadings={loadPaletteWorkspaceHeadings}
-        onOpenFile={onPaletteOpenFile}
-        onOpenHeading={onPaletteOpenHeading}
-        onOpenWorkspaceHeading={onPaletteOpenWorkspaceHeading}
-        onOpenLine={onPaletteOpenLine}
-      />
+      {paletteOpen && (
+        <Suspense fallback={null}>
+          <CommandPalette
+            open
+            onClose={onPaletteClose}
+            commands={commands}
+            files={files}
+            headings={paletteHeadings}
+            recentFiles={recents}
+            lineCount={paletteLineCount}
+            loadWorkspaceHeadings={loadPaletteWorkspaceHeadings}
+            onOpenFile={onPaletteOpenFile}
+            onOpenHeading={onPaletteOpenHeading}
+            onOpenWorkspaceHeading={onPaletteOpenWorkspaceHeading}
+            onOpenLine={onPaletteOpenLine}
+          />
+        </Suspense>
+      )}
 
       {tabSwitcher && (
-        <TabSwitcher
-          tabs={tabSwitcherTabs}
-          selectedId={tabSwitcherSelectedId}
-          onSelect={selectTabSwitcherId}
-          onCommit={commitTabSwitcher}
-          onCancel={cancelTabSwitcher}
-        />
+        <Suspense fallback={null}>
+          <TabSwitcher
+            tabs={tabSwitcherTabs}
+            selectedId={tabSwitcherSelectedId}
+            onSelect={selectTabSwitcherId}
+            onCommit={commitTabSwitcher}
+            onCancel={cancelTabSwitcher}
+          />
+        </Suspense>
       )}
 
       {toast && (
@@ -6585,6 +6622,7 @@ export default function App() {
         </div>
       )}
 
+      <Suspense fallback={null}>
       {renameState && (
         <RenameModal
           t={t}
@@ -6683,6 +6721,7 @@ export default function App() {
           onDismiss={dismissUpdate}
         />
       )}
+      </Suspense>
     </div>
     </I18nProvider>
   )

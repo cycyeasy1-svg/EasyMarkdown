@@ -6,10 +6,9 @@ import {
   matchIndices,
   findMatchesInText,
   findRangeIndexFromStart,
-  replaceMatchesInText,
-  docBlocks,
-  blockIndexForLine
+  replaceMatchesInText
 } from '../src/renderer/src/find.js'
+import { docBlocks, blockIndexForLine } from '../src/renderer/src/find-blocks.js'
 
 describe('matchIndices', () => {
   it('returns all case-insensitive match offsets', () => {

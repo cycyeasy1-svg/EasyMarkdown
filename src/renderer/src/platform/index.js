@@ -8,8 +8,6 @@
 // We also expose a `capabilities` object regardless of platform: desktop fills
 // in a full set so the renderer can gate features uniformly without sniffing
 // platform strings everywhere.
-import { makeCapacitorApi } from './capacitor-api.js'
-
 const DESKTOP_CAPABILITIES = {
   folderWorkspace: true,
   watch: true,
@@ -21,11 +19,14 @@ const DESKTOP_CAPABILITIES = {
   splitView: true
 }
 
-if (typeof window !== 'undefined') {
-  if (!window.api) {
-    // Mobile / web: no Electron preload — back the contract with Capacitor.
-    window.api = makeCapacitorApi()
-  } else if (!window.api.capabilities) {
+export async function installPlatformApi() {
+  if (typeof window === 'undefined') return
+  if (__MOBILE_BUILD__) {
+    // Keep every Capacitor plugin out of the Electron entry. The mobile build
+    // replaces this compile-time flag and loads the adapter before React mounts.
+    const { makeCapacitorApi } = await import('./capacitor-api.js')
+    if (!window.api) window.api = makeCapacitorApi()
+  } else if (!window.api?.capabilities) {
     // Desktop: the preload normally exposes capabilities directly (its object is
     // frozen by contextBridge, so it must). This branch is a defensive fallback
     // for an older preload — guarded because assigning to the frozen api object

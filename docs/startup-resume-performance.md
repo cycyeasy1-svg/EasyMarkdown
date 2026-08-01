@@ -262,7 +262,87 @@ minify によりディスク読み込み・解析対象は縮小するが、単�
 - 復帰時の数秒停止は検証機で再現していない。今回の変更は起動負荷には効くが、Windows/GPU の再常駐化を直接解決するものではない。
 - テーマ数が多い実環境における起動前後の I/O 差、および署名済み packaged build の Defender 差は未計測である。
 
-## 8. 参考資料
+## 8. 第2次対応の実施記録
+
+### 実施状態
+
+- 状態: 完了
+- 実施日: 2026-08-01
+- 目的: アプリシェルに不要な編集エンジン・低頻度 UI・モバイル専用依存を初期 entry から分離し、起動時の JavaScript 解析・実行量を削減する。
+
+### 実装内容
+
+1. [`App.jsx`](../src/renderer/src/App.jsx)
+   - `KeepEditor` を `React.lazy` へ移行し、アプリシェルを先に描画してから active document に必要な editor chunk を読み込む構成にした。
+   - 設定、コマンドパレット、ヘルプ、全文検索、アウトライン、リンク診断、履歴、PDF export、各種 dialog/toast を利用時ロードへ分離した。
+   - editor および sidebar panel の遅延中に、レイアウトを保つ軽量な loading fallback を追加した。
+2. [`find-blocks.js`](../src/renderer/src/find-blocks.js)
+   - 行ジャンプ時だけ必要な Keep parser 依存を初期 find helper から分離した。行ジャンプ要求時に dynamic import し、要求対象が変わった場合は古い非同期結果を適用しない。
+3. [`platform/index.js`](../src/renderer/src/platform/index.js)
+   - Capacitor adapter を desktop の static dependency から外し、mobile build の場合だけ dynamic import するようにした。
+   - `__MOBILE_BUILD__` を desktop/mobile の Vite 設定で明示し、desktop 成果物に Capacitor / native plugin code が混入しないことを確認した。
+4. [`main.jsx`](../src/renderer/src/main.jsx)
+   - platform API の準備後に React を mount する。汎用 Vite target でも動作するよう top-level await は使用していない。
+   - Crepe theme CSS は既存の cascade 要件を守るため初期ロードを維持した。現状は `app.css` より前に読み込む順序が機能要件であり、単純な遅延化は editor の font-size 等を壊すためである。
+5. i18n
+   - 初期 entry の残存比率が比較的大きいことは確認したが、今回は分割していない。翻訳関数が同期 API で全画面から参照され、locale 定義の機械的分割だけでも影響範囲が大きいため、独立した互換性対応として扱う。
+
+### バンドルサイズ
+
+| 成果物 | 第1次対応後 | 第2次対応後 | 差分 |
+| --- | ---: | ---: | ---: |
+| 初期 entry JavaScript | 772.23 KB | 497.04 KB | 35.6% 減 |
+| 初期 CSS | 227.33 KB | 227.87 KB | ほぼ同等 |
+| `KeepEditor` | entry 内 | 74.21 KB の遅延 chunk | 初期 entry から分離 |
+| Keep parser | entry 内 | 25.93 KB の共有遅延 chunk | 初期 entry から分離 |
+
+調査開始時の未圧縮 entry 1,330,856 bytes と比較すると、初期 JavaScript は約 62.7% 小さくなった。desktop build の初期 entry は 500 KB 未満になり、desktop の全 JavaScript 成果物から Capacitor 関連文字列が消えた。`Editor`（Milkdown/Crepe）は約 1.55 MB の遅延 chunk のままであるが、該当モードを開くまで初期 entry の解析対象にはならない。
+
+### 起動再計測
+
+第1次対応後と第2次対応後の build を、毎回新規 user-data directory と同じ小規模 Markdown 文書で各 3 回起動した。`shell` は `#root .app`、`document` は Keep の `.km-doc` が表示された時点である。初回 sample は OS/Defender/ディスクの cold cache 影響が大きいため、2・3 回目も分けて記録する。
+
+| sample | 第1次 shell | 第2次 shell | 第1次 document | 第2次 document | 第2次 shell → document |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 1 | 2,438.1 ms | 2,375.3 ms | 2,485.2 ms | 2,489.2 ms | 113.8 ms |
+| 2 | 1,790.0 ms | 712.2 ms | 1,839.3 ms | 1,020.3 ms | 308.1 ms |
+| 3 | 1,390.4 ms | 693.7 ms | 1,427.0 ms | 1,026.4 ms | 332.7 ms |
+
+2・3 回目平均では shell が 1,590.2 ms から 703.0 ms（約 55.8% 減）、document が 1,633.2 ms から 1,023.4 ms（約 37.3% 減）になった。初回 cold start の document 表示はほぼ同等であり、未署名 Electron binary のリアルタイム scan や OS cold I/O が依然として支配的と考えられる。シェル先行表示により 114～333 ms の editor 遅延が明示的に生じるが、2・3 回目の document 到達時刻自体は短縮しており、遅延を後段へ移しただけではない。
+
+この値は開発機上の unpacked build の少数 sample であり、製品 KPI の基準値にはしない。署名済み packaged build、利用者端末、Defender 条件を揃えた計測が別途必要である。
+
+### 大規模文書性能
+
+900 × 24（21,624 cells）の `perf-app` を 1 sample 実行し、全 budget check が pass した。
+
+| 指標 | 第1次対応後 | 第2次対応後 |
+| --- | ---: | ---: |
+| first rows | 110.8 ms | 117.9 ms |
+| table open wall | 1,224.0 ms | 1,259.2 ms |
+| table Task | 1,052.0 ms | 1,028.0 ms |
+| max Long Task | 220 ms | 204 ms |
+| Total Blocking Time | 239 ms | 248 ms |
+
+1 sample 間の変動範囲であり、今回のコード分割による大規模文書操作の明確な回帰は認められない。
+
+### 検証結果
+
+- `npm run lint`: pass
+- `npm test`: 51 files / 448 tests pass
+- `npm run build`: pass
+- `npm run build:mobile`: pass
+- 第2次対応の関連 E2E 35 cases: 34 pass、Milkdown context submenu 1 case が一時的に失敗したが、同 case の単独再実行は pass
+- 最終 desktop build 後の主要 lazy route E2E: 12 cases pass（smoke、command palette、help、local history、settings/tabs、workspace search）
+- `perf-app --no-check --runs=1`: 全 check pass
+
+### 残課題
+
+- 「長時間未使用後の復帰で数秒停止」は検証機では再現していない。第2次対応は renderer の再解析量と初回 mount を減らすが、Windows の working set trim、GPU process の再常駐化、Defender scan を直接制御するものではない。
+- 初回 cold start はほぼ横ばいである。第3次対応では署名済み packaged build を対象に ETW/WPA または Process Monitor と Chrome trace を同時採取し、CPU、hard page fault、ディスク I/O、GPU、Defender のどこで停止しているかを切り分ける。
+- i18n locale 分割と Crepe CSS 遅延化は、同期 API および cascade 順序の互換性設計を伴うため今回の範囲から除外した。効果を見積もってから独立対応する。
+
+## 9. 参考資料
 
 - [Electron Performance](https://www.electronjs.org/docs/latest/tutorial/performance)
 - [Electron BrowserWindow](https://www.electronjs.org/docs/latest/api/browser-window)

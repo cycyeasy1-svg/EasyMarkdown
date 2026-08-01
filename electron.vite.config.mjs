@@ -34,7 +34,8 @@ export default defineConfig({
     // app (it loads from file://), nor on macOS/Linux (127.0.0.1 always works).
     server: { host: '127.0.0.1' },
     define: {
-      __APP_VERSION__: JSON.stringify(pkg.version)
+      __APP_VERSION__: JSON.stringify(pkg.version),
+      __MOBILE_BUILD__: 'false'
     },
     build: {
       // electron-vite defaults renderer minification to false. Shipping a

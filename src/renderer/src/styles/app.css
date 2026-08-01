@@ -7313,6 +7313,31 @@ body.hm-table-auto-wrap .km-table td {
   background: var(--bg-editor);
   font-size: 13px;
 }
+.hm-panel-loading,
+.hm-editor-module-loading {
+  min-height: 100%;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 10px;
+  color: var(--faint);
+  background: var(--bg-editor);
+  font-size: 13px;
+}
+.hm-editor-module-spinner {
+  width: 18px;
+  height: 18px;
+  border: 2px solid color-mix(in srgb, var(--faint) 30%, transparent);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: hm-editor-module-spin 0.8s linear infinite;
+}
+@keyframes hm-editor-module-spin {
+  to { transform: rotate(360deg); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .hm-editor-module-spinner { animation: none; }
+}
 .pane-center.has-help {
   container: help-host / inline-size;
 }
