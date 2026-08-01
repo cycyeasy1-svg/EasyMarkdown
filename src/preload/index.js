@@ -153,6 +153,7 @@ const api = {
   // Tell main the IPC listeners below are registered — main queues launch-time
   // 'open-paths'/'open-folder' sends until this arrives (see sendOpen in main).
   rendererReady: () => ipcRenderer.send('app:renderer-ready'),
+  openPathsPresented: (requestId) => ipcRenderer.send('app:open-presented', requestId),
 
   // events from main
   onOpenPaths: on('open-paths'),

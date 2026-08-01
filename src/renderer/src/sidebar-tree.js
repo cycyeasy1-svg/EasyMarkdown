@@ -2,6 +2,41 @@ import { isMarkdownName } from './paths.js'
 
 const normalizePath = (path) => String(path || '').replace(/\\/g, '/').replace(/\/+$/, '')
 
+// Read a group of lazy-tree directories without issuing an unbounded burst of
+// IPC calls. Results keep the caller's first-seen order; duplicate paths and
+// individual read failures are omitted so one inaccessible folder cannot block
+// the rest of the tree refresh.
+export async function readDirectoriesBatched(directories, readDirectory, concurrency = 6) {
+  const dirs = [...new Set((directories || []).filter(Boolean))]
+  if (!dirs.length) return []
+
+  const requestedLimit = Number(concurrency)
+  const limit = Number.isFinite(requestedLimit)
+    ? Math.max(1, Math.floor(requestedLimit))
+    : 1
+  const results = new Array(dirs.length)
+  let nextIndex = 0
+
+  const worker = async () => {
+    while (nextIndex < dirs.length) {
+      const index = nextIndex
+      nextIndex += 1
+      try {
+        const nodes = await readDirectory(dirs[index])
+        results[index] = [dirs[index], Array.isArray(nodes) ? nodes : []]
+      } catch {
+        // Keep refreshing the remaining directories. Watcher reads can race
+        // with folder deletion or permissions changing underneath the app.
+      }
+    }
+  }
+
+  await Promise.all(
+    Array.from({ length: Math.min(limit, dirs.length) }, () => worker())
+  )
+  return results.filter(Boolean)
+}
+
 // Turn the complete recursive directory snapshot into the smallest lazy-tree
 // cache that can render every Markdown branch. Directories that have no
 // Markdown files anywhere below them remain visible in their parent, but stay

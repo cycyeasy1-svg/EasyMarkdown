@@ -333,7 +333,9 @@ async function runSample(sampleNumber, fixtures) {
       return preserved
     })
 
-    await page.locator('.status-btn[title*="Ctrl+/"]').click()
+    // View-mode UI is intentionally a single cycling button. Select it by its
+    // stable class/data contract rather than translated shortcut text.
+    await page.locator('.hm-view-mode-btn[data-mode="rich"]').click()
     const source = page.locator('textarea.source-editor')
     await source.waitFor({ state: 'visible', timeout: 15_000 })
     await page.waitForTimeout(150)

@@ -1,5 +1,54 @@
 import { describe, expect, it } from 'vitest'
-import { flattenVisibleTree, selectMarkdownBranches } from '../src/renderer/src/sidebar-tree.js'
+import {
+  flattenVisibleTree,
+  readDirectoriesBatched,
+  selectMarkdownBranches
+} from '../src/renderer/src/sidebar-tree.js'
+
+describe('readDirectoriesBatched', () => {
+  it('deduplicates paths, preserves first-seen order, and skips failed reads', async () => {
+    const result = await readDirectoriesBatched(
+      ['/one', '/two', '/one', '/broken', '/three'],
+      async (dir) => {
+        if (dir === '/broken') throw new Error('gone')
+        return [{ name: dir }]
+      },
+      2
+    )
+
+    expect(result).toEqual([
+      ['/one', [{ name: '/one' }]],
+      ['/two', [{ name: '/two' }]],
+      ['/three', [{ name: '/three' }]]
+    ])
+  })
+
+  it('caps concurrent directory reads', async () => {
+    let active = 0
+    let maximum = 0
+    const release = []
+    const read = (dir) => new Promise((resolve) => {
+      active += 1
+      maximum = Math.max(maximum, active)
+      release.push(() => {
+        active -= 1
+        resolve([{ name: dir }])
+      })
+    })
+
+    const pending = readDirectoriesBatched(['/a', '/b', '/c', '/d'], read, 2)
+    await Promise.resolve()
+    expect(maximum).toBe(2)
+    release.shift()()
+    await Promise.resolve()
+    release.shift()()
+    await Promise.resolve()
+    while (release.length) release.shift()()
+    await pending
+
+    expect(maximum).toBe(2)
+  })
+})
 
 describe('selectMarkdownBranches', () => {
   it('expands only directories that contain Markdown directly or below them', () => {

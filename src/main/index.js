@@ -40,7 +40,7 @@ import {
   exportTypographyCss
 } from '../shared/fonts.js'
 
-const __dirname = dirname(fileURLToPath(import.meta.url))
+const __dirname = globalThis.easymarkdownMainDir || dirname(fileURLToPath(import.meta.url))
 
 async function openExternalUrl(url) {
   const allowedUrl = getAllowedExternalUrl(url)
@@ -171,19 +171,6 @@ process.on('uncaughtException', (err) => {
   console.error('Uncaught exception (ignored):', err?.message || err)
 })
 
-// ---- Single instance: route any second launch into the existing window ----
-const gotLock = app.requestSingleInstanceLock()
-if (!gotLock) {
-  app.quit()
-} else {
-  app.on('second-instance', (_e, argv) => {
-    const { files, folders } = extractArgs(argv)
-    focusMainWindow()
-    if (folders.length) sendOpen('open-folder', folders[0])
-    if (files.length) sendOpen('open-paths', files)
-  })
-}
-
 // Split launch args into markdown files and folders. A folder argument (from
 // the Explorer "Open with EasyMarkdown" folder menu) opens as a workspace; markdown
 // files open as tabs. Non-existent paths and flags are ignored.
@@ -220,7 +207,9 @@ function extractArgs(argv) {
 function focusMainWindow() {
   if (!mainWindow) return
   if (mainWindow.isMinimized()) mainWindow.restore()
-  mainWindow.show()
+  // Calling show() on an already-visible Windows window can produce an extra
+  // activation flash. focus() is sufficient in that state.
+  if (!mainWindow.isVisible()) mainWindow.show()
   mainWindow.focus()
 }
 
@@ -240,6 +229,7 @@ function sendToRenderer(channel, payload) {
 // 'app:renderer-ready' (App.jsx mount, after it registers the listeners).
 let rendererReady = false
 const pendingOpens = []
+const pendingPresentedFocus = new Map()
 function sendOpen(channel, payload) {
   if (rendererReady && mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send(channel, payload)
@@ -251,6 +241,39 @@ ipcMain.on('app:renderer-ready', () => {
   rendererReady = true
   for (const [channel, payload] of pendingOpens.splice(0)) sendToRenderer(channel, payload)
 })
+
+function sendOpenPathsThenFocus(paths) {
+  const requestId = randomUUID()
+  const fallbackTimer = setTimeout(() => {
+    pendingPresentedFocus.delete(requestId)
+    focusMainWindow()
+  }, 5000)
+  pendingPresentedFocus.set(requestId, fallbackTimer)
+  sendOpen('open-paths', { paths, requestId })
+}
+
+ipcMain.on('app:open-presented', (event, requestId) => {
+  if (!mainWindow || mainWindow.isDestroyed() || event.sender !== mainWindow.webContents) return
+  const timer = pendingPresentedFocus.get(requestId)
+  if (!timer) return
+  clearTimeout(timer)
+  pendingPresentedFocus.delete(requestId)
+  focusMainWindow()
+})
+
+// The lightweight bootstrap calls this after the primary instance is ready to
+// route argv. File opens surface the window only after the renderer has switched
+// to the requested document; a plain second launch still focuses immediately.
+export function handleSecondInstance(argv) {
+  const { files, folders } = extractArgs(argv)
+  if (folders.length) sendOpen('open-folder', folders[0])
+  if (files.length) sendOpenPathsThenFocus(files)
+  else focusMainWindow()
+}
+
+export function handleOpenFile(path) {
+  sendOpenPathsThenFocus([path])
+}
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -395,16 +418,11 @@ function createWindow() {
   }
 
   mainWindow.on('closed', () => {
+    for (const timer of pendingPresentedFocus.values()) clearTimeout(timer)
+    pendingPresentedFocus.clear()
     mainWindow = null
   })
 }
-
-// macOS: opening a file from Finder
-app.on('open-file', (event, path) => {
-  event.preventDefault()
-  focusMainWindow()
-  sendOpen('open-paths', [path])
-})
 
 app.whenReady().then(() => {
   ensureThemesDir()

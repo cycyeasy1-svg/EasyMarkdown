@@ -12,7 +12,16 @@ const repoRoot = resolve(__dirname, '..', '..')
 // The built main entry (matches package.json "main"). The renderer is loaded via
 // loadFile(out/renderer/index.html) when ELECTRON_RENDERER_URL is absent — which
 // is exactly the state we launch in below.
-const MAIN = join(repoRoot, 'out', 'main', 'index.js')
+export const MAIN = join(repoRoot, 'out', 'main', 'index.js')
+
+export function createElectronEnv() {
+  const env = { ...process.env }
+  // Strip ELECTRON_RENDERER_URL so main takes the loadFile(out/...) branch.
+  delete env.ELECTRON_RENDERER_URL
+  // ELECTRON_RUN_AS_NODE makes the electron binary behave like plain Node.
+  delete env.ELECTRON_RUN_AS_NODE
+  return env
+}
 
 export const fixture = (name) => join(__dirname, 'fixtures', name)
 
@@ -48,13 +57,7 @@ export async function launchApp(fixtureFiles = [], options = {}) {
   // forwarded into a running dev instance.
   const userDataDir = options.userDataDir || mkdtempSync(join(tmpdir(), 'em-e2e-'))
 
-  const env = { ...process.env }
-  // Strip ELECTRON_RENDERER_URL so main takes the loadFile(out/...) branch.
-  delete env.ELECTRON_RENDERER_URL
-  // ELECTRON_RUN_AS_NODE makes the electron binary behave like plain Node (so
-  // `import 'electron'` yields no app and the process exits) — some shells/CI
-  // images set it. Clear it so we launch a real Electron app.
-  delete env.ELECTRON_RUN_AS_NODE
+  const env = createElectronEnv()
 
   const app = await electron.launch({
     // --lang pins Chromium's locale (→ navigator.language → DEFAULT_LANG) to

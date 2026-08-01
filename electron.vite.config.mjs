@@ -11,7 +11,9 @@ export default defineConfig({
   main: {
     build: {
       rollupOptions: {
-        input: { index: resolve(__dirname, 'src/main/index.js') }
+        // Acquire the single-instance lock before loading the full main process,
+        // so file-association launches can forward argv with minimal startup work.
+        input: { index: resolve(__dirname, 'src/main/bootstrap.js') }
       }
     }
   },
@@ -35,6 +37,9 @@ export default defineConfig({
       __APP_VERSION__: JSON.stringify(pkg.version)
     },
     build: {
+      // electron-vite defaults renderer minification to false. Shipping a
+      // minified entry reduces cold disk/Defender work and script parse input.
+      minify: 'esbuild',
       rollupOptions: {
         input: { index: resolve(__dirname, 'src/renderer/index.html') }
       }

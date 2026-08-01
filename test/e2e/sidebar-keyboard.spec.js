@@ -155,3 +155,42 @@ test('file tree supports roving keyboard focus, ARIA, rename, delete and context
     rmSync(dir, { recursive: true, force: true })
   }
 })
+
+test('session restore reveals only the active tab branch until a sleeping tab is activated', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'em-sidebar-restore-'))
+  const activeDir = join(dir, 'active', 'nested')
+  const sleepingDir = join(dir, 'sleeping', 'nested')
+  mkdirSync(activeDir, { recursive: true })
+  mkdirSync(sleepingDir, { recursive: true })
+  const activePath = join(activeDir, 'active.md')
+  const sleepingPath = join(sleepingDir, 'sleeping.md')
+  writeFileSync(activePath, '# Active\n', 'utf8')
+  writeFileSync(sleepingPath, '# Sleeping\n', 'utf8')
+
+  const first = await launchApp([dir, sleepingPath, activePath])
+  try {
+    await expect(first.page.locator('.tab.active')).toContainText('active.md')
+    await expect.poll(() => first.page.evaluate((expectedPath) => {
+      const session = JSON.parse(localStorage.getItem('easymarkdown.session.v1') || '{}')
+      return session.activePath === expectedPath && session.openPaths?.length === 2
+    }, activePath)).toBe(true)
+  } finally {
+    await first.cleanup({ preserveUserData: true })
+  }
+
+  const second = await launchApp([], { userDataDir: first.userDataDir })
+  try {
+    const row = (name) => second.page.locator('.tree-row[role="treeitem"]', {
+      has: second.page.locator('.tree-label', { hasText: new RegExp(`^${name}$`) })
+    })
+    await expect(second.page.locator('.tab.active')).toContainText('active.md')
+    await expect(row('active.md')).toBeVisible()
+    await expect(row('sleeping.md')).toHaveCount(0)
+
+    await second.page.locator('.tab', { hasText: 'sleeping.md' }).click()
+    await expect(row('sleeping.md')).toBeVisible()
+  } finally {
+    await second.cleanup()
+    rmSync(dir, { recursive: true, force: true })
+  }
+})

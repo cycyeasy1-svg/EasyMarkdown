@@ -1121,6 +1121,12 @@ export default function App() {
   // restore reads this to avoid clobbering that just-opened tab by forcing the
   // *previous* session's active tab back to the front. See the restore effect.
   const explicitOpenRef = useRef(false)
+  // Monotonic token so an older slow disk read cannot steal focus back from a
+  // newer open request that the user issued while it was still loading.
+  const openRequestRef = useRef(0)
+  // Opening an active placeholder also triggers the lazy-activation effect. Keep
+  // both callers on one read promise so the same file is never read twice.
+  const fillTabJobsRef = useRef(new Map())
 
   // Drop editor APIs for tabs that have closed.
   useEffect(() => {
@@ -1352,9 +1358,8 @@ export default function App() {
   const refreshThemes = useCallback(() => {
     window.api.themesList?.().then(setCustomThemes).catch(() => {})
   }, [])
-  useEffect(() => {
-    refreshThemes()
-  }, [refreshThemes])
+  // Theme lists can require a recursive user-directory scan. Settings and the
+  // mobile theme picker refresh on open, so keep this work off the boot path.
   // Inject the selected custom theme's CSS (or clear it). If its file vanished,
   // fall back to no custom theme.
   useEffect(() => {
@@ -2121,31 +2126,46 @@ export default function App() {
   // restart with many tabs reads only the file(s) you actually look at, never all
   // N up front. A file that went missing since last session is dropped quietly,
   // matching the old restore. No-op if the tab is already loaded or gone.
-  const fillTab = useCallback(async (id) => {
-    const tab = tabsRef.current.find((t) => t.id === id)
-    if (!tab || !tab.loading) return
-    try {
-      const { content, mtimeMs } = await window.api.readFile(tab.path)
-      const patch = (t) =>
-        t.id === id
-          ? {
-              ...t,
-              content,
-              savedContent: content,
-              mtimeMs,
-              heavy: isHeavyDoc(content),
-              loading: false,
-              reloadNonce: t.reloadNonce + 1
-            }
-          : t
-      tabsRef.current = tabsRef.current.map(patch)
-      setTabs((prev) => prev.map(patch))
-    } catch {
-      const norm = (tab.path || '').replace(/\\/g, '/')
-      tabsRef.current = tabsRef.current.filter((t) => t.id !== id)
-      setTabs((prev) => prev.filter((t) => t.id !== id))
-      setRecents((prev) => removeRecentPath(prev, norm))
+  const fillTab = useCallback((id) => {
+    const running = fillTabJobsRef.current.get(id)
+    if (running) return running
+
+    const job = (async () => {
+      const tab = tabsRef.current.find((t) => t.id === id)
+      if (!tab) return { ok: false, error: null }
+      if (!tab.loading) return { ok: true, error: null }
+      try {
+        const { content, mtimeMs } = await window.api.readFile(tab.path)
+        const patch = (t) =>
+          t.id === id
+            ? {
+                ...t,
+                content,
+                savedContent: content,
+                mtimeMs,
+                heavy: isHeavyDoc(content),
+                loading: false,
+                reloadNonce: t.reloadNonce + 1
+              }
+            : t
+        tabsRef.current = tabsRef.current.map(patch)
+        setTabs((prev) => prev.map(patch))
+        return { ok: true, error: null }
+      } catch (error) {
+        const norm = (tab.path || '').replace(/\\/g, '/')
+        tabsRef.current = tabsRef.current.filter((t) => t.id !== id)
+        setTabs((prev) => prev.filter((t) => t.id !== id))
+        setRecents((prev) => removeRecentPath(prev, norm))
+        return { ok: false, error }
+      }
+    })()
+
+    fillTabJobsRef.current.set(id, job)
+    const clearJob = () => {
+      if (fillTabJobsRef.current.get(id) === job) fillTabJobsRef.current.delete(id)
     }
+    void job.then(clearJob, clearJob)
+    return job
   }, [])
 
   const focusSidebarForOpenedPath = useCallback((path) => {
@@ -2156,18 +2176,38 @@ export default function App() {
 
   const openPaths = useCallback(async (paths, silent = false, options = {}) => {
     if (!paths || !paths.length) return null
+    const requestToken = ++openRequestRef.current
     const wantsPreview = !silent && !!options.preview && paths.length === 1
     // An explicit open (anything but the silent session restore) means the user
     // wants *this* file in front — record it synchronously so the restore effect
     // won't activate the previous session's tab on top of it.
     if (!silent) explicitOpenRef.current = true
-    let lastId = null
-    let lastPath = null
+    const previousActiveId = activeIdRef.current
+    let lastTargetId = null
+    let lastSuccessfulId = null
+    let lastSuccessfulPath = null
     const seen = new Set()
     const remember = (fp) => {
       setRecents((prev) =>
         rememberRecent(prev, { path: fp, name: baseName(fp), dir: dirName(fp), openedAt: Date.now() })
       )
+    }
+    const activateTarget = (id) => {
+      lastTargetId = id
+      if (silent || requestToken !== openRequestRef.current) return
+      // Switch before disk I/O. File-association opens therefore replace the old
+      // document with a target-titled loading tab as soon as argv reaches us.
+      setActiveId(id)
+      setHome(false)
+    }
+    const reportOpenError = (error, path, norm) => {
+      const missing = error?.message?.includes('ENOENT')
+      setRecents((prev) => removeRecentPath(prev, norm))
+      if (!silent) {
+        window.alert(
+          tRef.current(missing ? 'error.fileMissing' : 'error.openFailed', { name: baseName(path) })
+        )
+      }
     }
     for (const path of paths) {
       const norm = path.replace(/\\/g, '/')
@@ -2176,29 +2216,70 @@ export default function App() {
       // Synchronous check against the live tab list (no setState race).
       const existing = tabsRef.current.find((t) => (t.path || '').replace(/\\/g, '/') === norm)
       if (existing) {
+        if (!wantsPreview && existing.preview) promotePreviewTab(existing.id)
+        activateTarget(existing.id)
         // A lazy restore placeholder counts as "already open" but has no content
         // yet — load it now so callers that read it next (PDF export, the editor)
         // see the real document, not an empty buffer.
-        if (existing.loading) await fillTab(existing.id)
-        if (!wantsPreview && existing.preview) promotePreviewTab(existing.id)
-        lastId = existing.id
-        lastPath = path
-        remember(path)
+        const result = existing.loading ? await fillTab(existing.id) : { ok: true, error: null }
+        if (result.ok) {
+          lastSuccessfulId = existing.id
+          lastSuccessfulPath = path
+          remember(path)
+        } else {
+          reportOpenError(result.error, path, norm)
+        }
         continue
       }
+
+      // Preview tabs retain their replace-after-read behavior so a missing file
+      // cannot discard the current preview. Permanent opens use an immediate
+      // placeholder below, which is the path used by OS file associations.
+      if (!wantsPreview) {
+        const id = genId()
+        const placeholder = {
+          id,
+          path,
+          title: baseName(path),
+          content: '',
+          savedContent: '',
+          mtimeMs: null,
+          reloadNonce: 0,
+          heavy: false,
+          preview: false,
+          loading: true
+        }
+        tabsRef.current = [...tabsRef.current, placeholder]
+        setTabs(tabsRef.current)
+        activateTarget(id)
+        const result = await fillTab(id)
+        if (result.ok) {
+          lastSuccessfulId = id
+          lastSuccessfulPath = path
+          remember(path)
+        } else {
+          reportOpenError(result.error, path, norm)
+        }
+        continue
+      }
+
       try {
         const { content, mtimeMs } = await window.api.readFile(path)
         // Re-check after the await in case a concurrent open added this path.
         const concurrent = tabsRef.current.find((t) => (t.path || '').replace(/\\/g, '/') === norm)
         if (concurrent) {
-          if (!wantsPreview && concurrent.preview) promotePreviewTab(concurrent.id)
-          lastId = concurrent.id
-          lastPath = path
-          remember(path)
+          activateTarget(concurrent.id)
+          const result = concurrent.loading ? await fillTab(concurrent.id) : { ok: true, error: null }
+          if (result.ok) {
+            lastSuccessfulId = concurrent.id
+            lastSuccessfulPath = path
+            remember(path)
+          } else {
+            reportOpenError(result.error, path, norm)
+          }
           continue
         }
         const id = genId()
-        lastId = id
         const newTab = {
           id,
           path,
@@ -2210,49 +2291,50 @@ export default function App() {
           heavy: isHeavyDoc(content),
           preview: wantsPreview
         }
-        if (wantsPreview) {
-          const currentPreview = tabsRef.current.find((tab) => tab.preview)
-          const previewProtected =
-            currentPreview &&
+        const currentPreview = tabsRef.current.find((tab) => tab.preview)
+        const previewProtected =
+          currentPreview &&
+          (
+            hasUnsavedTab(currentPreview) ||
+            currentPreview.id === splitIdRef.current ||
             (
-              hasUnsavedTab(currentPreview) ||
-              currentPreview.id === splitIdRef.current ||
-              (
-                sourcePreviewPinnedRef.current &&
-                currentPreview.id === sourcePreviewIdRef.current
-              )
+              sourcePreviewPinnedRef.current &&
+              currentPreview.id === sourcePreviewIdRef.current
             )
-          if (previewProtected) promotePreviewTab(currentPreview.id)
-          const result = openPreviewTabInList(tabsRef.current, newTab)
-          tabsRef.current = result.tabs
-          setTabs(result.tabs)
-        } else {
-          tabsRef.current = [...tabsRef.current, newTab] // keep snapshot current for the next iteration
-          setTabs(tabsRef.current)
-        }
-        lastPath = path
+          )
+        if (previewProtected) promotePreviewTab(currentPreview.id)
+        const previewResult = openPreviewTabInList(tabsRef.current, newTab)
+        tabsRef.current = previewResult.tabs
+        setTabs(previewResult.tabs)
+        activateTarget(id)
+        lastSuccessfulId = id
+        lastSuccessfulPath = path
         remember(path)
       } catch (e) {
-        // File was moved/deleted (e.g. a stale "recent" entry). Drop it from the
-        // recents list so the dead link disappears, and show a friendly message
-        // instead of the raw IPC error.
-        const missing = e?.message?.includes('ENOENT')
-        setRecents((prev) => removeRecentPath(prev, norm))
-        // Startup restore skips missing files quietly; an explicit open (clicking
-        // a Recent, File > Open) still tells the user what happened.
-        if (!silent) {
-          window.alert(
-            tRef.current(missing ? 'error.fileMissing' : 'error.openFailed', { name: baseName(path) })
-          )
-        }
+        reportOpenError(e, path, norm)
       }
     }
-    if (lastId) {
-      setActiveId(lastId)
+
+    const liveTarget = tabsRef.current.some((tab) => tab.id === lastTargetId) ? lastTargetId : null
+    const liveSuccessful = tabsRef.current.some((tab) => tab.id === lastSuccessfulId)
+      ? lastSuccessfulId
+      : null
+    const previousStillOpen = tabsRef.current.some((tab) => tab.id === previousActiveId)
+      ? previousActiveId
+      : null
+    const finalId = liveTarget || liveSuccessful || previousStillOpen
+    const stillLatestRequest = requestToken === openRequestRef.current
+    if (finalId && stillLatestRequest) {
+      setActiveId(finalId)
       setHome(false)
-      if (!silent && options.followSidebar) focusSidebarForOpenedPath(lastPath)
+      if (!silent && options.followSidebar && lastSuccessfulPath) {
+        focusSidebarForOpenedPath(lastSuccessfulPath)
+      }
+    } else if (!finalId && stillLatestRequest) {
+      setActiveId(null)
+      setHome(true)
     }
-    return lastId
+    return finalId
   }, [fillTab, focusSidebarForOpenedPath, hasUnsavedTab, promotePreviewTab])
 
   const newTab = useCallback(() => {
@@ -4281,7 +4363,30 @@ export default function App() {
 
   useEffect(() => {
     const offMenu = window.api.onMenu((cmd) => handlers.current[cmd]?.())
-    const offOpen = window.api.onOpenPaths((paths) => openPaths(paths, false, { followSidebar: true }))
+    const offOpen = window.api.onOpenPaths((payload) => {
+      const request = Array.isArray(payload) ? { paths: payload, requestId: null } : (payload || {})
+      const opening = openPaths(request.paths, false, { followSidebar: true })
+      if (!request.requestId || !window.api.openPathsPresented) return
+      const acknowledgeAfterCommit = () => {
+        let acknowledged = false
+        const acknowledge = () => {
+          if (acknowledged) return
+          acknowledged = true
+          window.api.openPathsPresented(request.requestId)
+        }
+        // Prefer two painted frames so a background window is surfaced with the
+        // target editor already committed. Minimized Chromium may pause rAF, so a
+        // short timer is the non-visual fallback; React has committed by then.
+        const fallback = setTimeout(acknowledge, 100)
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            clearTimeout(fallback)
+            acknowledge()
+          })
+        })
+      }
+      void Promise.resolve(opening).then(acknowledgeAfterCommit, acknowledgeAfterCommit)
+    })
     // A folder path arriving from Explorer's "Open with EasyMarkdown" folder menu.
     const offFolder = window.api.onOpenFolderPath?.((dir) => {
       // never open a relative path as a workspace; add as a new root (kept alongside any existing ones)
@@ -4532,22 +4637,30 @@ export default function App() {
         session.activePath && paths.includes(session.activePath) ? session.activePath : paths[0]
       const pinnedSet = new Set(session.pinnedPaths || [])
       const previewSet = new Set(session.previewPaths || [])
-      const placeholders = paths.map((p) => ({
-        id: genId(),
-        path: p,
-        title: baseName(p),
-        content: '',
-        savedContent: '',
-        mtimeMs: null,
-        reloadNonce: 0,
-        heavy: false,
-        pinned: pinnedSet.has(p),
-        preview: previewSet.has(p) && !pinnedSet.has(p),
-        loading: true // not yet read from disk; filled lazily on activation
-      }))
+      const normalizeRestorePath = (p) => {
+        const normalized = (p || '').replace(/\\/g, '/')
+        return window.api.platform === 'win32' ? normalized.toLowerCase() : normalized
+      }
+      const alreadyOpen = new Set(tabsRef.current.map((tab) => normalizeRestorePath(tab.path)))
+      const placeholders = paths
+        .filter((p) => !alreadyOpen.has(normalizeRestorePath(p)))
+        .map((p) => ({
+          id: genId(),
+          path: p,
+          title: baseName(p),
+          content: '',
+          savedContent: '',
+          mtimeMs: null,
+          reloadNonce: 0,
+          heavy: false,
+          pinned: pinnedSet.has(p),
+          preview: previewSet.has(p) && !pinnedSet.has(p),
+          loading: true // not yet read from disk; filled lazily on activation
+        }))
       tabsRef.current = [...tabsRef.current, ...placeholders]
-      setTabs((prev) => [...prev, ...placeholders])
-      const priorityTab = placeholders.find((t) => t.path === priorityPath)
+      setTabs(tabsRef.current)
+      const priorityKey = normalizeRestorePath(priorityPath)
+      const priorityTab = tabsRef.current.find((t) => normalizeRestorePath(t.path) === priorityKey)
       if (priorityTab && !explicitOpenRef.current) {
         setActiveId(priorityTab.id)
         setHome(false)
@@ -5815,7 +5928,6 @@ export default function App() {
                 workspaces={workspaces}
                 activePath={activePath}
                 openTabPaths={openTabPaths}
-                openTabPathsRaw={openTabPathsRaw}
                 onOpenFile={onSidebarOpenFile}
                 onOpenRight={openFileRight}
                 onExportPdf={exportPathToPdf}

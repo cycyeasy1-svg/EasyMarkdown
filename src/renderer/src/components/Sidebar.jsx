@@ -2,7 +2,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Icon } from './icons.jsx'
 import { useI18n } from '../i18n.jsx'
 import { baseName, dirName as parentDir, joinPath as join, isMarkdownName, isValidName, isExistsError } from '../paths.js'
-import { flattenVisibleTree, selectMarkdownBranches } from '../sidebar-tree.js'
+import { flattenVisibleTree, readDirectoriesBatched, selectMarkdownBranches } from '../sidebar-tree.js'
 import { copyToClipboard, fireToast } from '../ui.js'
 
 const treePathKey = (path) => {
@@ -17,7 +17,7 @@ const treePathKey = (path) => {
 // which change while typing. With stable props (App useCallbacks its handlers and
 // keys the open-path set by its contents), memo skips re-rendering the whole tree
 // on each content edit. See the openTabPaths memo + onSidebarOpenFile in App.jsx.
-function Sidebar({ workspaces, activePath, openTabPaths, openTabPathsRaw, onOpenFile, onOpenRight, onExportPdf, onAddFolder, onRemoveFolder, onReorderFolder, onRenamePath, refreshNonce, showHiddenFiles = false }) {
+function Sidebar({ workspaces, activePath, openTabPaths, onOpenFile, onOpenRight, onExportPdf, onAddFolder, onRemoveFolder, onReorderFolder, onRenamePath, refreshNonce, showHiddenFiles = false }) {
   const { t } = useI18n()
   const isMobile = window.api.platform === 'ios' || window.api.platform === 'android'
   const copyText = (text) => copyToClipboard(text, t('code.copied'))
@@ -59,9 +59,9 @@ function Sidebar({ workspaces, activePath, openTabPaths, openTabPathsRaw, onOpen
   // Last path we scrolled to — so we reveal a file once when it's opened, not on
   // every later manual expand/collapse of unrelated folders.
   const lastScrolledRef = useRef(null)
-  // Open-tab paths we've already auto-revealed, so re-expanding doesn't fight a
-  // folder the user later collapses by hand (reset when the workspace changes).
-  const revealedRef = useRef(new Set())
+  // Reuse an in-flight IPC read when root initialization and active-file reveal
+  // ask for the same directory at the same time.
+  const loadJobsRef = useRef(new Map())
   const showHiddenRef = useRef(showHiddenFiles)
   showHiddenRef.current = showHiddenFiles
 
@@ -118,13 +118,47 @@ function Sidebar({ workspaces, activePath, openTabPaths, openTabPathsRaw, onOpen
     })
   }, [effectiveFocusedPath, focusedPath, visibleRowsKey])
 
+  const readDirOnce = useCallback((dir, requestedHidden) => {
+    const key = `${requestedHidden ? 1 : 0}\0${dir}`
+    const current = loadJobsRef.current.get(key)
+    if (current) return current
+
+    const job = Promise.resolve().then(() =>
+      window.api.readDir(dir, { showHidden: requestedHidden })
+    )
+    loadJobsRef.current.set(key, job)
+    const clear = () => {
+      if (loadJobsRef.current.get(key) === job) loadJobsRef.current.delete(key)
+    }
+    job.then(clear, clear)
+    return job
+  }, [])
+
   const loadDir = useCallback(async (dir) => {
     const requestedHidden = showHiddenFiles
-    const nodes = await window.api.readDir(dir, { showHidden: requestedHidden })
+    const nodes = await readDirOnce(dir, requestedHidden)
     if (requestedHidden !== showHiddenRef.current) return nodes
     setChildrenMap((m) => ({ ...m, [dir]: nodes }))
     return nodes
-  }, [showHiddenFiles])
+  }, [readDirOnce, showHiddenFiles])
+
+  const loadDirsBatch = useCallback(async (dirs) => {
+    const requestedHidden = showHiddenFiles
+    const entries = await readDirectoriesBatched(
+      dirs,
+      (dir) => readDirOnce(dir, requestedHidden),
+      6
+    )
+    if (requestedHidden !== showHiddenRef.current || !entries.length) return entries
+    setChildrenMap((current) => {
+      const next = { ...current }
+      entries.forEach(([dir, nodes]) => {
+        next[dir] = nodes
+      })
+      return next
+    })
+    return entries
+  }, [readDirOnce, showHiddenFiles])
 
   // Load + expand any root we haven't seen yet, leaving already-loaded roots'
   // expansion and children untouched — adding a folder must not collapse the
@@ -138,26 +172,26 @@ function Sidebar({ workspaces, activePath, openTabPaths, openTabPathsRaw, onOpen
       newRoots.forEach((w) => n.add(w.rootPath))
       return n
     })
-    newRoots.forEach((w) => loadDir(w.rootPath))
+    void loadDirsBatch(newRoots.map((w) => w.rootPath))
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rootsKey, loadDir])
+  }, [rootsKey, loadDirsBatch])
 
   // Refresh all currently-loaded dirs when the watcher fires
   useEffect(() => {
     if (!roots.length || refreshNonce === 0) return
-    Object.keys(childrenMap).forEach((dir) => loadDir(dir))
+    void loadDirsBatch(Object.keys(childrenRef.current))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refreshNonce])
 
   // The preference applies to every already-expanded lazy directory, not only
   // folders opened after the toggle. Expansion and watcher state stay intact.
   useEffect(() => {
-    Object.keys(childrenRef.current).forEach((dir) => loadDir(dir))
-  }, [showHiddenFiles, loadDir])
+    void loadDirsBatch(Object.keys(childrenRef.current))
+  }, [showHiddenFiles, loadDirsBatch])
 
   // Lazy folder watching: watch exactly the directories the tree has actually
-  // loaded (each root + every folder the user expanded or that was revealed for an
-  // open tab), one level deep each (see main `watch:start`). This replaces the old
+  // loaded (each root + every folder the user expanded or that was revealed for the
+  // active tab), one level deep each (see main `watch:start`). This replaces the old
   // recursive whole-root crawl that made launch janky on big workspaces — we only
   // watch what's visible, and pick up changes in collapsed folders when they're
   // expanded (loadDir re-reads then). Watches follow childrenMap; dirs that leave
@@ -190,7 +224,7 @@ function Sidebar({ workspaces, activePath, openTabPaths, openTabPathsRaw, onOpen
   // Expand the ancestor folders of the given files so they're revealed in the
   // tree. Additive — only ever adds to `expanded`, never collapses what the user
   // opened. Loads each ancestor dir (so its children render) before expanding.
-  // Used both to follow the active file and to surface restored open tabs.
+  // Sleeping restored tabs stay unloaded until they become the active file.
   const revealAncestors = useCallback(
     async (paths, isCancelled) => {
       if (!roots.length) return
@@ -214,10 +248,10 @@ function Sidebar({ workspaces, activePath, openTabPaths, openTabPathsRaw, onOpen
         }
       }
       if (!ancestors.size) return
-      for (const dir of ancestors) {
-        if (isCancelled?.()) return
-        if (!childrenRef.current[dir]) await loadDir(dir)
-      }
+      const missing = [...ancestors].filter(
+        (dir) => childrenRef.current[dir] === undefined
+      )
+      await loadDirsBatch(missing)
       if (isCancelled?.()) return
       setExpanded((s) => {
         const n = new Set(s)
@@ -226,7 +260,7 @@ function Sidebar({ workspaces, activePath, openTabPaths, openTabPathsRaw, onOpen
       })
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [rootsKey, loadDir]
+    [rootsKey, loadDirsBatch]
   )
 
   // Issue #11: follow the active file — when a file is opened/switched (via the
@@ -240,37 +274,6 @@ function Sidebar({ workspaces, activePath, openTabPaths, openTabPathsRaw, onOpen
       cancelled = true
     }
   }, [activePath, revealAncestors])
-
-  // Reveal every open tab's folder too, not just the active one — so a restored
-  // session (many tabs deep in the tree) shows them all, with their open-file
-  // dots. Each path is revealed only once (`revealedRef`), so this never fights a
-  // folder the user later collapses manually; it only expands newly-seen tabs.
-  useEffect(() => {
-    if (!roots.length || !openTabPathsRaw?.length) return
-    const fresh = openTabPathsRaw.filter((p) => p && !revealedRef.current.has(p))
-    if (!fresh.length) return
-    fresh.forEach((p) => revealedRef.current.add(p))
-    let superseded = false
-    // Expand unconditionally (additive + idempotent) so every open tab reveals
-    // even as more tabs stream in during restore — don't cancel the expansion.
-    revealAncestors(fresh).then(() => {
-      // The tree just grew (folders expanded) — re-pin the active file's row into
-      // view. Wait for the next paint so we scroll to its *final* position, not the
-      // spot it sat at before these folders expanded below/around it. Bypasses the
-      // lastScrolledRef guard on purpose; runs only for freshly-seen tabs (restore /
-      // new opens), never on the user's own manual folder expansion. `superseded`
-      // keeps only the last batch's scroll, so the view ends on the active file.
-      if (superseded) return
-      requestAnimationFrame(() => {
-        if (superseded || !activeRowRef.current) return
-        activeRowRef.current.scrollIntoView({ block: 'nearest' })
-      })
-    })
-    return () => {
-      superseded = true
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [openTabPathsRaw, rootsKey, revealAncestors])
 
   // Scroll the active file's row into view once it (and its ancestors) are
   // rendered. Guarded by lastScrolledRef so we only reveal on open, not on every
