@@ -1,7 +1,7 @@
 # Changelog
 
 ## 1.5.0
-<!-- head: a685811 -->
+<!-- head: 25001b2 -->
 
 - **Format text without leaving Keep** — apply bold, italic, strikethrough,
   underline, highlights, and text colors from a toolbar while editing blocks,
