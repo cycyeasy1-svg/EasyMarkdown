@@ -472,10 +472,9 @@ test('milkdown mode: slash language alias inserts a preconfigured code block', a
   const { page, cleanup } = await openWelcome()
   try {
     const pm = await switchToMilkdown(page)
-    const paragraph = pm.locator('p', { hasText: 'reliable click' })
-    await paragraph.click()
-    await page.keyboard.press('End')
-    await page.keyboard.press('Enter')
+    // Use the fixture's empty trailing paragraph. `End` moves to the visual line
+    // end in Chromium and is not a stable way to reach the end of wrapped text.
+    await pm.locator('p').last().click()
     await page.keyboard.type('/java')
 
     const menu = page.locator('.hm-smart-slash[data-show="true"]')

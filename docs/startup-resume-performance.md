@@ -438,7 +438,49 @@ process memory は OS の trim、GPU cache、計測順序による変動が大�
 - Milkdown editor は Undo/selection state を安全に外部化できていないため hibernate 対象外である。Milkdown を多数常駐させる利用形態では別設計が必要になる。
 - Electron 43 系への更新、Windows code signing、実機 ETW 分析は、それぞれ独立して回帰確認・権限・環境準備を必要とする。
 
-## 10. 参考資料
+## 10. Electron 43 互換性対応
+
+### 実施状態
+
+- 状態: 完了
+- 実施日: 2026-08-01
+- 更新内容: Electron 34.5.8 から、実施日時点の 43 系最新 patch である Electron 43.2.0 へ更新した。
+- 方針: Electron 更新だけで発生した挙動差を切り分けられるよう、機能追加は含めず、互換性修正と test automation の決定性改善だけを同じ batch に含めた。
+
+### 検出した互換性問題と対応
+
+1. Keep table の context menu
+   - Chromium 150 では、column resize handle に focus がある状態から table cell を右クリックすると、live table と mirrored top scrollbar の位置合わせで `scrollLeft = 0.5` の scroll event が発生する場合があった。
+   - 既存実装はすべての scroll event で context menu を閉じるため、menu が生成直後に消えていた。
+   - 右クリック時は logical cell selection だけを更新して DOM focus を移動せず、table 本体または mirrored scrollbar が原点近傍で発生させた 1 px 未満の同期 event だけを user scroll として扱わないようにした。通常の scroll-dismiss 動作は維持している。
+2. Milkdown E2E の caret 操作
+   - Chromium の `Home` / `End` は visual line 基準で動作し、折り返しと find refresh の timing によって selection/caret 位置が変わるため、Electron 更新後に二つの test が不安定化した。
+   - 製品挙動を変更せず、paragraph selection と末尾の空 paragraph を直接指定する deterministic な操作へ変更した。
+
+### 検証結果
+
+- `npm run lint`: pass
+- `npm test`: 52 files / 454 tests pass
+- `npm run build`: pass
+- `npm run build:mobile`: pass
+- `npm run test:e2e`: 95 / 95 cases pass
+- Milkdown の更新 test 2 cases × 5 rounds: pass
+- Keep table context menu test × 10 rounds: pass
+- `perf-resume --runs=3`: 15 / 15 budget checks pass
+- `perf-app`: 31 / 31 checks pass
+- `npm run dist:dir`: Windows x64 unpacked package 作成 pass
+- packaged `EasyMarkdown.exe` の直接起動: Electron 43.2.0 / Chromium 150.0.7871.129 / Node 24.18.0 を確認し、preload、renderer shell、status bar、起動引数からの Markdown open が pass
+
+`perf-resume` の 3 samples では復帰 2 rAF が 33.1～34.6 ms、hibernate reader reopen が 144.7～178.1 ms、scroll restore ratio はすべて 0.701 だった。`perf-app` は 21,624 cells 条件で table open 1,251.3 ms、max Long Task 187 ms、Total Blocking Time 241 ms で、すべて既存 budget 内である。
+
+### リリース判断と未検証境界
+
+- Windows x64 は development build、全 E2E、performance benchmark、unpacked package の実起動まで確認済みである。
+- この Windows 環境では macOS x64/arm64 package と実機挙動を検証できない。共通 code path の unit/E2E と mobile build は pass しているが、macOS release 前には実機で起動、traffic lights、file open、sleep/wake、sign/notarize を確認する。
+- unpacked package は project 方針どおり未署名であり、Windows Defender / SmartScreen に対する署名済み installer の cold-start 差は本 batch の対象外である。
+- `npm audit` は現時点で 17 件（moderate 1、high 15、critical 1）を報告する。主な修正候補は `electron-builder` など別 dependency の major/minor 更新を伴うため、Electron runtime の互換性 batch には混在させず、独立した security dependency batch で評価する。
+
+## 11. 参考資料
 
 - [Electron Performance](https://www.electronjs.org/docs/latest/tutorial/performance)
 - [Electron BrowserWindow](https://www.electronjs.org/docs/latest/api/browser-window)

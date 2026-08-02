@@ -461,7 +461,7 @@ function KeepEditor({
         onFilterClick: (clonedBtn) => openFilterPop(clonedBtn),
         onHeaderClick: (liveTh) => selectCell(liveTh),
         onHeaderContextMenu: (liveTh, _clonedTh, event) => {
-          selectCell(liveTh)
+          selectCell(liveTh, { focus: false })
           event.preventDefault()
           openMenu(event.clientX, event.clientY, tableItemsForCell(liveTh))
         },
@@ -2141,7 +2141,11 @@ function KeepEditor({
         if (cell && host.contains(cell)) {
           const table = cell.closest('table.km-table')
           if (!table) return
-          selectCell(cell)
+          // A context menu updates the logical table selection without stealing
+          // DOM focus. Moving focus from a column resize handle can trigger a
+          // fractional horizontal scroll in Chromium, which immediately closes
+          // the menu through the normal scroll-dismiss path.
+          selectCell(cell, { focus: false })
           items.push(...tableItemsForCell(cell))
         } else {
           const block = e.target.closest('.km-block')
@@ -2270,8 +2274,17 @@ function KeepEditor({
     // Scrolling abandons an open right-click menu (its anchor moved away). The
     // cell editor stays open on purpose (it may hold unsaved edits) and is
     // re-anchored to its cell so it tracks the cell instead of drifting.
-    const onScroll = () => {
-      closeMenu()
+    const onScroll = (event) => {
+      const target = event.target
+      const isSubpixelTableSync =
+        target instanceof HTMLElement &&
+        target.matches('.km-table-wrap, .km-table-scrolltop') &&
+        Math.abs(target.scrollTop) < 1 &&
+        Math.abs(target.scrollLeft) < 1
+      // Chromium 150 can align the live table and its mirrored top scrollbar
+      // to 0.5px during a right-click. That is not a user scroll and must not
+      // dismiss the menu that the same gesture just opened.
+      if (!isSubpixelTableSync) closeMenu()
       repositionCellPop()
       repositionFilterPop()
       tableScrollRef.current?.update()

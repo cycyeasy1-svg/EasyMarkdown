@@ -57,9 +57,9 @@ test('Milkdown debounces live find refreshes while preserving editor focus', asy
     await openNeedleFind(page)
 
     const paragraph = editor.locator('p').first()
-    await paragraph.click()
-    await page.keyboard.press('Home')
-    await page.keyboard.press('Shift+End')
+    // Select the paragraph deterministically. Home/End operate on visual lines
+    // and can collapse differently while the live-find refresh is settling.
+    await paragraph.selectText()
     await page.keyboard.type('changed first')
 
     await expect(paragraph).toHaveText('changed first')
