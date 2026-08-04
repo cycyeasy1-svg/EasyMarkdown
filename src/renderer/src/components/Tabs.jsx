@@ -33,6 +33,7 @@ function Tabs({
   const stripRef = useRef(null)
   const scrollRef = useRef(null)
   const [overflowing, setOverflowing] = useState(false)
+  const [scrollEdges, setScrollEdges] = useState({ atStart: true, atEnd: true })
   // Right-click context menu: { x, y, tab } in viewport coords, or null.
   const [menu, setMenu] = useState(null)
   // Drag-reorder state: the tab id being dragged and the id currently hovered
@@ -43,9 +44,6 @@ function Tabs({
   // clear ✕ (the unsaved state is shown in the bottom bar, not as a tab dot).
   const isMobile = window.api.platform === 'ios' || window.api.platform === 'android'
   const focusedId = focusedPane === 'right' && splitId != null ? splitId : activeId
-  const focusedIndex = tabs.findIndex((tab) => tab.id === focusedId)
-  const canMovePrevious = focusedIndex > 0
-  const canMoveNext = focusedIndex !== -1 && focusedIndex < tabs.length - 1
 
   // Firefox-style overflow affordances: the arrow buttons do not consume any
   // space while every tab fits. Compare the tab content width with the whole
@@ -63,16 +61,28 @@ function Tabs({
       cancelAnimationFrame(raf)
       raf = requestAnimationFrame(() => {
         setOverflowing(scroll.scrollWidth > strip.clientWidth + 1)
+        const maxScrollLeft = Math.max(0, scroll.scrollWidth - scroll.clientWidth)
+        const nextEdges = {
+          atStart: scroll.scrollLeft <= 1,
+          atEnd: scroll.scrollLeft >= maxScrollLeft - 1
+        }
+        setScrollEdges((current) => (
+          current.atStart === nextEdges.atStart && current.atEnd === nextEdges.atEnd
+            ? current
+            : nextEdges
+        ))
       })
     }
     measure()
     const resize = new ResizeObserver(measure)
     resize.observe(strip)
     resize.observe(scroll)
+    scroll.addEventListener('scroll', measure, { passive: true })
     window.addEventListener('resize', measure)
     return () => {
       cancelAnimationFrame(raf)
       resize.disconnect()
+      scroll.removeEventListener('scroll', measure)
       window.removeEventListener('resize', measure)
     }
   }, [tabs, isMobile])
@@ -103,9 +113,24 @@ function Tabs({
   const reveal = (tab) => {
     if (tab.path) window.api.showInFolder(tab.path)
   }
-  const moveTabFocus = (delta) => {
-    const target = tabs[focusedIndex + delta]
-    if (target) onActivate(target.id)
+  const scrollTabs = (direction) => {
+    const scroll = scrollRef.current
+    if (!scroll) return
+    const firstTab = scroll.querySelector('.tab')
+    const tabWidth = firstTab?.getBoundingClientRect().width || 120
+    const gap = Number.parseFloat(getComputedStyle(scroll).columnGap) || 0
+    scroll.scrollBy({ left: direction * (tabWidth + gap), behavior: 'smooth' })
+  }
+  const handleWheel = (event) => {
+    const scroll = event.currentTarget
+    if (scroll.scrollWidth <= scroll.clientWidth + 1) return
+
+    const rawDelta = Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : event.deltaY
+    if (!rawDelta) return
+    const unit = event.deltaMode === 1 ? 32 : event.deltaMode === 2 ? scroll.clientWidth : 1
+    const before = scroll.scrollLeft
+    scroll.scrollLeft += rawDelta * unit
+    if (scroll.scrollLeft !== before) event.preventDefault()
   }
 
   return (
@@ -113,15 +138,15 @@ function Tabs({
       {overflowing && (
         <button
           className="tab-nav tab-nav-prev"
-          title={t('tab.previous')}
-          aria-label={t('tab.previous')}
-          disabled={!canMovePrevious}
-          onClick={() => moveTabFocus(-1)}
+          title={t('tab.scrollLeft')}
+          aria-label={t('tab.scrollLeft')}
+          disabled={scrollEdges.atStart}
+          onClick={() => scrollTabs(-1)}
         >
           <Icon name="chevron-right" size={15} style={{ transform: 'rotate(180deg)' }} />
         </button>
       )}
-      <div className="tabs-scroll" ref={scrollRef}>
+      <div className="tabs-scroll" ref={scrollRef} onWheel={handleWheel}>
         {tabs.map((tab) => {
           const dirty = tab.dirty
           const isLeft = tab.id === activeId
@@ -203,10 +228,10 @@ function Tabs({
       {overflowing && (
         <button
           className="tab-nav tab-nav-next"
-          title={t('tab.next')}
-          aria-label={t('tab.next')}
-          disabled={!canMoveNext}
-          onClick={() => moveTabFocus(1)}
+          title={t('tab.scrollRight')}
+          aria-label={t('tab.scrollRight')}
+          disabled={scrollEdges.atEnd}
+          onClick={() => scrollTabs(1)}
         >
           <Icon name="chevron-right" size={15} />
         </button>

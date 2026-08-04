@@ -1818,50 +1818,82 @@ function KeepEditor({
         '<input class="km-fp-search" placeholder="' +
         escapeAttrLocal(tRef.current('keep.filterSearch')) +
         '">' +
-        '<div class="km-fp-tools"><a data-all="1">' +
+        '<div class="km-fp-tools"><button type="button" data-select="all">' +
         escapeHtmlLocal(tRef.current('keep.selectAll')) +
-        '</a><a data-all="0">' +
+        '</button><button type="button" data-select="none">' +
         escapeHtmlLocal(tRef.current('keep.selectNone')) +
-        '</a></div>' +
+        '</button><button type="button" data-select="invert">' +
+        escapeHtmlLocal(tRef.current('keep.invertSelection')) +
+        '</button><button type="button" data-select="duplicates">' +
+        escapeHtmlLocal(tRef.current('keep.selectDuplicates')) +
+        '</button><button type="button" data-select="unique">' +
+        escapeHtmlLocal(tRef.current('keep.selectUnique')) +
+        '</button></div>' +
         '<div class="km-fp-list"></div>' +
         // Confirm first, cancel after — matches the cell / block source editors.
-        '<div class="km-fp-actions"><button type="button" class="ok">' +
+        '<div class="km-fp-actions"><button type="button" class="clear-column"' +
+        (excluded.size ? '' : ' disabled') +
+        '>' +
+        escapeHtmlLocal(tRef.current('keep.clearColumnFilter')) +
+        '</button><button type="button" class="ok">' +
         escapeHtmlLocal(tRef.current('edit.confirm')) +
         '</button><button type="button" class="cancel">' +
         escapeHtmlLocal(tRef.current('edit.cancel')) +
         '</button></div>'
       const list = pop.querySelector('.km-fp-list')
       const sorted = [...values].sort((a, b) => a.localeCompare(b, 'ja'))
+      const selected = new Set(sorted.filter((v) => !excluded.has(v)))
+      const matchesSearch = (v, filter) =>
+        !filter || v.replace(/<br>/g, ' ').includes(filter)
+      const matchingValues = (filter) => sorted.filter((v) => matchesSearch(v, filter))
       const buildList = (filter) => {
         list.innerHTML = ''
-        sorted
-          .filter((v) => !filter || v.replace(/<br>/g, ' ').includes(filter))
-          .forEach((v) => {
-            const lab = document.createElement('label')
-            const cb = document.createElement('input')
-            cb.type = 'checkbox'
-            cb.checked = !excluded.has(v)
-            cb.dataset.v = v
-            const span = document.createElement('span')
-            span.className = 'km-fp-value'
-            span.innerHTML = inline(v)
-            const count = document.createElement('span')
-            count.className = 'km-fp-count'
-            count.textContent = `(${valueCounts.get(v)})`
-            lab.appendChild(cb)
-            lab.appendChild(span)
-            lab.appendChild(count)
-            list.appendChild(lab)
-          })
+        matchingValues(filter).forEach((v) => {
+          const lab = document.createElement('label')
+          const cb = document.createElement('input')
+          cb.type = 'checkbox'
+          cb.checked = selected.has(v)
+          cb.dataset.v = v
+          cb.onchange = () => {
+            if (cb.checked) selected.add(v)
+            else selected.delete(v)
+          }
+          const span = document.createElement('span')
+          span.className = 'km-fp-value'
+          span.innerHTML = inline(v)
+          const count = document.createElement('span')
+          count.className = 'km-fp-count'
+          count.textContent = `(${valueCounts.get(v)})`
+          lab.appendChild(cb)
+          lab.appendChild(span)
+          lab.appendChild(count)
+          list.appendChild(lab)
+        })
       }
       buildList('')
-      pop.querySelector('.km-fp-search').addEventListener('input', (e) => buildList(e.target.value))
-      pop.querySelectorAll('.km-fp-tools a').forEach((a) => {
-        a.onclick = () => {
-          const on = a.dataset.all === '1'
-          list.querySelectorAll('input').forEach((cb) => (cb.checked = on))
+      const search = pop.querySelector('.km-fp-search')
+      search.addEventListener('input', (e) => buildList(e.target.value))
+      pop.querySelectorAll('.km-fp-tools button').forEach((button) => {
+        button.onclick = () => {
+          matchingValues(search.value).forEach((value) => {
+            const action = button.dataset.select
+            if (action === 'all') selected.add(value)
+            else if (action === 'none') selected.delete(value)
+            else if (action === 'invert') {
+              if (selected.has(value)) selected.delete(value)
+              else selected.add(value)
+            } else if (action === 'duplicates') {
+              if (valueCounts.get(value) > 1) selected.add(value)
+              else selected.delete(value)
+            } else if (action === 'unique') {
+              if (valueCounts.get(value) === 1) selected.add(value)
+              else selected.delete(value)
+            }
+          })
+          buildList(search.value)
         }
       })
+      pop.querySelector('.clear-column').onclick = () => clearColumnFilter(ti, ci)
       pop.querySelector('.cancel').onclick = closePop
       pop.querySelector('.ok').onclick = () => {
         // Excel-style: the search box narrows the visible list; confirming keeps
@@ -1870,11 +1902,11 @@ function KeepEditor({
         // filters the table down to the matching rows. (Previously the hidden,
         // non-matching values were silently kept unless already excluded, so a
         // search-then-confirm with no manual unchecking did nothing.)
-        const keep = new Set(
-          [...list.querySelectorAll('input')]
-            .filter((cb) => cb.checked)
-            .map((cb) => cb.dataset.v)
-        )
+        list.querySelectorAll('input').forEach((cb) => {
+          if (cb.checked) selected.add(cb.dataset.v)
+          else selected.delete(cb.dataset.v)
+        })
+        const keep = new Set(matchingValues(search.value).filter((v) => selected.has(v)))
         // Values whose rows are hidden by OTHER columns' filters aren't listed,
         // so they can't be toggled here — carry their exclusion over unchanged.
         const ex = new Set([...excluded].filter((v) => !values.has(v)))
@@ -1882,7 +1914,10 @@ function KeepEditor({
           if (!keep.has(v)) ex.add(v)
         })
         if (ex.size > 0) filterStateRef.current[ti][ci] = ex
-        else delete filterStateRef.current[ti][ci]
+        else {
+          delete filterStateRef.current[ti][ci]
+          if (!Object.keys(filterStateRef.current[ti]).length) delete filterStateRef.current[ti]
+        }
         closePop()
         // A filter only toggles row visibility — it never touches rawLines or block
         // structure. Apply it directly instead of a full re-render (rebuilding a
@@ -1892,14 +1927,7 @@ function KeepEditor({
         reportFilter()
         const cols = filterStateRef.current[ti]
         const isActive = !!(cols && cols[ci] && cols[ci].size > 0)
-        // Toggle the ▼ active state on every copy of this column's button — the
-        // live header AND the floating-header clone (which may be the one clicked).
-        host
-          .querySelectorAll('.km-filter-btn[data-ti="' + ti + '"][data-ci="' + ci + '"]')
-          .forEach((b) => b.classList.toggle('active', isActive))
-        document
-          .querySelectorAll('.km-float-header .km-filter-btn[data-ti="' + ti + '"][data-ci="' + ci + '"]')
-          .forEach((b) => b.classList.toggle('active', isActive))
+        syncColumnFilterButtons(ti, ci, isActive)
         // Hiding rows can reflow column widths — re-measure the floating header so
         // it stays aligned with the (now narrower/wider) live table.
         tableScrollRef.current?.update()
@@ -1934,6 +1962,24 @@ function KeepEditor({
     const tableHasFilter = (ti) => {
       const cols = filterStateRef.current[ti]
       return !!cols && Object.keys(cols).length > 0
+    }
+    const syncColumnFilterButtons = (ti, ci, active) => {
+      const sel = '.km-filter-btn[data-ti="' + ti + '"][data-ci="' + ci + '"]'
+      host.querySelectorAll(sel).forEach((b) => b.classList.toggle('active', active))
+      document
+        .querySelectorAll('.km-float-header ' + sel)
+        .forEach((b) => b.classList.toggle('active', active))
+    }
+    const clearColumnFilter = (ti, ci) => {
+      const cols = filterStateRef.current[ti]
+      if (!cols?.[ci]?.size) return
+      closePop()
+      delete cols[ci]
+      if (!Object.keys(cols).length) delete filterStateRef.current[ti]
+      applyFilter(ti)
+      syncColumnFilterButtons(ti, ci, false)
+      reportFilter()
+      tableScrollRef.current?.update()
     }
     // Drop every filter on one table (right-click menu) / on the whole document
     // (status-bar badge). Display-only, like the filters themselves: un-hide the

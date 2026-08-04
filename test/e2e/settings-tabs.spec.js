@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { launchApp, fixture } from './helpers.js'
 
-test('tab migration buttons appear only on overflow and switch adjacent tabs', async () => {
+test('overflow arrows and the mouse wheel scroll the tab strip without switching tabs', async () => {
   const single = await launchApp([fixture('welcome.md')])
   try {
     await expect(single.page.locator('.tab-nav')).toHaveCount(0)
@@ -33,8 +33,8 @@ test('tab migration buttons appear only on overflow and switch adjacent tabs', a
     const next = many.page.locator('.tab-nav-next')
     await expect(previous).toBeVisible()
     await expect(next).toBeVisible()
-    await expect(previous).toHaveAttribute('title', '切换到上一个标签')
-    await expect(next).toHaveAttribute('title', '切换到下一个标签')
+    await expect(previous).toHaveAttribute('title', '向左滚动标签栏')
+    await expect(next).toHaveAttribute('title', '向右滚动标签栏')
 
     const tabWidths = await many.page.locator('.tab').evaluateAll((tabs) =>
       tabs.map((tab) => tab.getBoundingClientRect().width)
@@ -44,9 +44,18 @@ test('tab migration buttons appear only on overflow and switch adjacent tabs', a
 
     await many.page.locator('.tab', { hasText: names[7] }).click()
     await expect(many.page.locator('.tab.active')).toContainText(names[7])
+    const scroll = many.page.locator('.tabs-scroll')
+    const initialScrollLeft = await scroll.evaluate((element) => element.scrollLeft)
+    expect(initialScrollLeft).toBeGreaterThan(0)
+
     await previous.click()
-    await expect(many.page.locator('.tab.active')).toContainText(names[6])
-    await next.click()
+    await expect(many.page.locator('.tab.active')).toContainText(names[7])
+    await expect.poll(() => scroll.evaluate((element) => element.scrollLeft)).toBeLessThan(initialScrollLeft)
+
+    const afterArrow = await scroll.evaluate((element) => element.scrollLeft)
+    await scroll.hover()
+    await many.page.mouse.wheel(0, 240)
+    await expect.poll(() => scroll.evaluate((element) => element.scrollLeft)).toBeGreaterThan(afterArrow)
     await expect(many.page.locator('.tab.active')).toContainText(names[7])
   } finally {
     await many.cleanup()

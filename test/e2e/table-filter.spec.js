@@ -58,6 +58,45 @@ test('column filter hides rows; a second column dropdown lists only surviving va
   }
 })
 
+test('column filter selects inverse, duplicate, or unique values and clears only that column', async () => {
+  const { page, cleanup } = await openFilterDoc()
+  try {
+    const table = page.locator('.km-doc table.km-table[data-ti="0"]')
+    await table.locator('.km-filter-btn[data-ci="1"]').first().click()
+    const pop = page.locator('.km-filter-pop')
+    const checked = (value) => pop.locator(`input[data-v="${value}"]`)
+
+    await expect(pop.locator('.clear-column')).toBeDisabled()
+    await pop.locator('[data-select="invert"]').click()
+    await expect(checked('red')).not.toBeChecked()
+    await expect(checked('yellow')).not.toBeChecked()
+    await expect(checked('purple')).not.toBeChecked()
+
+    await pop.locator('[data-select="unique"]').click()
+    await expect(checked('red')).not.toBeChecked()
+    await expect(checked('yellow')).toBeChecked()
+    await expect(checked('purple')).toBeChecked()
+
+    await pop.locator('[data-select="duplicates"]').click()
+    await expect(checked('red')).toBeChecked()
+    await expect(checked('yellow')).not.toBeChecked()
+    await expect(checked('purple')).not.toBeChecked()
+    await pop.locator('.km-fp-actions .ok').click()
+
+    await expect(table.locator('tbody tr:not(.km-filtered)')).toHaveCount(2)
+    await expect(page.locator('.status-filter')).toContainText('筛选 2/4 条')
+
+    await table.locator('.km-filter-btn[data-ci="1"]').first().click()
+    await expect(page.locator('.km-filter-pop .clear-column')).toBeEnabled()
+    await page.locator('.km-filter-pop .clear-column').click()
+    await expect(page.locator('.km-filter-pop')).toHaveCount(0)
+    await expect(table.locator('tbody tr.km-filtered')).toHaveCount(0)
+    await expect(page.locator('.status-filter')).toHaveCount(0)
+  } finally {
+    await cleanup()
+  }
+})
+
 test('right-click "clear this table\'s filters" restores the rows and the badge', async () => {
   const { page, cleanup } = await openFilterDoc()
   try {

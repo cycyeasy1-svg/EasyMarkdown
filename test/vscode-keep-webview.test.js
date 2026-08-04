@@ -193,6 +193,53 @@ describe('VSCode Keep webview interactions', () => {
     expect(countFor('yellow')).toBeUndefined()
   })
 
+  it('selects inverse, duplicate, or unique filter values and clears the current column', async () => {
+    send({
+      type: 'init',
+      text: [
+        '| fruit | color |',
+        '| --- | --- |',
+        '| apple | red |',
+        '| banana | yellow |',
+        '| cherry | red |',
+        '| grape | purple |'
+      ].join('\n'),
+      lang: 'zh',
+      langPref: 'zh',
+      theme: 'auto'
+    })
+    await waitForPaint()
+
+    document.querySelector('.km-filter-btn[data-ci="1"]').click()
+    const checked = (value) => document.querySelector(`.km-fp-list input[data-v="${value}"]`).checked
+    expect(document.querySelector('.km-fp-actions .clear-column').disabled).toBe(true)
+
+    document.querySelector('.km-fp-tools [data-select="invert"]').click()
+    expect(checked('red')).toBe(false)
+    expect(checked('yellow')).toBe(false)
+    expect(checked('purple')).toBe(false)
+
+    document.querySelector('.km-fp-tools [data-select="unique"]').click()
+    expect(checked('red')).toBe(false)
+    expect(checked('yellow')).toBe(true)
+    expect(checked('purple')).toBe(true)
+
+    document.querySelector('.km-fp-tools [data-select="duplicates"]').click()
+    expect(checked('red')).toBe(true)
+    expect(checked('yellow')).toBe(false)
+    expect(checked('purple')).toBe(false)
+    document.querySelector('.km-fp-actions .ok').click()
+    expect(document.querySelectorAll('tbody tr.km-filtered')).toHaveLength(2)
+
+    document.querySelector('.km-filter-btn[data-ci="1"]').click()
+    const clear = document.querySelector('.km-fp-actions .clear-column')
+    expect(clear.disabled).toBe(false)
+    expect(clear.textContent).toBe('清除本列筛选')
+    clear.click()
+    expect(document.querySelector('.km-filter-pop')).toBeNull()
+    expect(document.querySelectorAll('tbody tr.km-filtered')).toHaveLength(0)
+  })
+
   it('formats a block draft through the shared Keep toolbar before posting a minimal edit', async () => {
     send({
       type: 'init',

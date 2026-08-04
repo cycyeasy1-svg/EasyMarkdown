@@ -1914,58 +1914,91 @@ function openFilterPop(btn) {
     '<input class="km-fp-search" placeholder="' +
     escapeAttrLocal(t('keep.filterSearch')) +
     '">' +
-    '<div class="km-fp-tools"><a data-all="1">' +
+    '<div class="km-fp-tools"><button type="button" data-select="all">' +
     escapeHtmlLocal(t('keep.selectAll')) +
-    '</a><a data-all="0">' +
+    '</button><button type="button" data-select="none">' +
     escapeHtmlLocal(t('keep.selectNone')) +
-    '</a></div>' +
+    '</button><button type="button" data-select="invert">' +
+    escapeHtmlLocal(t('keep.invertSelection')) +
+    '</button><button type="button" data-select="duplicates">' +
+    escapeHtmlLocal(t('keep.selectDuplicates')) +
+    '</button><button type="button" data-select="unique">' +
+    escapeHtmlLocal(t('keep.selectUnique')) +
+    '</button></div>' +
     '<div class="km-fp-list"></div>' +
-    '<div class="km-fp-actions"><button type="button" class="ok">' +
+    '<div class="km-fp-actions"><button type="button" class="clear-column"' +
+    (excluded.size ? '' : ' disabled') +
+    '>' +
+    escapeHtmlLocal(t('keep.clearColumnFilter')) +
+    '</button><button type="button" class="ok">' +
     escapeHtmlLocal(t('edit.confirm')) +
     '</button><button type="button" class="cancel">' +
     escapeHtmlLocal(t('edit.cancel')) +
     '</button></div>'
   const list = pop.querySelector('.km-fp-list')
   const sorted = [...values].sort((a, b) => a.localeCompare(b, 'ja'))
+  const selected = new Set(sorted.filter((v) => !excluded.has(v)))
+  const matchesSearch = (v, filter) => !filter || v.replace(/<br>/g, ' ').includes(filter)
+  const matchingValues = (filter) => sorted.filter((v) => matchesSearch(v, filter))
   const buildList = (filter) => {
     list.innerHTML = ''
-    sorted
-      .filter((v) => !filter || v.replace(/<br>/g, ' ').includes(filter))
-      .forEach((v) => {
-        const lab = document.createElement('label')
-        const cb = document.createElement('input')
-        cb.type = 'checkbox'
-        cb.checked = !excluded.has(v)
-        cb.dataset.v = v
-        const span = document.createElement('span')
-        span.className = 'km-fp-value'
-        span.innerHTML = inline(v)
-        const count = document.createElement('span')
-        count.className = 'km-fp-count'
-        count.textContent = `(${valueCounts.get(v)})`
-        lab.appendChild(cb)
-        lab.appendChild(span)
-        lab.appendChild(count)
-        list.appendChild(lab)
-      })
+    matchingValues(filter).forEach((v) => {
+      const lab = document.createElement('label')
+      const cb = document.createElement('input')
+      cb.type = 'checkbox'
+      cb.checked = selected.has(v)
+      cb.dataset.v = v
+      cb.onchange = () => {
+        if (cb.checked) selected.add(v)
+        else selected.delete(v)
+      }
+      const span = document.createElement('span')
+      span.className = 'km-fp-value'
+      span.innerHTML = inline(v)
+      const count = document.createElement('span')
+      count.className = 'km-fp-count'
+      count.textContent = `(${valueCounts.get(v)})`
+      lab.appendChild(cb)
+      lab.appendChild(span)
+      lab.appendChild(count)
+      list.appendChild(lab)
+    })
   }
   buildList('')
-  pop.querySelector('.km-fp-search').addEventListener('input', (e) => buildList(e.target.value))
-  pop.querySelectorAll('.km-fp-tools a').forEach((a) => {
-    a.onclick = () => {
-      const on = a.dataset.all === '1'
-      list.querySelectorAll('input').forEach((cb) => (cb.checked = on))
+  const search = pop.querySelector('.km-fp-search')
+  search.addEventListener('input', (e) => buildList(e.target.value))
+  pop.querySelectorAll('.km-fp-tools button').forEach((button) => {
+    button.onclick = () => {
+      matchingValues(search.value).forEach((value) => {
+        const action = button.dataset.select
+        if (action === 'all') selected.add(value)
+        else if (action === 'none') selected.delete(value)
+        else if (action === 'invert') {
+          if (selected.has(value)) selected.delete(value)
+          else selected.add(value)
+        } else if (action === 'duplicates') {
+          if (valueCounts.get(value) > 1) selected.add(value)
+          else selected.delete(value)
+        } else if (action === 'unique') {
+          if (valueCounts.get(value) === 1) selected.add(value)
+          else selected.delete(value)
+        }
+      })
+      buildList(search.value)
     }
   })
+  pop.querySelector('.clear-column').onclick = () => clearColumnFilter(ti, ci)
   pop.querySelector('.cancel').onclick = closePop
   pop.querySelector('.ok').onclick = () => {
     // Excel-style (matches the app's KeepEditor): confirming keeps only the
     // values that are BOTH visible (match the search) AND checked, and excludes
     // every other listed value — so search-then-confirm filters the table down
     // to the matching rows.
-    const keep = new Set(
-      [...list.querySelectorAll('input')].filter((cb) => cb.checked).map((cb) => cb.dataset.v)
-    )
+    list.querySelectorAll('input').forEach((cb) => {
+      if (cb.checked) selected.add(cb.dataset.v)
+      else selected.delete(cb.dataset.v)
+    })
+    const keep = new Set(matchingValues(search.value).filter((v) => selected.has(v)))
     // Values whose rows are hidden by OTHER columns' filters aren't listed, so
     // they can't be toggled here — carry their exclusion over unchanged.
     const ex = new Set([...excluded].filter((v) => !values.has(v)))
@@ -1973,19 +2006,15 @@ function openFilterPop(btn) {
       if (!keep.has(v)) ex.add(v)
     })
     if (ex.size > 0) filterState[ti][ci] = ex
-    else delete filterState[ti][ci]
+    else {
+      delete filterState[ti][ci]
+      if (!Object.keys(filterState[ti]).length) delete filterState[ti]
+    }
     closePop()
     applyFilter(ti)
     const cols = filterState[ti]
     const isActive = !!(cols && cols[ci] && cols[ci].size > 0)
-    // Toggle ▼ active on every copy of this column's button — the live header AND
-    // the floating-header clone (which may be the one that was clicked).
-    host
-      .querySelectorAll('.km-filter-btn[data-ti="' + ti + '"][data-ci="' + ci + '"]')
-      .forEach((b) => b.classList.toggle('active', isActive))
-    document
-      .querySelectorAll('.km-float-header .km-filter-btn[data-ti="' + ti + '"][data-ci="' + ci + '"]')
-      .forEach((b) => b.classList.toggle('active', isActive))
+    syncColumnFilterButtons(ti, ci, isActive)
     // Hiding rows can reflow column widths — re-measure the floating header.
     tableScroll?.update()
   }
@@ -2014,6 +2043,23 @@ function applyFilter(ti) {
 function tableHasFilter(ti) {
   const cols = filterState[ti]
   return !!cols && Object.keys(cols).length > 0
+}
+function syncColumnFilterButtons(ti, ci, active) {
+  const sel = '.km-filter-btn[data-ti="' + ti + '"][data-ci="' + ci + '"]'
+  host.querySelectorAll(sel).forEach((b) => b.classList.toggle('active', active))
+  document
+    .querySelectorAll('.km-float-header ' + sel)
+    .forEach((b) => b.classList.toggle('active', active))
+}
+function clearColumnFilter(ti, ci) {
+  const cols = filterState[ti]
+  if (!cols?.[ci]?.size) return
+  closePop()
+  delete cols[ci]
+  if (!Object.keys(cols).length) delete filterState[ti]
+  applyFilter(ti)
+  syncColumnFilterButtons(ti, ci, false)
+  tableScroll?.update()
 }
 function anyFilterActive() {
   return Object.keys(filterState).some((ti) => tableHasFilter(ti))
