@@ -165,6 +165,11 @@ describe('inline', () => {
       '<span class="hm-html-inline"><span style="color: #f00; padding: 2px">a<br>b</span></span>'
     )
   })
+  it('renders Markdown syntax nested inside an allow-listed inline HTML wrapper', () => {
+    expect(inline('<font color="red">~~gone<br>second line~~</font>')).toBe(
+      '<span class="hm-html-inline"><font color="red"><s>gone<br>second line</s></font></span>'
+    )
+  })
   it('adds a render-only fallback class for a toolbar text color', () => {
     expect(inline('<span style="color: #3378c5">blue</span>')).toBe(
       '<span class="hm-html-inline hm-text-color hm-text-color-blue">' +
@@ -514,6 +519,26 @@ describe('raw HTML block rendering', () => {
     expect(html).not.toContain('<iframe')
     expect(html).toContain('&lt;script&gt;')
     expect(html).toContain('&lt;iframe')
+  })
+
+  it('renders a GFM table and inline Markdown inside a neutral HTML container', () => {
+    const lines = [
+      '<div class="report" onclick="alert(1)">',
+      '',
+      '| Status | Value |',
+      '|---|---|',
+      '| ~~old~~ | **new** |',
+      '',
+      '</div>'
+    ]
+    const html = renderBlockInner(parseDoc(lines)[0], 0, lines, {})
+
+    expect(html).toContain('<div class="report">')
+    expect(html).toContain('<table class="km-table"')
+    expect(html).toContain('<s>old</s>')
+    expect(html).toContain('<strong>new</strong>')
+    expect(html).not.toContain('onclick=')
+    expect(html).not.toContain('|---|---|')
   })
 })
 

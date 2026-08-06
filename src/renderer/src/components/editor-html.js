@@ -3,8 +3,9 @@
 import {
   isRenderableBlockHtml,
   isRenderableInlineHtml,
-  sanitizeHtmlFragment
+  matchMarkdownContainerTag
 } from '../html-sanitize.js'
+import { renderMarkdownBlockHtml, renderMarkdownInlineHtml } from '../keep-parser.js'
 
 // Decode HTML entities (&nbsp;, &amp;, &#160;…) to their characters for *display*
 // of raw HTML we don't render. A <textarea> is a rawtext element: assigning
@@ -28,7 +29,7 @@ export function renderHtmlNodeView(node) {
     dom.className = 'hm-html-block'
     dom.setAttribute('data-type', 'html')
     dom.contentEditable = 'false'
-    dom.innerHTML = sanitizeHtmlFragment(value)
+    dom.innerHTML = renderMarkdownBlockHtml(value)
     // The node is an atom with no editable content; ignore inner DOM mutations so
     // ProseMirror doesn't try to reconcile the rendered HTML.
     return { dom, ignoreMutation: () => true, stopEvent: () => false }
@@ -41,7 +42,7 @@ export function renderHtmlNodeView(node) {
     span.className = 'hm-html-inline'
     span.setAttribute('data-type', 'html')
     span.contentEditable = 'false'
-    span.innerHTML = sanitizeHtmlFragment(value)
+    span.innerHTML = renderMarkdownInlineHtml(value)
     return { dom: span, ignoreMutation: () => true, stopEvent: () => false }
   }
   // Not something we render — show the raw markup as text, but decode HTML
@@ -60,8 +61,9 @@ export function renderHtmlNodeView(node) {
 // `<tag …>…</tag>` run inside phrasing content whose inner nodes are all simple
 // (text / <br> / raw html) and collapses it into ONE `html` node whose value is
 // the full fragment. The node view then renders that inline, and it round-trips:
-// the node serializes back to exactly this value. Runs with complex inner content
-// (nested emphasis, links, images) are left split — lossless beats clever.
+// the node serializes back to exactly this value. When remark positions and the
+// original VFile are available, complex Markdown children are sliced verbatim so
+// `<font>~~x~~</font>` remains byte-identical while both formats render.
 const INLINE_HTML_TAGS = new Set([
   'span', 'font', 'b', 'i', 'u', 's', 'strike', 'em', 'strong', 'small', 'big',
   'sub', 'sup', 'mark', 'kbd', 'abbr', 'ins', 'del', 'cite', 'q', 'samp', 'var', 'time'
@@ -71,6 +73,7 @@ const CLOSE_TAG_RE = /^<\/([a-z][a-z0-9]*)\s*>$/i
 const PHRASING_PARENTS = new Set([
   'paragraph', 'heading', 'tableCell', 'emphasis', 'strong', 'delete', 'link'
 ])
+const BLOCK_CONTAINER_PARENTS = new Set(['root', 'blockquote', 'listItem'])
 
 function escTextForHtml(s) {
   return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
@@ -85,11 +88,63 @@ function serializeInner(n) {
   return null
 }
 
+function exactSourceRun(openNode, closeNode, file) {
+  const source = file?.value == null ? '' : String(file.value)
+  const start = openNode?.position?.start?.offset
+  const end = closeNode?.position?.end?.offset
+  if (!source || !Number.isInteger(start) || !Number.isInteger(end) || end <= start) return null
+  const value = source.slice(start, end)
+  if (!value.startsWith(openNode.value || '') || !value.endsWith(closeNode.value || '')) {
+    return null
+  }
+  return value
+}
+
 export function mergeInlineHtmlRemarkPlugin() {
-  return (tree) => {
+  return (tree, file) => {
     const visit = (node) => {
       if (!node || !Array.isArray(node.children)) return
       node.children.forEach(visit)
+      if (BLOCK_CONTAINER_PARENTS.has(node.type)) {
+        const kids = node.children
+        const out = []
+        let i = 0
+        while (i < kids.length) {
+          const open = kids[i]?.type === 'html'
+            ? matchMarkdownContainerTag(kids[i].value || '')
+            : null
+          if (open && !open.closing) {
+            let depth = 1
+            let j = i + 1
+            for (; j < kids.length; j++) {
+              const tag = kids[j]?.type === 'html'
+                ? matchMarkdownContainerTag(kids[j].value || '')
+                : null
+              if (!tag || tag.name !== open.name) continue
+              depth += tag.closing ? -1 : 1
+              if (depth === 0) break
+            }
+            if (depth === 0 && j < kids.length) {
+              const exact = exactSourceRun(kids[i], kids[j], file)
+              if (exact != null) {
+                out.push({
+                  type: 'html',
+                  value: exact,
+                  position: kids[i].position && kids[j].position
+                    ? { start: kids[i].position.start, end: kids[j].position.end }
+                    : undefined
+                })
+                i = j + 1
+                continue
+              }
+            }
+          }
+          out.push(kids[i])
+          i++
+        }
+        node.children = out
+        return
+      }
       if (!PHRASING_PARENTS.has(node.type)) return
       const kids = node.children
       const out = []
@@ -116,6 +171,18 @@ export function mergeInlineHtmlRemarkPlugin() {
             inner.push(c)
           }
           if (depth === 0 && j < kids.length) {
+            const exact = exactSourceRun(k, kids[j], file)
+            if (exact != null) {
+              out.push({
+                type: 'html',
+                value: exact,
+                position: k.position && kids[j].position
+                  ? { start: k.position.start, end: kids[j].position.end }
+                  : undefined
+              })
+              i = j + 1
+              continue
+            }
             const pieces = inner.map(serializeInner)
             if (pieces.every((p) => p !== null)) {
               out.push({ type: 'html', value: k.value + pieces.join('') + kids[j].value })

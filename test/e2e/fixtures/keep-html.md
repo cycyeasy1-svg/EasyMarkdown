@@ -18,3 +18,13 @@
 </table>
 
 Inline <span style="color: #FF0000;">red text</span> remains in the paragraph.
+
+Nested inline <font color="red">~~removed text~~</font> keeps both formats.
+
+<div class="markdown-shell" onclick="alert(1)">
+
+| Name | Result |
+|---|---|
+| alpha | **ok** |
+
+</div>

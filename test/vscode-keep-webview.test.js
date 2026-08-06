@@ -145,6 +145,39 @@ describe('VSCode Keep webview interactions', () => {
     expect(document.querySelector('.km-doc mark.hm-hl-yellow')?.textContent).toBe('marked')
   })
 
+  it('renders Markdown nested in inline and block HTML wrappers', async () => {
+    send({
+      type: 'init',
+      text: [
+        '| Cell |',
+        '|---|',
+        '| <font color="red">~~removed~~</font> |',
+        '',
+        '<div class="markdown-shell" onclick="alert(1)">',
+        '',
+        '| Name | Result |',
+        '|---|---|',
+        '| alpha | **ok** |',
+        '',
+        '</div>'
+      ].join('\n'),
+      lang: 'en',
+      langPref: 'en',
+      theme: 'auto'
+    })
+    await waitForPaint()
+
+    const strike = document.querySelector('.km-table td font s')
+    expect(strike?.textContent).toBe('removed')
+    expect(strike?.closest('font')?.getAttribute('color')).toBe('red')
+
+    const shell = document.querySelector('.hm-html-block .markdown-shell')
+    expect(shell).not.toBeNull()
+    expect(shell?.hasAttribute('onclick')).toBe(false)
+    expect(shell?.querySelector('.km-table strong')?.textContent).toBe('ok')
+    expect(shell?.textContent).not.toContain('|---|---|')
+  })
+
   it('persists the Keep viewport without dropping an unfinished draft', async () => {
     state.draft = { version: 1, kind: 'block', value: 'unfinished' }
     const scroller = document.querySelector('.editor-scroll')

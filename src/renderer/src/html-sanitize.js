@@ -68,6 +68,35 @@ const INLINE_ROOT_TAGS = new Set([
   'var'
 ])
 
+// Inside an already-recognized raw HTML container, preserve ordinary safe HTML
+// links and images as well. They remain disabled as standalone inline roots so
+// the existing strict empty-anchor rule and Markdown image/link syntax keep
+// owning normal prose.
+const CONTAINER_INLINE_ROOT_TAGS = new Set([...INLINE_ROOT_TAGS, 'a', 'img'])
+
+// Neutral block containers commonly wrap Markdown produced by generators and
+// converters. Their own tags still render as HTML, but their body is allowed to
+// go back through the Markdown renderer (for example a GFM table inside <div>).
+// Structural/raw-text roots such as table, ul, pre and p intentionally stay out:
+// their children are HTML content, not a second Markdown document.
+const MARKDOWN_CONTAINER_TAGS = new Set([
+  'address',
+  'article',
+  'aside',
+  'blockquote',
+  'center',
+  'details',
+  'div',
+  'fieldset',
+  'figcaption',
+  'figure',
+  'footer',
+  'header',
+  'main',
+  'nav',
+  'section'
+])
+
 const SAFE_TAGS = new Set([
   ...BLOCK_ROOT_TAGS,
   ...INLINE_ROOT_TAGS,
@@ -415,18 +444,45 @@ export function isRenderableInlineHtml(value) {
   return !!match && source.slice(match.end).trim() === ''
 }
 
-// Return the exact source end of a balanced, recognized inline fragment. This is
-// used by a markdown-it inline rule so Markdown syntax inside raw HTML stays raw.
-export function matchRenderableInlineHtml(source, start) {
+// Recognize a lone opening/closing neutral container tag. Remark may split a
+// Markdown-bearing block into `<div>` · table · `</div>` sibling nodes; the rich
+// editor uses this descriptor to merge that run back to its exact source slice.
+export function matchMarkdownContainerTag(value) {
+  const source = String(value)
+  const tag = leadingTag(source)
+  if (
+    !tag ||
+    tag.selfClosing ||
+    !MARKDOWN_CONTAINER_TAGS.has(tag.name) ||
+    source.slice(tag.end).trim()
+  ) {
+    return null
+  }
+  return { name: tag.name, closing: tag.closing }
+}
+
+// Return the exact source end and wrapper/body split of a recognized inline
+// fragment. The Markdown renderer sanitizes the wrapper and parses the body.
+export function matchRenderableInlineHtml(source, start, options = {}) {
   const first = readTagAt(source, start)
+  const allowedTags = options.container ? CONTAINER_INLINE_ROOT_TAGS : INLINE_ROOT_TAGS
   if (
     !first ||
     first.kind !== 'tag' ||
     first.closing ||
-    first.selfClosing ||
-    !INLINE_ROOT_TAGS.has(first.name)
+    !allowedTags.has(first.name)
   ) {
     return null
+  }
+
+  if (first.selfClosing || VOID_TAGS.has(first.name)) {
+    return {
+      end: first.end,
+      html: source.slice(start, first.end),
+      open: first.raw,
+      inner: '',
+      close: ''
+    }
   }
 
   let depth = 0
@@ -442,7 +498,60 @@ export function matchRenderableInlineHtml(source, start) {
     if (tag.kind === 'tag' && tag.name === first.name) {
       if (tag.closing) depth--
       else if (!tag.selfClosing) depth++
-      if (depth === 0) return { end: tag.end, html: source.slice(start, tag.end) }
+      if (depth === 0) {
+        return {
+          end: tag.end,
+          html: source.slice(start, tag.end),
+          open: first.raw,
+          inner: source.slice(first.end, tag.start),
+          close: tag.raw
+        }
+      }
+    }
+    cursor = tag.end
+  }
+  return null
+}
+
+// Split a balanced neutral HTML block into its wrapper and Markdown-capable body.
+// Only surrounding whitespace may follow the closing tag; otherwise the old
+// whole-fragment sanitizer remains the safer, lossless fallback.
+export function splitMarkdownContainerHtml(value) {
+  const source = String(value)
+  const first = leadingTag(source)
+  if (
+    !first ||
+    first.closing ||
+    first.selfClosing ||
+    !MARKDOWN_CONTAINER_TAGS.has(first.name)
+  ) {
+    return null
+  }
+
+  let depth = 0
+  let cursor = first.start
+  while (cursor < source.length) {
+    const lt = source.indexOf('<', cursor)
+    if (lt < 0) break
+    const tag = readTagAt(source, lt)
+    if (!tag) {
+      cursor = lt + 1
+      continue
+    }
+    if (tag.kind === 'tag' && tag.name === first.name) {
+      if (tag.closing) depth--
+      else if (!tag.selfClosing) depth++
+      if (depth === 0) {
+        const suffix = source.slice(tag.end)
+        if (suffix.trim()) return null
+        return {
+          prefix: source.slice(0, first.start),
+          open: first.raw,
+          inner: source.slice(first.end, tag.start),
+          close: tag.raw,
+          suffix
+        }
+      }
     }
     cursor = tag.end
   }

@@ -33,7 +33,8 @@ import {
   findRenderableBlockHtmlEnd,
   isRenderableBlockHtml,
   matchRenderableInlineHtml,
-  sanitizeHtmlFragment
+  sanitizeHtmlFragment,
+  splitMarkdownContainerHtml
 } from './html-sanitize.js'
 import { HIGHLIGHT_STICKY_RE, MARK_HTML_STICKY_RE } from './highlight-syntax.js'
 import { keepTextColorByValue } from './keep-format-colors.js'
@@ -112,6 +113,13 @@ const md = new MarkdownIt({ html: false, linkify: true, breaks: false, typograph
 md.normalizeLink = (url) => url
 md.normalizeLinkText = (text) => text
 md.linkify.set({ fuzzyLink: false, fuzzyEmail: false, fuzzyIP: false })
+
+function sanitizeDocumentHtml(html, baseDir) {
+  return sanitizeHtmlFragment(html, {
+    resolveImageSrc: (src) =>
+      baseDir && isRelativePath(src) ? resolveToFileUrl(baseDir, src) : src
+  })
+}
 
 function hasWindowsDrivePrefix(source, position) {
   const lineStart = source.lastIndexOf('\n', position - 1) + 1
@@ -196,11 +204,13 @@ md.inline.ruler.before('html_inline', 'hm_br', (state, silent) => {
 md.renderer.rules.hm_br = () => '<br>'
 
 // Render a balanced formatting fragment such as `<span style="color:red">x</span>`.
-// The custom token prevents Markdown syntax inside raw HTML from being interpreted;
-// the DOM-free sanitizer makes this same output safe in Electron and VSCode.
+// The wrapper is sanitized, while its body re-enters markdown-it so constructs such
+// as `<font color="red">~~removed~~</font>` keep both layers of formatting.
 md.inline.ruler.before('html_inline', 'hm_safe_inline_html', (state, silent) => {
   if (state.src.charCodeAt(state.pos) !== 0x3c /* < */) return false
-  const match = matchRenderableInlineHtml(state.src, state.pos)
+  const match = matchRenderableInlineHtml(state.src, state.pos, {
+    container: !!state.env.allowContainerHtml
+  })
   if (!match) return false
   if (!silent) {
     const token = state.push('hm_safe_inline_html', '', 0)
@@ -209,8 +219,12 @@ md.inline.ruler.before('html_inline', 'hm_safe_inline_html', (state, silent) => 
   state.pos = match.end
   return true
 })
-md.renderer.rules.hm_safe_inline_html = (tokens, idx) => {
-  const safe = sanitizeHtmlFragment(tokens[idx].content)
+md.renderer.rules.hm_safe_inline_html = (tokens, idx, _options, env) => {
+  const safe = renderMarkdownInlineHtml(
+    tokens[idx].content,
+    env && env.baseDir,
+    !!(env && env.allowContainerHtml)
+  )
   const rootStyle = safe.match(/^<span\b[^>]*\bstyle="([^"]*)"/i)?.[1] || ''
   const colorValue =
     rootStyle.match(/(?:^|;)\s*color\s*:\s*(#[0-9a-f]{6})(?:\s*;|$)/i)?.[1] || ''
@@ -221,6 +235,22 @@ md.renderer.rules.hm_safe_inline_html = (tokens, idx) => {
   // remains the portable `<span style="color: …">` form.
   const colorClass = color ? ` hm-text-color hm-text-color-${color.id}` : ''
   return `<span class="hm-html-inline${colorClass}">${safe}</span>`
+}
+
+// Keep the source HTML wrapper intact for display, but parse Markdown inside it.
+// All emitted source tags still pass through the shared allow-list sanitizer;
+// markdown-it's own generated tags come from its fixed renderer rules.
+export function renderMarkdownInlineHtml(value, baseDir, container = false) {
+  const source = String(value)
+  const start = source.search(/\S|$/)
+  const match = matchRenderableInlineHtml(source, start, { container })
+  if (!match || source.slice(match.end).trim()) return sanitizeDocumentHtml(source, baseDir)
+
+  return (
+    sanitizeDocumentHtml(source.slice(0, start) + match.open, baseDir) +
+    md.renderInline(match.inner, { baseDir, allowContainerHtml: true }) +
+    sanitizeDocumentHtml(match.close + source.slice(match.end), baseDir)
+  )
 }
 
 // `==highlight==` and its colored `<mark class="hm-hl-…">` form. Registered as an
@@ -282,8 +312,8 @@ md.renderer.rules.link_open = (tokens, idx) => {
 // Render one block's inline content to HTML. `baseDir` (the document's folder)
 // resolves relative image paths. Literal `<br>` and balanced safe HTML fragments
 // are handled by the explicit rules above; every other raw tag remains escaped.
-export function inline(text, baseDir) {
-  return md.renderInline(String(text), { baseDir })
+export function inline(text, baseDir, env = {}) {
+  return md.renderInline(String(text), { ...env, baseDir })
 }
 
 const TABLE_COL_MIN_EM = 6
@@ -812,7 +842,7 @@ function renderList(b, viewLines, baseDir, opts = {}) {
         checked: !!task && task[1] !== ' ',
         line: b.start + k,
         blankLinesBefore: blankRun,
-        html: inline(task ? task[2] || '' : m[3], baseDir)
+        html: inline(task ? task[2] || '' : m[3], baseDir, opts.inlineEnv)
       })
     } else if (items.length) {
       // An unmarked line continues the previous list item. A normal blank before
@@ -827,13 +857,13 @@ function renderList(b, viewLines, baseDir, opts = {}) {
             extra +
             '"></span>'
           : '<br>'
-      items[items.length - 1].html += bridge + inline(l.trim(), baseDir)
+      items[items.length - 1].html += bridge + inline(l.trim(), baseDir, opts.inlineEnv)
     } else {
       items.push({
         indent: 0,
         ordered: false,
         blankLinesBefore: blankRun,
-        html: inline(l.trim(), baseDir)
+        html: inline(l.trim(), baseDir, opts.inlineEnv)
       })
     }
     blankRun = 0
@@ -902,7 +932,7 @@ function renderList(b, viewLines, baseDir, opts = {}) {
   return html
 }
 
-export function renderTableRows(b, from = 0, to = b.dataRows.length, baseDir) {
+export function renderTableRows(b, from = 0, to = b.dataRows.length, baseDir, inlineEnv) {
   let html = ''
   const start = Math.max(0, Number(from) || 0)
   const end = Math.min(b.dataRows.length, Math.max(start, Number(to) || 0))
@@ -923,7 +953,7 @@ export function renderTableRows(b, from = 0, to = b.dataRows.length, baseDir) {
         '" data-raw="' +
         escapeAttr(raw) +
         '">' +
-        inline(raw, baseDir) +
+        inline(raw, baseDir, inlineEnv) +
         '</td>'
     }
     html += '</tr>'
@@ -938,7 +968,8 @@ function renderTable(
   forExport,
   baseDir,
   tableInitialRows,
-  filterLabel
+  filterLabel,
+  inlineEnv
 ) {
   const headers = b.headers
   const colWidths = estimateTableColumnWidths(headers, b.dataRows)
@@ -989,7 +1020,7 @@ function renderTable(
       '" data-raw="' +
       escapeAttr(h) +
       '"><div class="km-th-flex"><span class="km-th-content">' +
-      inline(h, baseDir) +
+      inline(h, baseDir, inlineEnv) +
       '</span>' +
       filterBtn +
       '</div></th>'
@@ -1005,9 +1036,41 @@ function renderTable(
       '"' +
       (initialRows >= totalRows ? ' data-km-render-complete="true"' : '')
   html += '</tr></thead><tbody' + progressAttrs + '>'
-  html += renderTableRows(b, 0, initialRows, baseDir)
+  html += renderTableRows(b, 0, initialRows, baseDir, inlineEnv)
   html += '</tbody></table></div>'
   return html
+}
+
+// Raw HTML blocks stay source-backed atoms, but neutral containers such as <div>
+// may contain real Markdown emitted by conversion tools. Render that inner body
+// with the same block/inline pipeline as the surrounding Keep document, then put
+// it back inside the sanitized wrapper. Structural HTML roots (table, pre, ul, …)
+// deliberately take the whole-fragment sanitizer fallback instead.
+export function renderMarkdownBlockHtml(source, opts = {}) {
+  const baseDir = opts.baseDir
+  const container = splitMarkdownContainerHtml(source)
+  if (!container) return sanitizeDocumentHtml(source, baseDir)
+
+  const viewLines = toViewLines(container.inner.split('\n'))
+  const blocks = parseDoc(viewLines)
+  let tableIdx = 0
+  let content = ''
+  for (let bi = 0; bi < blocks.length; bi++) {
+    const block = blocks[bi]
+    content += renderBlockInner(block, bi, viewLines, {
+      ...opts,
+      forExport: true,
+      tableIdx,
+      inlineEnv: { ...opts.inlineEnv, allowContainerHtml: true }
+    })
+    if (block.type === 'table') tableIdx++
+  }
+
+  return (
+    sanitizeDocumentHtml(container.prefix + container.open, baseDir) +
+    content +
+    sanitizeDocumentHtml(container.close + container.suffix, baseDir)
+  )
 }
 
 // Render ONE block's interior (the "edit source" button + its content HTML), i.e.
@@ -1040,18 +1103,12 @@ export function renderBlockInner(b, bi, viewLines, opts = {}) {
         escapeAttr(collapseLabel) +
         '"><svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg></button>'
     inner =
-      '<h' + b.level + ' id="km-h-' + bi + '" class="km-heading">' + collapseBtn + inline(b.text, baseDir) + '</h' + b.level + '>'
+      '<h' + b.level + ' id="km-h-' + bi + '" class="km-heading">' + collapseBtn + inline(b.text, baseDir, opts.inlineEnv) + '</h' + b.level + '>'
   } else if (b.type === 'paragraph') {
-    inner = '<p>' + viewLines.slice(b.start, b.end + 1).map((l) => inline(l, baseDir)).join('<br>') + '</p>'
+    inner = '<p>' + viewLines.slice(b.start, b.end + 1).map((l) => inline(l, baseDir, opts.inlineEnv)).join('<br>') + '</p>'
   } else if (b.type === 'html') {
     const source = viewLines.slice(b.start, b.end + 1).join('\n')
-    inner =
-      '<div class="hm-html-block">' +
-      sanitizeHtmlFragment(source, {
-        resolveImageSrc: (src) =>
-          baseDir && isRelativePath(src) ? resolveToFileUrl(baseDir, src) : src
-      }) +
-      '</div>'
+    inner = '<div class="hm-html-block">' + renderMarkdownBlockHtml(source, opts) + '</div>'
   } else if (b.type === 'code') {
     const body = viewLines.slice(b.start + 1, b.end).join('\n')
     // A ```mermaid fence renders as a live diagram (filled by KeepEditor after
@@ -1075,7 +1132,7 @@ export function renderBlockInner(b, bi, viewLines, opts = {}) {
   } else if (b.type === 'quote') {
     inner =
       '<blockquote>' +
-      inline(viewLines.slice(b.start, b.end + 1).map((l) => l.replace(/^\s*>\s?/, '')).join('<br>'), baseDir) +
+      inline(viewLines.slice(b.start, b.end + 1).map((l) => l.replace(/^\s*>\s?/, '')).join('<br>'), baseDir, opts.inlineEnv) +
       '</blockquote>'
   } else if (b.type === 'list') {
     inner = renderList(b, viewLines, baseDir, {
@@ -1090,7 +1147,8 @@ export function renderBlockInner(b, bi, viewLines, opts = {}) {
       forExport,
       baseDir,
       opts.tableInitialRows,
-      opts.filterLabel
+      opts.filterLabel,
+      opts.inlineEnv
     )
   } else if (b.type === 'frontmatter') {
     // Metadata card, mirroring the rich editor's frontmatter node view
