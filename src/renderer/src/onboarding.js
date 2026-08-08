@@ -24,6 +24,8 @@ Keep and Milkdown are the two **editor modes**. **Source view** (\`Ctrl+/\`) is 
 
 ## Keep mode: editing (the important part)
 
+- **Faster column filtering** — the filter menu can invert the selection, keep duplicate or unique values, and clear only the current column. These choices remain display-only and never alter the Markdown file.
+- **HTML containers and diagrams** — Markdown inside safe wrappers such as div and font is rendered while the original source remains untouched. Mermaid also supports more diagram types, including pie and Sankey charts.
 - **Edit a table cell** — click to select, move with arrows or \`Tab\`, and press \`Enter\` / \`F2\` (double-click still works). In the multi-line editor, \`Ctrl/Cmd+Enter\` confirms and \`Esc\` cancels. \`Alt+↓\` opens the column filter; \`Shift+F10\` opens table actions.
 - **Edit content (block source)** — for a paragraph, heading, list or quote, click the **Edit content** button at the block's top-right, change the raw text in the box, and confirm. Only that block's lines are replaced.
 - **Format text while editing** — block, insertion, and table-cell editors provide a toolbar for bold, italic, strikethrough, underline, highlight, and text color. Only the selected text in that draft is changed.
@@ -42,6 +44,9 @@ Cycle the status-bar view button to **Source + Keep** to edit raw Markdown besid
 
 ## General features
 
+- **Export studios** — PDF adds body-size and density controls, while HTML offers desktop/mobile preview, reading styles, width, type and contents settings. Both remember the most recent output folder; images, Mermaid and full code blocks are captured from the latest document state.
+- **Appearance, session and layout** — follow the operating system's light/dark appearance with separate themes, choose whether to restore the previous session, preserve ordinary source line breaks in Milkdown, and adjust heading spacing.
+- **Tabs and workspace-root links** — when tabs overflow, the edge arrows and mouse wheel scroll the strip without changing the active document. A path such as /docs/guide.md resolves from the workspace root for opening, diagnostics, references and rename updates.
 - **Tabs** — a single click in the file tree uses one replaceable preview tab; editing or double-clicking keeps it open. \`Ctrl+Tab\` shows recently used tabs, and \`Ctrl+Shift+T\` reopens the last closed file. Tabs remain reorderable and pinnable; overflow arrows appear only when the strip is full.
 - **Folder workspace** — the file tree supports arrow keys, Enter, F2, Delete, Shift+F10, cut and paste. Turn on **Show hidden files** when dotfiles should appear; \`.git\` and \`node_modules\` remain excluded. Refresh a collapsed folder to rescan it.
 - **Command palette** (\`Ctrl+P\`) — choose a scope for files, commands, current/workspace headings, line numbers, or help. The \`>\`, \`@\`, \`#\`, \`:\`, and \`?\` prefixes remain available for quick scope changes.
@@ -106,6 +111,8 @@ const ZH = `# EasyMarkdown 使用说明 📝
 
 ## 保持模式：编辑功能（重点）
 
+- **更快的列筛选** —— 筛选菜单可反选、只保留重复项或唯一项，并可仅清除当前列筛选；这些操作只影响显示，绝不会修改 Markdown 文件。
+- **HTML 容器与图表** —— div、font 等安全容器内的 Markdown 会正常渲染，同时保持原始源码不变；Mermaid 也支持饼图、Sankey 图等更多图表类型。
 - **编辑表格单元格** —— 单击选中，方向键或 \`Tab\` 移动，\`Enter\` / \`F2\` 编辑（仍支持双击）。多行编辑框中用 \`Ctrl/Cmd+Enter\` 确认、\`Esc\` 取消；\`Alt+↓\` 打开列筛选，\`Shift+F10\` 打开表格操作。
 - **内容编辑（改源码）** —— 段落、标题、列表、引用等块，点块右上角的 **内容编辑** 按钮，在文本框里改原文后确认，只替换该块所在的行。
 - **编辑时设置文字格式** —— 内容块、插入块和表格单元格编辑框提供粗体、斜体、删除线、下划线、高亮和文字颜色工具栏，只修改当前草稿中选中的文字。
@@ -124,6 +131,9 @@ const ZH = `# EasyMarkdown 使用说明 📝
 
 ## 通用功能
 
+- **导出工作室** —— PDF 新增正文字号和文档密度，HTML 支持桌面端/移动端预览、阅读样式、宽度、字号与目录设置；两者记住最近的保存目录，并从最新文档状态完整获取图片、Mermaid 和代码块。
+- **外观、会话与排版** —— 可跟随系统日间/夜间外观并分别指定主题，选择是否恢复上次会话，在 Milkdown 中保留源码普通单换行，并调整标题间距。
+- **标签与工作区根链接** —— 标签放不下时可用两侧按钮或鼠标滚轮滚动，不会切换当前文档；/docs/guide.md 这类路径会从工作区根目录解析，并用于打开、诊断、引用查询与重命名更新。
 - **标签页** —— 文件树单击使用一个可替换的预览标签，双击或开始编辑后转为普通标签。\`Ctrl+Tab\` 显示最近使用的标签，\`Ctrl+Shift+T\` 恢复最近关闭的文件；标签仍可拖拽排序与固定，放不下时才显示前后切换按钮。
 - **文件夹工作区** —— 文件树支持方向键、Enter、F2、Delete、Shift+F10 以及剪切粘贴移动。需要查看点文件时可开启「显示隐藏文件」；\`.git\` 与 \`node_modules\` 始终排除。折叠目录可右键刷新。
 - **命令面板**（\`Ctrl+P\`）—— 可选择文件、命令、当前/工作区标题、行号或帮助范围；\`>\`、\`@\`、\`#\`、\`:\`、\`?\` 快速前缀继续保留。
@@ -188,6 +198,8 @@ const JA = `# EasyMarkdown 使い方ガイド 📝
 
 ## キープモード：編集機能（重要）
 
+- **すばやい列フィルタ** —— 選択の反転、重複項目または一意の項目だけの選択、現在列だけのフィルタ解除ができます。表示だけに作用し、Markdown ファイルは変更しません。
+- **HTML コンテナと図** —— div や font など安全なコンテナ内の Markdown を、元のソースを変えずに描画します。Mermaid も円グラフや Sankey 図など、より多くの図形式に対応します。
 - **表セルの編集** —— クリックで選択し、矢印キーまたは \`Tab\` で移動、\`Enter\` / \`F2\` で編集します（ダブルクリックも利用可）。複数行入力欄では \`Ctrl/Cmd+Enter\` で確定、\`Esc\` で取消。\`Alt+↓\` で列フィルター、\`Shift+F10\` で表操作を開きます。
 - **内容を編集（ソース編集）** —— 段落・見出し・リスト・引用などのブロックは、右上の **内容を編集** ボタンから原文を書き換えて確定します。そのブロックの行だけが置換されます。
 - **編集中のインライン書式** —— 内容ブロック、挿入ブロック、表セルの編集欄には、太字・斜体・取り消し線・下線・ハイライト・文字色のツールバーがあります。現在の下書きで選択した文字だけを変更します。
@@ -206,6 +218,9 @@ const JA = `# EasyMarkdown 使い方ガイド 📝
 
 ## 共通機能
 
+- **書き出しスタジオ** —— PDF に本文サイズと文書密度を追加し、HTML ではデスクトップ／モバイルのプレビュー、閲覧スタイル、幅、文字サイズ、目次を設定できます。両方で直前の保存先を共有し、最新の文書状態から画像、Mermaid、コードブロックを完全に取得します。
+- **外観・セッション・組版** —— OS のライト／ダーク外観に合わせて個別テーマを選び、前回セッションの復元有無、Milkdown でのソース改行表示、見出し間隔を設定できます。
+- **タブとワークスペースルートリンク** —— タブが収まらないときは左右のボタンやマウスホイールで、現在の文書を切り替えずにスクロールできます。/docs/guide.md のようなパスはワークスペースルートから解決し、表示、診断、参照検索、名前変更更新に利用します。
 - **タブ** —— ファイルツリーのシングルクリックは置換可能なプレビュータブを使い、ダブルクリックまたは編集で通常タブになります。\`Ctrl+Tab\` は最近使ったタブを表示し、\`Ctrl+Shift+T\` は閉じたファイルを復元します。ドラッグ並べ替えとピン留めも利用できます。
 - **フォルダワークスペース** —— ファイルツリーは矢印、Enter、F2、Delete、Shift+F10、切り取り／貼り付けに対応します。「隠しファイルを表示」でドットファイルを表示できますが、\`.git\` と \`node_modules\` は常に除外されます。
 - **コマンドパレット**（\`Ctrl+P\`）—— ファイル、コマンド、現在／ワークスペースの見出し、行番号、ヘルプから検索範囲を選べます。\`>\`、\`@\`、\`#\`、\`:\`、\`?\` の接頭辞も引き続き使えます。

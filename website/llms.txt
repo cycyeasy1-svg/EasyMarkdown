@@ -20,7 +20,7 @@ AI 一天产出的 Markdown 比人一周写的还多，而这些设计书、检�
 
 ## 关键事实
 
-- 版本：桌面 v1.3.0 · VSCode 扩展 v1.5.0（2026-08）· 协议：MIT · 价格：免费
+- 版本：桌面 v1.4.0 · VSCode 扩展 v1.5.0（2026-08）· 协议：MIT · 价格：免费
 - 平台：Windows（NSIS .exe）/ macOS（.dmg，Apple Silicon & Intel）/ VSCode 扩展；另有 Capacitor 构建的 Android APK 与 iOS，与桌面版共用同一套渲染层
 - 界面语言：简体中文 / English / 日本語，实时切换，应用菜单跟随
 - 技术栈：Electron + Vite + React；Milkdown Crepe（ProseMirror）驱动自由编辑模式，保持模式为自研解析器
