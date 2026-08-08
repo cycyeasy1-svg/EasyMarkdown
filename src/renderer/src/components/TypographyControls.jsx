@@ -15,7 +15,10 @@ import {
   LINE_HEIGHT_MAX,
   PARA_SPACING_PRESETS,
   PARA_SPACING_MIN,
-  PARA_SPACING_MAX
+  PARA_SPACING_MAX,
+  HEADING_SPACING_PRESETS,
+  HEADING_SPACING_MIN,
+  HEADING_SPACING_MAX
 } from '../settings.js'
 
 const zoomPct = (z) => Math.round(z * 100) + '%'
@@ -84,7 +87,9 @@ export function TypographyGroups({
   lineHeight,
   onSetLineHeight,
   paragraphSpacing,
-  onSetParagraphSpacing
+  onSetParagraphSpacing,
+  headingSpacing,
+  onSetHeadingSpacing
 }) {
   const { t } = useI18n()
 
@@ -129,6 +134,14 @@ export function TypographyGroups({
     const r = track.getBoundingClientRect()
     const p = Math.min(1, Math.max(0, (clientX - r.left) / r.width))
     return round1(PARA_SPACING_MIN + p * (PARA_SPACING_MAX - PARA_SPACING_MIN))
+  }
+
+  const hsPct = (headingSpacing - HEADING_SPACING_MIN) / (HEADING_SPACING_MAX - HEADING_SPACING_MIN)
+  const hsIdx = HEADING_SPACING_PRESETS.findIndex((p) => p.value === headingSpacing)
+  const hsFromX = (track, clientX) => {
+    const r = track.getBoundingClientRect()
+    const p = Math.min(1, Math.max(0, (clientX - r.left) / r.width))
+    return round1(HEADING_SPACING_MIN + p * (HEADING_SPACING_MAX - HEADING_SPACING_MIN))
   }
 
   return (
@@ -194,6 +207,21 @@ export function TypographyGroups({
         pct={psPct}
         fromX={psFromX}
         onSet={onSetParagraphSpacing}
+      />
+      <div className="hm-pop-sep" />
+      <AdjustGroup
+        title={t('settings.headingSpacing')}
+        scope={t('settings.scope.keepAndMilkdown')}
+        valueLabel={headingSpacing.toFixed(1) + ' em'}
+        presets={HEADING_SPACING_PRESETS.map((p) => ({
+          ...p,
+          label: t('settings.headingSpacingPreset.' + p.id)
+        }))}
+        activeIndex={hsIdx}
+        onPick={(p) => onSetHeadingSpacing(p.value)}
+        pct={hsPct}
+        fromX={hsFromX}
+        onSet={onSetHeadingSpacing}
       />
     </>
   )

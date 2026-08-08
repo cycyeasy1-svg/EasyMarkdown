@@ -4532,8 +4532,8 @@ body.dark .milkdown {
 .milkdown .ProseMirror h6 {
   font-weight: 700;
   line-height: 1.3;
-  margin-top: 1.8em;
-  margin-bottom: 0.6em;
+  margin-top: var(--editor-heading-spacing, 1.8em);
+  margin-bottom: calc(var(--editor-heading-spacing, 1.8em) / 3);
   color: var(--text-strong);
 }
 .milkdown .ProseMirror h1 {
@@ -4663,6 +4663,10 @@ body.dark .milkdown {
   border-radius: var(--radius-md);
   margin: 0;
   font-size: 0.92em;
+}
+body.hm-preserve-soft-breaks .milkdown .ProseMirror span[data-type='hardbreak'][data-is-inline='true']::after {
+  content: '\A';
+  white-space: pre;
 }
 .milkdown .milkdown-code-block {
   margin: var(--editor-para-spacing, 0.8em) 0;
@@ -4827,7 +4831,7 @@ body.dark .milkdown {
   -webkit-overflow-scrolling: touch;
 }
 .milkdown .ProseMirror .milkdown-table-block table.children {
-  table-layout: fixed;
+  table-layout: auto;
   width: max-content;
   min-width: 0;
   margin: 0;
@@ -4868,8 +4872,8 @@ body.hm-table-auto-wrap .milkdown .ProseMirror .milkdown-table-block td {
   border-bottom: 1px solid var(--border-soft);
   /* Compact rows: tight padding + line-height so a Markdown table reads densely
      instead of wasting vertical space. */
-  padding: 6px 12px;
-  line-height: 1.5;
+  padding: 0.28em 0.6em;
+  line-height: 1.4;
   text-align: left;
   /* Wrap long content (incl. unbroken CJK / URLs) instead of letting it overflow
      and overlap neighbouring cells/rows (issue #6). */
@@ -5813,7 +5817,7 @@ body.hm-full-width .km-doc {
 .km-doc h6 {
   font-weight: 700;
   line-height: 1.3;
-  margin: calc(1.8em * var(--editor-para-scale, 1)) 0 calc(0.6em * var(--editor-para-scale, 1));
+  margin: var(--editor-heading-spacing, 1.8em) 0 calc(var(--editor-heading-spacing, 1.8em) / 3);
   color: var(--text-strong);
 }
 .km-doc h1 {
@@ -6997,6 +7001,26 @@ body.hm-table-auto-wrap .km-table td {
 }
 .hm-set-theme:hover { background: var(--hover); }
 .hm-set-theme.active { background: var(--accent-soft); color: var(--accent-strong); font-weight: 600; }
+.hm-system-theme-settings {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 12px;
+  margin: 2px 0 12px;
+  padding: 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  background: var(--bg-subtle);
+}
+.hm-system-theme-settings label { display: grid; gap: 5px; color: var(--muted); font-size: 11.5px; }
+.hm-system-theme-settings select {
+  min-width: 0;
+  padding: 6px 8px;
+  color: var(--text);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+.hm-system-theme-settings .hm-set-theme-note { grid-column: 1 / -1; margin-top: 0; }
 .hm-set-theme-actions {
   display: flex;
   gap: 8px;

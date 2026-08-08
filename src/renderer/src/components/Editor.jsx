@@ -28,7 +28,7 @@ import { useI18n } from '../i18n.jsx'
 import { copyToClipboard } from '../ui.js'
 import { renderHtmlNodeView, convertBlock, mergeInlineHtmlRemarkPlugin } from './editor-html.js'
 import { dirOf, isRelativePath, resolveToFileUrl, uniqueImageName } from './editor-images.js'
-import { inlineRichStyles } from './editor-copy.js'
+import { copiedPlainText, inlineRichStyles, materializeCopiedSoftBreaks } from './editor-copy.js'
 import {
   createMermaidPreviewRenderer,
   createMermaidSplitPlugin,
@@ -968,8 +968,9 @@ function Editor({
             const frag = sel.getRangeAt(0).cloneContents()
             const wrap = document.createElement('div')
             wrap.appendChild(frag)
+            materializeCopiedSoftBreaks(wrap)
+            const plain = copiedPlainText(wrap, sel.toString())
             inlineRichStyles(wrap)
-            const plain = sel.toString()
             // If the selection produced nothing meaningful (e.g. anchored in a
             // non-editable rendered HTML block), don't hijack the copy with an
             // empty payload — let the browser's default copy run.

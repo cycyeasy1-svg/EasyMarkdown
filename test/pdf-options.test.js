@@ -36,13 +36,22 @@ describe('PDF options', () => {
       customWidth: 20,
       customHeight: 1400,
       scale: 240,
+      fontSizePt: 40,
+      densityPreset: 'unknown',
       tocDepth: 9
     })).toMatchObject({
       customWidth: 50,
       customHeight: 1000,
       scale: 200,
+      fontSizePt: 24,
+      densityPreset: 'standard',
       tocDepth: 6,
       margins: { top: 0, right: 100, bottom: 20, left: 12 }
     })
+  })
+
+  it('keeps supported density presets and body font sizes', () => {
+    expect(normalizePdfOptions({ densityPreset: 'compact', fontSizePt: 9.5 }))
+      .toMatchObject({ densityPreset: 'compact', fontSizePt: 9.5 })
   })
 })

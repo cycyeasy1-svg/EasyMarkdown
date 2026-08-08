@@ -32,6 +32,7 @@ import {
 } from './markdown-links.js'
 import { canGrantLocalFonts, createLocalFontGrant } from './security.js'
 import { createPdfExportService } from './pdf-export.js'
+import { createHtmlExportService } from './html-export.js'
 import { shouldCreateMainWindow } from './window-lifecycle.js'
 import { menuAccelerator, normalizeMenuKeybindings } from './menu-keybindings.js'
 import {
@@ -148,6 +149,7 @@ const PDF_CSS = `
 
 let mainWindow = null
 const pdfExportService = createPdfExportService({ getMainWindow: () => mainWindow })
+const htmlExportService = createHtmlExportService({ getMainWindow: () => mainWindow })
 const isTrustedRenderer = (event) =>
   !!mainWindow && !mainWindow.isDestroyed() && event?.sender === mainWindow.webContents
 let localFontGrant = null
@@ -521,6 +523,16 @@ ipcMain.handle('pdf:save-preview', (event, payload) =>
     : { ok: false, error: 'Untrusted renderer.' })
 ipcMain.handle('pdf:dispose-preview', (event, token) =>
   isTrustedRenderer(event) && pdfExportService.disposePreview(event, token))
+ipcMain.handle('html:preview', (event, payload) =>
+  isTrustedRenderer(event)
+    ? htmlExportService.createPreview(event, payload)
+    : { ok: false, error: 'Untrusted renderer.' })
+ipcMain.handle('html:save-preview', (event, payload) =>
+  isTrustedRenderer(event)
+    ? htmlExportService.savePreview(event, payload)
+    : { ok: false, error: 'Untrusted renderer.' })
+ipcMain.handle('html:dispose-preview', (event, token) =>
+  isTrustedRenderer(event) && htmlExportService.disposePreview(event, token))
 
 // Export the current document as a self-contained .html file: same inline-
 // styled snapshot the PDF pipeline uses, wrapped in a standalone page with the

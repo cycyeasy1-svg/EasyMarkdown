@@ -80,6 +80,27 @@
   background: var(--bg);
 }
 
+.hm-pdf-segmented.hm-pdf-density {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.hm-pdf-number-with-unit {
+  position: relative;
+}
+
+.hm-pdf-number-with-unit input {
+  padding-right: 36px !important;
+}
+
+.hm-pdf-number-with-unit small {
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  color: var(--faint);
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+
 .hm-pdf-segmented button {
   border: 0;
   border-radius: 3px;

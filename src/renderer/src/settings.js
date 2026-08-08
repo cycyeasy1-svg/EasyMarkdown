@@ -83,16 +83,32 @@ export const PARA_SPACING_PRESETS = [
   { id: 'loose', value: 1.6 }
 ]
 
+// Space before headings (em). The smaller after-heading gap is derived in CSS,
+// keeping heading rhythm independent from paragraph spacing.
+export const HEADING_SPACING_MIN = 0.6
+export const HEADING_SPACING_MAX = 2.4
+export const DEFAULT_HEADING_SPACING = 1.8
+export const HEADING_SPACING_PRESETS = [
+  { id: 'tight', value: 0.8 },
+  { id: 'compact', value: 1.2 },
+  { id: 'standard', value: 1.8 },
+  { id: 'loose', value: 2.2 }
+]
+
 // New installs default to full width (the editor fills the pane). Existing users
 // keep whatever they saved. DEFAULT_PAGE_WIDTH stays the numeric slider fallback.
 export const DEFAULT_PAGE_WIDTH_PREF = 'full'
 
 export const DEFAULT_SETTINGS = {
+  themeMode: 'manual',
+  systemLightTheme: 'light',
+  systemDarkTheme: 'dark',
   pageWidth: DEFAULT_PAGE_WIDTH_PREF,
   fontSize: DEFAULT_FONT_SIZE,
   zoom: DEFAULT_ZOOM,
   lineHeight: DEFAULT_LINE_HEIGHT,
   paragraphSpacing: DEFAULT_PARA_SPACING,
+  headingSpacing: DEFAULT_HEADING_SPACING,
   // Empty values use the built-in language-specific stacks. English leads
   // Latin glyphs in every document; Chinese/Japanese choices take over the CJK
   // glyphs only when that document language is detected.
@@ -111,6 +127,11 @@ export const DEFAULT_SETTINGS = {
   // Which editor a newly-opened .md tab starts in: the source-preserving keep
   // editor (default) or the Milkdown WYSIWYG. Per-tab toggle still overrides.
   defaultEditorMode: 'keep',
+  // Keep ordinary source newlines visible in Milkdown without changing their
+  // Markdown meaning or serializing them as explicit hard breaks.
+  preserveSoftBreaks: true,
+  // Reopen saved files and unsaved scratch tabs from the previous session.
+  restoreSession: true,
   // Keep mode only: render a RUN of blank lines as that much vertical space, one
   // extra line per blank line beyond the block separator. Off by default because it
   // deliberately departs from CommonMark — every other renderer (GitHub, VSCode
@@ -129,7 +150,8 @@ export const DEFAULT_SETTINGS = {
   // Saved-file snapshots are opt-in because they retain document content outside
   // the original folder. Desktop stores a bounded 30-day history in userData.
   localHistory: false,
-  showHiddenFiles: false
+  showHiddenFiles: false,
+  lastPdfDensityPreset: 'standard'
 }
 
 const round1 = (n) => Math.round(n * 10) / 10
@@ -155,6 +177,19 @@ function normalizeFontSize(s) {
   return Math.min(FONT_SIZE_MAX, Math.max(FONT_SIZE_MIN, Math.round(n)))
 }
 
+const BUILTIN_THEME_IDS = new Set([
+  'light',
+  'dark',
+  'morandi',
+  'morandi-rose',
+  'morandi-blue',
+  'morandi-dark'
+])
+
+function normalizeThemeId(value, fallback) {
+  return BUILTIN_THEME_IDS.has(value) ? value : fallback
+}
+
 export function normalizeSourceFontOffset(value) {
   const n = Number(value)
   if (!Number.isFinite(n)) return DEFAULT_SOURCE_FONT_OFFSET
@@ -173,6 +208,9 @@ export function loadSettings() {
   try {
     const raw = JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}')
     return {
+      themeMode: raw.themeMode === 'system' ? 'system' : 'manual',
+      systemLightTheme: normalizeThemeId(raw.systemLightTheme, 'light'),
+      systemDarkTheme: normalizeThemeId(raw.systemDarkTheme, 'dark'),
       pageWidth: normalizeWidth(raw.pageWidth ?? DEFAULT_PAGE_WIDTH_PREF),
       fontSize: normalizeFontSize(raw.fontSize ?? DEFAULT_FONT_SIZE),
       zoom: normalizeZoom(raw.zoom ?? DEFAULT_ZOOM),
@@ -182,6 +220,12 @@ export function loadSettings() {
         PARA_SPACING_MIN,
         PARA_SPACING_MAX,
         DEFAULT_PARA_SPACING
+      ),
+      headingSpacing: normalizeInRange(
+        raw.headingSpacing,
+        HEADING_SPACING_MIN,
+        HEADING_SPACING_MAX,
+        DEFAULT_HEADING_SPACING
       ),
       // Migrate the short-lived single-font preference by applying it to all
       // three language slots. Once any new slot exists, its explicit value
@@ -194,13 +238,18 @@ export function loadSettings() {
       spellcheck: raw.spellcheck === true,
       autosave: raw.autosave === true,
       defaultEditorMode: raw.defaultEditorMode === 'rich' ? 'rich' : 'keep',
+      preserveSoftBreaks: raw.preserveSoftBreaks !== false,
+      restoreSession: raw.restoreSession !== false,
       blankLineSpacing: raw.blankLineSpacing === true,
       tableAutoWrap: raw.tableAutoWrap === true,
       selectionToolbar: raw.selectionToolbar !== false,
       inlineMathDeleteMode: raw.inlineMathDeleteMode === 'fast' ? 'fast' : 'protect',
       mobileReadOnly: raw.mobileReadOnly === true,
       localHistory: raw.localHistory === true,
-      showHiddenFiles: raw.showHiddenFiles === true
+      showHiddenFiles: raw.showHiddenFiles === true,
+      lastPdfDensityPreset: ['comfort', 'standard', 'compact'].includes(raw.lastPdfDensityPreset)
+        ? raw.lastPdfDensityPreset
+        : 'standard'
     }
   } catch {
     return { ...DEFAULT_SETTINGS }
@@ -287,6 +336,22 @@ export function applyParagraphSpacing(value) {
   // "standard" 0.8em preset → identical to the original look; >1 / <1 grows /
   // shrinks the whole vertical rhythm while preserving heading hierarchy).
   root.setProperty('--editor-para-scale', String(round1(v / DEFAULT_PARA_SPACING)))
+}
+
+export function applyHeadingSpacing(value) {
+  document.documentElement.style.setProperty(
+    '--editor-heading-spacing',
+    normalizeInRange(
+      value,
+      HEADING_SPACING_MIN,
+      HEADING_SPACING_MAX,
+      DEFAULT_HEADING_SPACING
+    ) + 'em'
+  )
+}
+
+export function applySoftBreakDisplay(enabled) {
+  document.body.classList.toggle('hm-preserve-soft-breaks', enabled !== false)
 }
 
 export function applyTableAutoWrap(enabled) {

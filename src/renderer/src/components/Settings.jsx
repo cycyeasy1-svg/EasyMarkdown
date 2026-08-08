@@ -102,6 +102,7 @@ export default function Settings({
   onRefreshThemes,
   onOpenThemesFolder,
   onGetMoreThemes,
+  systemIsDark,
   onClearLocalHistory,
   onOpenHelp,
   keybindings
@@ -224,6 +225,12 @@ export default function Settings({
               checked={settings.autosave}
               onChange={(v) => updateSettings({ autosave: v })}
             />
+            <SwitchRow
+              label={t('settings.restoreSession')}
+              desc={t('settings.restoreSessionDesc')}
+              checked={settings.restoreSession !== false}
+              onChange={(restoreSession) => updateSettings({ restoreSession })}
+            />
             {caps.localHistory && (
               <>
                 <SwitchRow
@@ -265,6 +272,13 @@ export default function Settings({
               scope={t('settings.scope.keepOnly')}
               checked={settings.blankLineSpacing}
               onChange={(blankLineSpacing) => updateSettings({ blankLineSpacing })}
+            />
+            <SwitchRow
+              label={t('settings.preserveSoftBreaks')}
+              desc={t('settings.preserveSoftBreaksDesc')}
+              scope={t('settings.scope.milkdownOnly')}
+              checked={settings.preserveSoftBreaks !== false}
+              onChange={(preserveSoftBreaks) => updateSettings({ preserveSoftBreaks })}
             />
             {caps.nativeMenus && (
               <SwitchRow
@@ -360,6 +374,41 @@ export default function Settings({
           {/* ── Appearance ── */}
           <div className="hm-set-section">
             <div className="hm-set-section-title">{t('settings.sectionAppearance')}</div>
+            <SwitchRow
+              label={t('settings.followSystemTheme')}
+              desc={t('settings.followSystemThemeDesc')}
+              checked={settings.themeMode === 'system'}
+              onChange={(enabled) => updateSettings({ themeMode: enabled ? 'system' : 'manual' })}
+            />
+            {settings.themeMode === 'system' && (
+              <div className="hm-system-theme-settings">
+                <label>
+                  <span>{t('settings.systemLightTheme')}</span>
+                  <select
+                    value={settings.systemLightTheme}
+                    onChange={(event) => updateSettings({ systemLightTheme: event.target.value })}
+                  >
+                    {THEMES.filter((item) => !item.dark).map((item) => (
+                      <option key={item.id} value={item.id}>{lang === 'zh' ? item.zh : item.en}</option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  <span>{t('settings.systemDarkTheme')}</span>
+                  <select
+                    value={settings.systemDarkTheme}
+                    onChange={(event) => updateSettings({ systemDarkTheme: event.target.value })}
+                  >
+                    {THEMES.filter((item) => item.dark).map((item) => (
+                      <option key={item.id} value={item.id}>{lang === 'zh' ? item.zh : item.en}</option>
+                    ))}
+                  </select>
+                </label>
+                <div className="hm-set-theme-note">
+                  {t('settings.systemThemeActive', { mode: t(systemIsDark ? 'settings.dark' : 'settings.light') })}
+                </div>
+              </div>
+            )}
             <div className="hm-set-themes">
               {THEMES.map((th) => (
                 <button

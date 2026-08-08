@@ -27,7 +27,12 @@ export function usePdfPreview({ request, options, delay = 180 }) {
     setState((previous) => ({ ...previous, status: 'previewing', error: null }))
     const timer = setTimeout(async () => {
       try {
-        const result = await window.api.previewPDF(request.source, request.defaultName, options)
+        const result = await window.api.previewPDF(
+          request.source,
+          request.defaultName,
+          options,
+          request.sourcePath
+        )
         if (requestId !== requestIdRef.current) {
           if (result?.token) window.api.disposePDFPreview(result.token).catch(() => {})
           return

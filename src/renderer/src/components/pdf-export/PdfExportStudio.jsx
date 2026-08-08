@@ -6,9 +6,12 @@ import PdfPreview from './PdfPreview.jsx'
 import PdfSettings from './PdfSettings.jsx'
 import './pdf-export.css'
 
-export default function PdfExportStudio({ request, saving, saveError, onCancel, onSave, t }) {
+export default function PdfExportStudio({ request, saving, saveError, onCancel, onSave, initialDensity, onDensityChange, t }) {
   const [options, setOptions] = useState(() =>
-    createPdfOptions(request.source?.title || '', t('pdf.tocTitle')))
+    normalizePdfOptions({
+      ...createPdfOptions(request.source?.title || '', t('pdf.tocTitle')),
+      densityPreset: initialDensity
+    }))
   const normalized = useMemo(() => {
     try {
       return { options: normalizePdfOptions(options), error: null }
@@ -20,6 +23,10 @@ export default function PdfExportStudio({ request, saving, saveError, onCancel, 
     request: normalized.options ? request : null,
     options: normalized.options
   })
+
+  useEffect(() => {
+    onDensityChange?.(options.densityPreset)
+  }, [onDensityChange, options.densityPreset])
 
   useEffect(() => {
     const onKeyDown = (event) => {

@@ -1,5 +1,6 @@
 import {
   PDF_MARGIN_PRESETS,
+  PDF_DENSITY_PRESETS,
   PDF_PAGE_SIZES,
   PDF_PAGINATION
 } from '../../../../shared/pdf-options.js'
@@ -96,6 +97,28 @@ export default function PdfSettings({ options, setOptions, rangeError, t }) {
             <output>{options.scale}%</output>
           </div>
         </label>
+        <label className="hm-pdf-field">
+          <span>{t('pdf.fontSize')}</span>
+          <div className="hm-pdf-number-with-unit">
+            <input type="number" min="8" max="24" step="0.5" value={options.fontSizePt} onChange={(event) => set('fontSizePt', event.target.value)} />
+            <small>pt</small>
+          </div>
+        </label>
+        <div className="hm-pdf-field">
+          <span>{t('pdf.density')}</span>
+          <div className="hm-pdf-segmented hm-pdf-density">
+            {PDF_DENSITY_PRESETS.map((value) => (
+              <button
+                key={value}
+                type="button"
+                className={options.densityPreset === value ? 'active' : ''}
+                onClick={() => set('densityPreset', value)}
+              >
+                {t(`pdf.density.${value}`)}
+              </button>
+            ))}
+          </div>
+        </div>
       </section>
 
       <section>

@@ -36,11 +36,15 @@ const api = {
   openAttachments: () => ipcRenderer.invoke('dialog:openAttachments'),
   openFolder: () => ipcRenderer.invoke('dialog:openFolder'),
   saveAs: (defaultName) => ipcRenderer.invoke('dialog:saveAs', defaultName),
-  previewPDF: (source, defaultName, options) =>
-    ipcRenderer.invoke('pdf:preview', { source, defaultName, options }),
+  previewPDF: (source, defaultName, options, sourcePath) =>
+    ipcRenderer.invoke('pdf:preview', { source, defaultName, options, sourcePath }),
   savePDFPreview: (token, defaultName) =>
     ipcRenderer.invoke('pdf:save-preview', { token, defaultName }),
   disposePDFPreview: (token) => ipcRenderer.invoke('pdf:dispose-preview', token),
+  previewHTML: (source, defaultName, options, sourcePath) =>
+    ipcRenderer.invoke('html:preview', { source, defaultName, options, sourcePath }),
+  saveHTMLPreview: (token) => ipcRenderer.invoke('html:save-preview', { token }),
+  disposeHTMLPreview: (token) => ipcRenderer.invoke('html:dispose-preview', token),
   exportHTML: (html, defaultName, title, typography) =>
     ipcRenderer.invoke('export:html', { html, defaultName, title, typography }),
   printHTML: (html, typography) => ipcRenderer.invoke('print:html', { html, typography }),

@@ -105,7 +105,8 @@ const replaceKatex = (clone) => {
 }
 
 const stripAttributes = (clone) => {
-  clone.querySelectorAll('script').forEach((element) => element.remove())
+  clone.querySelectorAll('script, iframe, object, embed, form, meta, link, base')
+    .forEach((element) => element.remove())
   clone.querySelectorAll('*').forEach((element) => {
     if (element.closest('[data-hm-pdf-preserve]')) return
     const measuredTable = element.closest('table[data-hm-pdf-table-layout="measured"]')

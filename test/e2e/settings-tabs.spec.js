@@ -123,15 +123,15 @@ test('settings modal opens, autosave toggle flips and persists in settings stora
     await page.keyboard.press('Escape')
     await expect(modal).toHaveCount(0)
 
-    // The five high-frequency adjusters and the blank-line display option now
+    // The six high-frequency adjusters and the blank-line display option now
     // live together behind the status-bar Layout button.
     const layoutButton = page.locator('.statusbar button[title="排版"]')
     await expect(layoutButton).toHaveText('')
     await expect(layoutButton.locator('svg')).toBeVisible()
     await layoutButton.click()
     const layout = page.locator('.hm-layout-pop')
-    await expect(layout.locator('.hm-adjust-group')).toHaveCount(5)
-    await expect(layout.locator('.hm-adjust-group .hm-setting-scope')).toHaveCount(2)
+    await expect(layout.locator('.hm-adjust-group')).toHaveCount(6)
+    await expect(layout.locator('.hm-adjust-group .hm-setting-scope')).toHaveCount(3)
     await expect(layout.locator('.hm-adjust-group .hm-setting-scope').first()).toHaveText('保持 / Milkdown')
     await expect(layout.locator('.hm-layout-option .hm-setting-scope')).toHaveText('仅保持模式')
     const blankLines = layout.getByRole('switch', { name: '保留连续空行' })

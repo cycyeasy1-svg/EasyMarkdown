@@ -7,6 +7,7 @@ const Editor = lazy(() => import('./components/Editor.jsx'))
 const KeepEditor = lazy(() => import('./components/KeepEditor.jsx'))
 const HelpCenter = lazy(() => import('./components/HelpCenter.jsx'))
 const PdfExportStudio = lazy(() => import('./components/pdf-export/PdfExportStudio.jsx'))
+const HtmlExportStudio = lazy(() => import('./components/html-export/HtmlExportStudio.jsx'))
 const CommandPalette = lazy(() => import('./components/CommandPalette.jsx'))
 const KeepChangeReview = lazy(() => import('./components/KeepChangeReview.jsx'))
 const LinkIntelligencePanel = lazy(() => import('./components/LinkIntelligencePanel.jsx'))
@@ -47,6 +48,8 @@ import {
   applyZoom,
   applyLineHeight,
   applyParagraphSpacing,
+  applyHeadingSpacing,
+  applySoftBreakDisplay,
   applyTableAutoWrap,
   applySelectionToolbar,
   normalizeZoom,
@@ -62,6 +65,7 @@ import {
 import { applyCustomTheme } from './customThemes.js'
 import { preparePdfSource } from './pdf-source.js'
 import { useKeybindings } from './hooks/useKeybindings.js'
+import { useSystemColorScheme } from './hooks/useSystemColorScheme.js'
 import {
   keybindingMatchesEvent,
   keybindingToDisplay,
@@ -834,6 +838,9 @@ export default function App() {
   const [pdfRequest, setPdfRequest] = useState(null)
   const [pdfSaving, setPdfSaving] = useState(false)
   const [pdfSaveError, setPdfSaveError] = useState('')
+  const [htmlRequest, setHtmlRequest] = useState(null)
+  const [htmlSaving, setHtmlSaving] = useState(false)
+  const [htmlSaveError, setHtmlSaveError] = useState('')
   // Bumped each time workspace search is invoked so an already-open panel
   // re-focuses its input (Ctrl+Shift+F while the panel is showing).
   const [searchFocusNonce, setSearchFocusNonce] = useState(0)
@@ -939,6 +946,14 @@ export default function App() {
   // User preferences (page width, font size, zoom). Persisted separately from
   // the session; see settings.js.
   const [settings, setSettings] = useState(loadSettings)
+  const systemIsDark = useSystemColorScheme()
+  const followsSystemTheme = settings.themeMode === 'system'
+  const effectiveTheme = followsSystemTheme
+    ? systemIsDark
+      ? settings.systemDarkTheme
+      : settings.systemLightTheme
+    : theme
+  const effectiveCustomTheme = followsSystemTheme ? null : customTheme
   const mobileReadOnly = isMobile && settings.mobileReadOnly
   const keybindings = useKeybindings(window.api.platform)
   // Keep-mode table-filter results per tab id ({ shown, total } or null) — drives
@@ -1386,8 +1401,8 @@ export default function App() {
 
   // ----------------------------- theme / i18n -----------------------------
   useEffect(() => {
-    applyTheme(theme)
-  }, [theme])
+    applyTheme(effectiveTheme)
+  }, [effectiveTheme])
 
   // Keep the native application menu in the UI language (desktop only; the
   // mobile shim has no native menus, hence the optional call).
@@ -1430,6 +1445,12 @@ export default function App() {
   useEffect(() => {
     applyParagraphSpacing(settings.paragraphSpacing)
   }, [settings.paragraphSpacing])
+  useEffect(() => {
+    applyHeadingSpacing(settings.headingSpacing)
+  }, [settings.headingSpacing])
+  useEffect(() => {
+    applySoftBreakDisplay(settings.preserveSoftBreaks)
+  }, [settings.preserveSoftBreaks])
   useEffect(() => {
     applyTableAutoWrap(settings.tableAutoWrap)
   }, [settings.tableAutoWrap])
@@ -1475,13 +1496,13 @@ export default function App() {
   // Inject the selected custom theme's CSS (or clear it). If its file vanished,
   // fall back to no custom theme.
   useEffect(() => {
-    if (!customTheme) {
+    if (!effectiveCustomTheme) {
       applyCustomTheme(null)
       return
     }
     let alive = true
     window.api
-      .themeRead(customTheme)
+      .themeRead(effectiveCustomTheme)
       .then((css) => alive && applyCustomTheme(css))
       .catch(() => {
         if (!alive) return
@@ -1491,13 +1512,18 @@ export default function App() {
     return () => {
       alive = false
     }
-  }, [customTheme])
+  }, [effectiveCustomTheme])
   // Picking a built-in theme clears any custom overlay; picking a custom one
   // keeps the built-in as the base (chrome + light/dark).
   const pickBuiltinTheme = useCallback((id) => {
     setTheme(id)
     setCustomTheme(null)
-  }, [])
+    updateSettings({ themeMode: 'manual' })
+  }, [updateSettings])
+  const pickCustomTheme = useCallback((file) => {
+    setCustomTheme(file)
+    updateSettings({ themeMode: 'manual' })
+  }, [updateSettings])
 
   const t = useCallback((key, vars) => translate(lang, key, vars), [lang])
   // Always-current translator for stable callbacks (e.g. openPaths) that must
@@ -1934,7 +1960,8 @@ export default function App() {
       return THEMES[(i + 1) % THEMES.length].id
     })
     setCustomTheme(null)
-  }, [])
+    updateSettings({ themeMode: 'manual' })
+  }, [updateSettings])
 
   // Toggle source/preview mode without unmounting either editor. Transfer a
   // Markdown offset (caret when visible, otherwise the top visible block) so the
@@ -3438,7 +3465,30 @@ export default function App() {
         fontWriteJa: settings.fontWriteJa,
         fontMono: settings.fontMono
       }),
-      defaultName: base + '.pdf'
+      defaultName: base + '.pdf',
+      sourcePath: tab.path || null
+    })
+    return true
+  }, [settings.fontWriteEn, settings.fontWriteJa, settings.fontWriteZh, settings.fontMono])
+
+  const openHtmlStudio = useCallback((tab, snapshot) => {
+    const html = typeof snapshot === 'string' ? snapshot : snapshot?.html
+    if (!tab || !html || !window.api.capabilities?.htmlExport) {
+      window.alert(tRef.current('error.exportHtmlUnavailable'))
+      return false
+    }
+    const base = (tab.title || 'Untitled').replace(/\.(md|markdown|mdx|txt)$/i, '')
+    setHtmlSaveError('')
+    setHtmlSaving(false)
+    setHtmlRequest({
+      source: preparePdfSource(snapshot, base, {
+        fontWriteEn: settings.fontWriteEn,
+        fontWriteZh: settings.fontWriteZh,
+        fontWriteJa: settings.fontWriteJa,
+        fontMono: settings.fontMono
+      }),
+      defaultName: base + '.html',
+      sourcePath: tab.path || null
     })
     return true
   }, [settings.fontWriteEn, settings.fontWriteJa, settings.fontWriteZh, settings.fontMono])
@@ -3455,7 +3505,7 @@ export default function App() {
         ? await api.getPdfSource()
         : await api?.getDocHTML?.()
       if (!(typeof snapshot === 'string' ? snapshot : snapshot?.html)) {
-        window.alert(tRef.current('error.exportPdfUnavailable'))
+        window.alert(tRef.current('error.exportHtmlUnavailable'))
         return
       }
       openPdfStudio(tab, snapshot)
@@ -4382,19 +4432,16 @@ export default function App() {
     },
     exportHtml: async () => {
       const id = pickEditableId()
-      const html = await editorApis.current[id]?.getDocHTML?.()
-      if (!html) {
-        window.alert(tRef.current('error.exportPdfUnavailable'))
+      const api = editorApis.current[id]
+      const snapshot = api?.getPdfSource
+        ? await api.getPdfSource()
+        : await api?.getDocHTML?.()
+      if (!(typeof snapshot === 'string' ? snapshot : snapshot?.html)) {
+        window.alert(tRef.current('error.exportHtmlUnavailable'))
         return
       }
       const tab = tabs.find((x) => x.id === id)
-      const base = (tab?.title || 'Untitled').replace(/\.(md|markdown|mdx|txt)$/i, '')
-      await window.api.exportHTML?.(html, base + '.html', base, {
-        fontWriteEn: settings.fontWriteEn,
-        fontWriteZh: settings.fontWriteZh,
-        fontWriteJa: settings.fontWriteJa,
-        fontMono: settings.fontMono
-      })
+      openHtmlStudio(tab, snapshot)
     },
     print: async () => {
       const id = pickEditableId()
@@ -4515,6 +4562,14 @@ export default function App() {
   const onSetLineHeight = useCallback((v) => updateSettings({ lineHeight: v }), [updateSettings])
   const onSetParagraphSpacing = useCallback(
     (v) => updateSettings({ paragraphSpacing: v }),
+    [updateSettings]
+  )
+  const onSetHeadingSpacing = useCallback(
+    (v) => updateSettings({ headingSpacing: v }),
+    [updateSettings]
+  )
+  const onPdfDensityChange = useCallback(
+    (lastPdfDensityPreset) => updateSettings({ lastPdfDensityPreset }),
     [updateSettings]
   )
   const onSetBlankLineSpacing = useCallback(
@@ -4774,8 +4829,10 @@ export default function App() {
   }, [])
 
   useEffect(() => {
-    const paths = (session.openPaths || []).filter(Boolean)
-    const untitled = (session.untitled || []).filter((u) => u && (u.content || '').trim())
+    const paths = settings.restoreSession ? (session.openPaths || []).filter(Boolean) : []
+    const untitled = settings.restoreSession
+      ? (session.untitled || []).filter((u) => u && (u.content || '').trim())
+      : []
     // Recreate unsaved scratch tabs (no path) from the last session.
     const addUntitled = () => {
       if (!untitled.length) return null
@@ -4987,7 +5044,10 @@ export default function App() {
     localStorage.setItem(ONBOARDED_KEY, '1')
     // Only greet on a genuinely fresh start (no restored session — neither saved
     // files nor unsaved scratch tabs).
-    if ((session.openPaths || []).filter(Boolean).length || (session.untitled || []).length) return
+    if (
+      settings.restoreSession &&
+      ((session.openPaths || []).filter(Boolean).length || (session.untitled || []).length)
+    ) return
     const doc = welcomeDoc(session.lang || DEFAULT_LANG)
     const id = genId()
     setTabs((prev) => [
@@ -5982,6 +6042,25 @@ export default function App() {
       setPdfSaving(false)
     }
   }
+  const closeHtmlStudio = () => {
+    if (htmlSaving) return
+    setHtmlSaveError('')
+    setHtmlRequest(null)
+  }
+  const saveHtmlStudio = async (token) => {
+    if (!htmlRequest || htmlSaving || !token) return
+    setHtmlSaving(true)
+    setHtmlSaveError('')
+    try {
+      const result = await window.api.saveHTMLPreview(token)
+      if (result?.path) setHtmlRequest(null)
+      else if (!result?.canceled) setHtmlSaveError(result?.error || t('html.saveFailed'))
+    } catch (error) {
+      setHtmlSaveError(error?.message || String(error))
+    } finally {
+      setHtmlSaving(false)
+    }
+  }
 
   return (
     <I18nProvider lang={lang} setLang={setLang}>
@@ -6589,11 +6668,11 @@ export default function App() {
         onRedoKeep={onStatusRedoKeep}
         onReviewKeep={onStatusReviewKeep}
         onShare={onStatusShare}
-        theme={theme}
+        theme={effectiveTheme}
         setTheme={pickBuiltinTheme}
         customThemes={customThemes}
-        customTheme={customTheme}
-        onPickCustom={setCustomTheme}
+        customTheme={effectiveCustomTheme}
+        onPickCustom={pickCustomTheme}
         onRefreshThemes={refreshThemes}
         lang={lang}
         setLang={setLang}
@@ -6628,6 +6707,8 @@ export default function App() {
         onSetLineHeight={onSetLineHeight}
         paragraphSpacing={settings.paragraphSpacing}
         onSetParagraphSpacing={onSetParagraphSpacing}
+        headingSpacing={settings.headingSpacing}
+        onSetHeadingSpacing={onSetHeadingSpacing}
         blankLineSpacing={settings.blankLineSpacing}
         onSetBlankLineSpacing={onSetBlankLineSpacing}
         filterInfo={activeTab ? keepFilters[activeTab.id] : null}
@@ -6660,11 +6741,12 @@ export default function App() {
             onClose={() => setSettingsOpen(false)}
             settings={settings}
             updateSettings={updateSettings}
-            theme={theme}
+            theme={effectiveTheme}
             setTheme={pickBuiltinTheme}
             customThemes={customThemes}
-            customTheme={customTheme}
-            onPickCustom={setCustomTheme}
+            customTheme={effectiveCustomTheme}
+            onPickCustom={pickCustomTheme}
+            systemIsDark={systemIsDark}
             onRefreshThemes={refreshThemes}
             onOpenThemesFolder={onOpenThemesFolder}
             onGetMoreThemes={onGetMoreThemes}
@@ -6683,6 +6765,21 @@ export default function App() {
             saveError={pdfSaveError}
             onCancel={closePdfStudio}
             onSave={savePdfStudio}
+            initialDensity={settings.lastPdfDensityPreset}
+            onDensityChange={onPdfDensityChange}
+            t={t}
+          />
+        </Suspense>
+      )}
+
+      {htmlRequest && (
+        <Suspense fallback={<div className="hm-pdf-loading">{t('html.generatingPreview')}</div>}>
+          <HtmlExportStudio
+            request={htmlRequest}
+            saving={htmlSaving}
+            saveError={htmlSaveError}
+            onCancel={closeHtmlStudio}
+            onSave={saveHtmlStudio}
             t={t}
           />
         </Suspense>

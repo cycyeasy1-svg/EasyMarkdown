@@ -2696,6 +2696,52 @@ function KeepEditor({
       return false
     }
 
+    const buildExportHtml = () => {
+      flushRemaining()
+      const tmp = document.createElement('div')
+      tmp.innerHTML = renderDoc(
+        rawLinesRef.current,
+        {},
+        {
+          forExport: true,
+          baseDir: dirOf(docPathRef.current),
+          blankLineSpacing: blankLineSpacingRef.current
+        }
+      ).html
+      tmp.querySelectorAll('.km-mermaid').forEach((element) => {
+        const cached = peekMermaidSvg(element.getAttribute('data-code') || '')
+        if (cached?.svg) element.innerHTML = cached.svg
+      })
+      const inject = (selector) => {
+        const live = [...host.querySelectorAll(selector)]
+        ;[...tmp.querySelectorAll(selector)].forEach((element, index) => {
+          if (live[index]?.innerHTML) element.innerHTML = live[index].innerHTML
+        })
+      }
+      inject('.km-mermaid')
+      inject('.km-math')
+      return tmp.innerHTML
+    }
+
+    const buildExportSource = () => {
+      const tmp = document.createElement('div')
+      tmp.innerHTML = buildExportHtml()
+      const images = []
+      tmp.querySelectorAll('img').forEach((image, index) => {
+        const src = image.getAttribute('src') || ''
+        image.removeAttribute('srcset')
+        if (!src) {
+          image.remove()
+          return
+        }
+        if (/^data:/i.test(src)) return
+        const placeholder = `horsemd-pdf-resource-${String(index + 1).padStart(4, '0')}`
+        image.setAttribute('src', placeholder)
+        images.push({ placeholder, src })
+      })
+      return { html: tmp.innerHTML, images }
+    }
+
     onReady?.({
       getMarkdown: () => rawLinesRef.current.join('\n'),
       getScroller,
@@ -2743,36 +2789,9 @@ function KeepEditor({
       // export render leaves mermaid/math as empty placeholders (they fill async in
       // the live DOM), so copy each already-rendered diagram/formula across by index
       // — both come from the same rawLines, so the Nth placeholder matches.
-      getDocHTML: () => {
-        flushRemaining() // the by-index embed copy below needs every live placeholder present
-        const tmp = document.createElement('div')
-        tmp.innerHTML = renderDoc(
-          rawLinesRef.current,
-          {},
-          {
-            forExport: true,
-            baseDir: dirOf(docPathRef.current),
-            blankLineSpacing: blankLineSpacingRef.current
-          }
-        ).html
-        // Embeds now render lazily (only when scrolled near view), so the live host
-        // may not hold a diagram the export needs. Fill mermaid from the shared
-        // session cache first (covers anything ever rendered), then copy the live
-        // DOM by index for whatever the cache misses / for math.
-        tmp.querySelectorAll('.km-mermaid').forEach((el) => {
-          const c = peekMermaidSvg(el.getAttribute('data-code') || '')
-          if (c && c.svg) el.innerHTML = c.svg
-        })
-        const inject = (sel) => {
-          const live = [...host.querySelectorAll(sel)]
-          ;[...tmp.querySelectorAll(sel)].forEach((el, i) => {
-            if (live[i] && live[i].innerHTML) el.innerHTML = live[i].innerHTML
-          })
-        }
-        inject('.km-mermaid')
-        inject('.km-math')
-        return tmp.innerHTML
-      },
+      getExportSource: buildExportSource,
+      getPdfSource: buildExportSource,
+      getDocHTML: buildExportHtml,
       setBlock: () => false, // no block model in keep mode
       // Status-bar filter badge click: drop every table filter in the document.
       clearAllFilters: () => clearAllFilters(),

@@ -27,6 +27,25 @@ const COPY_STYLES = {
   IMG: 'max-width:100%;'
 }
 
+const INLINE_SOFT_BREAK = 'span[data-type="hardbreak"][data-is-inline="true"]'
+
+export function materializeCopiedSoftBreaks(root) {
+  root.querySelectorAll(INLINE_SOFT_BREAK).forEach((softBreak) => {
+    softBreak.replaceWith(document.createElement('br'))
+  })
+}
+
+export function copiedPlainText(root, fallback = '') {
+  if (!root.querySelector('br')) return fallback
+  const holder = document.createElement('div')
+  holder.style.cssText = 'position:fixed;left:-100000px;top:0;white-space:pre-wrap;'
+  holder.appendChild(root.cloneNode(true))
+  document.body.appendChild(holder)
+  const text = holder.innerText
+  holder.remove()
+  return text || fallback
+}
+
 export function inlineRichStyles(root) {
   root.querySelectorAll('*').forEach((el) => {
     // strip editor-only attributes

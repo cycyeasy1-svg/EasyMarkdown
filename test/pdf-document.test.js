@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  buildPdfCss,
   buildPdfDocument,
   buildPdfHeaderFooter,
   buildPdfToc,
@@ -60,5 +61,13 @@ describe('PDF document assembly', () => {
     expect(templates.headerTemplate).toContain('&lt;Title&gt;')
     expect(templates.headerTemplate).toContain('class="date"')
     expect(templates.footerTemplate).toContain('class="pageNumber"')
+  })
+
+  it('emits body-size and density variables and keeps measured table widths', () => {
+    const css = buildPdfCss({ fontSizePt: 9, densityPreset: 'compact' })
+    expect(css).toContain('--hm-pdf-font-size: 9pt')
+    expect(css).toContain('--hm-pdf-line-height:1.4')
+    expect(css).toContain('table[data-hm-pdf-table-layout="measured"]')
+    expect(css).toContain('table-layout: auto')
   })
 })

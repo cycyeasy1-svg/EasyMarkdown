@@ -557,6 +557,8 @@ function StatusBar({
   onSetLineHeight,
   paragraphSpacing,
   onSetParagraphSpacing,
+  headingSpacing,
+  onSetHeadingSpacing,
   blankLineSpacing,
   onSetBlankLineSpacing,
   customThemes,
@@ -735,6 +737,8 @@ function StatusBar({
               onSetLineHeight={onSetLineHeight}
               paragraphSpacing={paragraphSpacing}
               onSetParagraphSpacing={onSetParagraphSpacing}
+              headingSpacing={headingSpacing}
+              onSetHeadingSpacing={onSetHeadingSpacing}
               blankLineSpacing={blankLineSpacing}
               onSetBlankLineSpacing={onSetBlankLineSpacing}
             />

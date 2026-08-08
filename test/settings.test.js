@@ -35,11 +35,15 @@ describe('loadSettings / saveSettings', () => {
   })
   it('round-trips saved values', () => {
     const saved = {
+      themeMode: 'system',
+      systemLightTheme: 'morandi',
+      systemDarkTheme: 'morandi-dark',
       pageWidth: 900,
       fontSize: 18,
       zoom: 1.25,
       lineHeight: 2.0,
       paragraphSpacing: 1.2,
+      headingSpacing: 1.2,
       fontWriteEn: 'Inter',
       fontWriteZh: 'Noto Sans SC',
       fontWriteJa: 'Noto Sans JP',
@@ -48,13 +52,16 @@ describe('loadSettings / saveSettings', () => {
       spellcheck: true,
       autosave: true,
       defaultEditorMode: 'rich',
+      preserveSoftBreaks: false,
+      restoreSession: false,
       blankLineSpacing: true,
       tableAutoWrap: true,
       selectionToolbar: false,
       inlineMathDeleteMode: 'fast',
       mobileReadOnly: true,
       localHistory: true,
-      showHiddenFiles: true
+      showHiddenFiles: true,
+      lastPdfDensityPreset: 'compact'
     }
     saveSettings(saved)
     expect(loadSettings()).toEqual(saved)
@@ -76,14 +83,18 @@ describe('loadSettings / saveSettings', () => {
   it('clamps out-of-range stored values on load', () => {
     localStorage.setItem(
       SETTINGS_KEY,
-      JSON.stringify({ pageWidth: 5000, fontSize: 99, zoom: 9, lineHeight: 9, paragraphSpacing: 9 })
+      JSON.stringify({ pageWidth: 5000, fontSize: 99, zoom: 9, lineHeight: 9, paragraphSpacing: 9, headingSpacing: 9 })
     )
     expect(loadSettings()).toEqual({
+      themeMode: 'manual',
+      systemLightTheme: 'light',
+      systemDarkTheme: 'dark',
       pageWidth: 1400,
       fontSize: 24,
       zoom: 2,
       lineHeight: 2.4,
       paragraphSpacing: 2,
+      headingSpacing: 2.4,
       fontWriteEn: '',
       fontWriteZh: '',
       fontWriteJa: '',
@@ -92,13 +103,16 @@ describe('loadSettings / saveSettings', () => {
       spellcheck: false,
       autosave: false,
       defaultEditorMode: 'keep',
+      preserveSoftBreaks: true,
+      restoreSession: true,
       blankLineSpacing: false,
       tableAutoWrap: false,
       selectionToolbar: true,
       inlineMathDeleteMode: 'protect',
       mobileReadOnly: false,
       localHistory: false,
-      showHiddenFiles: false
+      showHiddenFiles: false,
+      lastPdfDensityPreset: 'standard'
     })
   })
   it('coerces the boolean flags strictly', () => {
