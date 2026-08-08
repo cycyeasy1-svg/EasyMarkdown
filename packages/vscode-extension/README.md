@@ -25,12 +25,13 @@ minimal line-range edit, so VSCode owns dirty state, undo/redo and save.
 - **Safe raw HTML** — sanitized inline and block HTML renders in Keep, including
   complex tables with row and column spans; scripts, event handlers, and
   layout-breaking styles are removed.
-- **Tables** — Excel-style per-column filters, add/remove rows & columns,
-  drag-to-resize and auto-fit, temporary hide/restore controls, a sticky
-  floating header for wide tables with selection and context-menu actions, rich
-  copy (cell / row / column / table), keyboard cell navigation, and rectangular
-  TSV paste from spreadsheets. An optional fit-and-wrap mode keeps every column
-  inside the writing area instead of scrolling sideways.
+- **Tables** — Excel-style per-column filters with quick selection for duplicate
+  or unique values, add/remove rows & columns, drag-to-resize and auto-fit,
+  temporary hide/restore controls, a sticky floating header for wide tables
+  with selection and context-menu actions, rich copy (cell / row / column /
+  table), keyboard cell navigation, and rectangular TSV paste from
+  spreadsheets. An optional fit-and-wrap mode keeps every column inside the
+  writing area instead of scrolling sideways.
 - **Task lists** — `- [ ]` / `- [x]` render as real checkboxes; a click toggles
   exactly that source line.
 - **Block structure editing** — insert a block above/below, duplicate it, or
@@ -43,8 +44,9 @@ minimal line-range edit, so VSCode owns dirty state, undo/redo and save.
   files into `./assets/` and insert relative Markdown links at the current Keep
   block or source selection.
 - **Links** — `#anchors` jump within the document; relative `.md`/file links open
-  in VSCode (`file.md#section` opens *and* scrolls). Alt/Option+Click opens a
-  relative target to the side.
+  in VSCode (`file.md#section` opens *and* scrolls), and paths such as
+  `/docs/guide.md` resolve from the current workspace root. Alt/Option+Click
+  opens a relative target to the side.
 - **Native diagnostics bridge** — when VSCode reports Markdown problems, a small
   count badge appears in Keep and opens the native Problems view.
 - **Heading fold** — collapse/expand a heading's whole section.

@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.6.0
+<!-- head: a35bc6e -->
+
+- **Faster table filter selection** — invert the current selection, select
+  duplicated or unique values, and clear a column filter directly from the
+  filter menu.
+- **Workspace-root relative Markdown links** — links such as `/docs/guide.md`
+  now resolve from the current workspace root in Keep, with native absolute
+  paths retained as a compatibility fallback.
+
 ## 1.5.0
 <!-- head: 73d9eee -->
 
