@@ -4,7 +4,11 @@
 // whether pasted/typed text is treated as a diagram, and it's easy to get wrong
 // because DIAGRAM_HEADER is a /g regex (stateful lastIndex).
 import { describe, it, expect } from 'vitest'
-import { startsAsMermaid, peekMermaidSvg } from '../src/renderer/src/components/editor-mermaid.js'
+import {
+  startsAsMermaid,
+  peekMermaidSvg,
+  splitMermaidDiagrams
+} from '../src/renderer/src/components/editor-mermaid.js'
 
 describe('startsAsMermaid', () => {
   it('recognizes common diagram headers at the very start', () => {
@@ -43,5 +47,18 @@ describe('startsAsMermaid', () => {
 describe('peekMermaidSvg', () => {
   it('returns null for an uncached diagram (sync miss, no throw)', () => {
     expect(peekMermaidSvg('graph TD\nA-->B', 'light')).toBe(null)
+  })
+})
+
+describe('splitMermaidDiagrams', () => {
+  it('does not split header-like text inside labels', () => {
+    expect(splitMermaidDiagrams('flowchart TD\nA[sequenceDiagram] --> B[flowchart LR]')).toEqual([])
+  })
+
+  it('splits only when another diagram begins at a line start', () => {
+    expect(splitMermaidDiagrams('flowchart TD\nA-->B\nsequenceDiagram\nA->>B: hi')).toEqual([
+      'flowchart TD\nA-->B',
+      'sequenceDiagram\nA->>B: hi'
+    ])
   })
 })

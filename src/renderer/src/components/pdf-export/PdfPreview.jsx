@@ -150,9 +150,11 @@ export default function PdfPreview({ data, status, token, error, warnings, retry
           <button type="button" onClick={retry}>{t('pdf.retry')}</button>
         </div>
       )}
-      {(warnings?.resourceTimeout || warnings?.failedImages > 0) && (
+      {(warnings?.resourceTimeout || warnings?.failedImages > 0 || warnings?.unresolvedImages > 0) && (
         <div className="hm-pdf-preview-warning" role="status">
-          {t('pdf.resourceWarning', { n: warnings.failedImages || 0 })}
+          {t('pdf.resourceWarning', {
+            n: Number(warnings.failedImages || 0) + Number(warnings.unresolvedImages || 0)
+          })}
         </div>
       )}
     </section>

@@ -1,6 +1,7 @@
-export function preparePdfSource(html, title, typography = {}) {
+export function preparePdfSource(input, title, typography = {}) {
+  const source = typeof input === 'string' ? { html: input } : (input || {})
   const template = document.createElement('template')
-  template.innerHTML = String(html || '')
+  template.innerHTML = String(source.html || '')
 
   template.content.querySelectorAll('.katex').forEach((katex) => {
     const math = katex.querySelector('.katex-mathml math')
@@ -27,6 +28,7 @@ export function preparePdfSource(html, title, typography = {}) {
   return {
     html: template.innerHTML,
     headings,
+    images: Array.isArray(source.images) ? source.images : undefined,
     title: String(title || ''),
     typography
   }

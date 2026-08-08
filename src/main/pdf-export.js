@@ -1,4 +1,4 @@
-import { BrowserWindow, app, dialog, shell } from 'electron'
+import { BrowserWindow, app, dialog, shell, net } from 'electron'
 import { randomUUID } from 'node:crypto'
 import fs from 'node:fs/promises'
 import { join } from 'node:path'
@@ -10,6 +10,7 @@ import {
 import { exportTypographyCss } from '../shared/fonts.js'
 import { docLangAttr } from './helpers.js'
 import { createLatestTaskRunner } from './latest-task-runner.js'
+import { stagePdfImages } from './pdf-images.js'
 
 const RESOURCE_WAIT_MS = 12000
 const FONT_WAIT_MS = 1500
@@ -128,57 +129,73 @@ export function createPdfExportService({ getMainWindow }) {
   const render = async ({ source, options }, signal) => {
     validateSource(source)
     const page = resolvePdfPage(options)
-    const tempHtml = join(app.getPath('temp'), `easymarkdown-pdf-preview-${randomUUID()}.html`)
-    await fs.writeFile(
-      tempHtml,
-      buildPdfDocument(source, page, {
-        typographyCss: exportTypographyCss(source?.typography),
-        langAttr: docLangAttr(source?.html)
-      }),
-      'utf8'
-    )
-    if (signal.aborted) {
-      fs.unlink(tempHtml).catch(() => {})
-      throw new Error('PDF preview canceled')
-    }
-    const previewWindow = new BrowserWindow({
-      show: false,
-      webPreferences: {
-        contextIsolation: true,
-        nodeIntegration: false,
-        sandbox: true
-      }
-    })
+    const tempDir = join(app.getPath('temp'), `easymarkdown-pdf-preview-${randomUUID()}`)
+    const tempHtml = join(tempDir, 'index.html')
+    await fs.mkdir(tempDir, { recursive: true })
+    let previewWindow = null
+    let printing = false
     const abort = () => {
-      if (!previewWindow.isDestroyed()) previewWindow.destroy()
+      // printToPDF can reject before Chromium's native backend is ready again.
+      // Once printing starts, let it settle and discard the stale result.
+      if (!printing && previewWindow && !previewWindow.isDestroyed()) previewWindow.destroy()
     }
     signal.addEventListener('abort', abort, { once: true })
-    previewWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
     try {
+      const prepared = await stagePdfImages(source, {
+        assetsDir: tempDir,
+        fetchImpl: (url, init) => net.fetch(url, init),
+        signal
+      })
+      await fs.writeFile(
+        tempHtml,
+        buildPdfDocument(prepared.source, page, {
+          typographyCss: exportTypographyCss(source?.typography),
+          langAttr: docLangAttr(source?.html)
+        }),
+        'utf8'
+      )
+      if (signal.aborted) throw new Error('PDF preview canceled')
+      previewWindow = new BrowserWindow({
+        show: false,
+        webPreferences: {
+          contextIsolation: true,
+          nodeIntegration: false,
+          sandbox: true
+        }
+      })
+      previewWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
       await previewWindow.loadFile(tempHtml)
       const resources = await previewWindow.webContents.executeJavaScript(printableResourcesScript, true)
-      const pdf = await previewWindow.webContents.printToPDF({
-        printBackground: true,
-        pageSize: page.printPageSize,
-        scale: page.scale / 100,
-        pageRanges: page.pageRanges,
-        preferCSSPageSize: true,
-        generateTaggedPDF: page.generateOutline,
-        generateDocumentOutline: page.generateOutline,
-        ...buildPdfHeaderFooter(page)
-      })
+      printing = true
+      let pdf
+      try {
+        pdf = await previewWindow.webContents.printToPDF({
+          printBackground: true,
+          pageSize: page.printPageSize,
+          scale: page.scale / 100,
+          pageRanges: page.pageRanges,
+          preferCSSPageSize: true,
+          generateTaggedPDF: page.generateOutline,
+          generateDocumentOutline: page.generateOutline,
+          ...buildPdfHeaderFooter(page)
+        })
+      } finally {
+        printing = false
+      }
       return {
         pdf,
         warnings: {
           resourceTimeout: resources?.imageStatus === 'timeout',
           failedImages: Number(resources?.failedImages || 0),
-          wrappedMath: Number(resources?.wrappedMath || 0)
+          wrappedMath: Number(resources?.wrappedMath || 0),
+          stagedImages: Number(prepared.stagedImages || 0),
+          unresolvedImages: Number(prepared.unresolvedImages || 0)
         }
       }
     } finally {
       signal.removeEventListener('abort', abort)
-      if (!previewWindow.isDestroyed()) previewWindow.destroy()
-      fs.unlink(tempHtml).catch(() => {})
+      if (previewWindow && !previewWindow.isDestroyed()) previewWindow.destroy()
+      fs.rm(tempDir, { recursive: true, force: true }).catch(() => {})
     }
   }
 

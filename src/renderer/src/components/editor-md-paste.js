@@ -11,25 +11,23 @@
 //   (2) any strong Markdown block marker → parse the whole clipboard as Markdown.
 // Never takes over when pasting INTO a code block (append code there).
 import { Slice, Fragment } from '@milkdown/prose/model'
+import { startsAsMermaid } from './editor-mermaid.js'
+import { codeBlockAtDom } from './editor-codeblock-source.js'
 
-// Mermaid diagram-header detection (inlined so this module stays independent of
-// the mermaid renderer). A header is a direction-qualified flow/graph or a
-// standalone diagram keyword; the direction requirement avoids matching common
-// words (`graph`, `pie`) inside ordinary prose.
-const DIRECTIONS = '(?:TB|TD|BT|RL|LR)'
-const DIAGRAM_HEADER = new RegExp(
-  '(?:flowchart|graph)\\s+' + DIRECTIONS + '\\b' +
-    '|(?:sequenceDiagram|classDiagram|stateDiagram(?:-v2)?|erDiagram|gantt|journey|gitGraph|mindmap|timeline|quadrantChart|requirementDiagram|C4Context)(?=\\s|$)',
-  'gi'
-)
+// Accept either a complete fenced Mermaid block or raw Mermaid source. Header
+// detection is shared with the renderer so new diagram types stay in sync.
+const fencedMermaid = (text) => {
+  const normalized = String(text || '').replace(/\r\n?/g, '\n')
+  const match = normalized.match(/^(`{3,}|~{3,})[ \t]*mermaid[^\n]*\n([\s\S]*?)\n\1[ \t]*$/i)
+  return match ? match[2].replace(/\s+$/, '') : null
+}
 
-// Does `text` begin with a mermaid diagram header?
-function startsAsMermaid(text) {
-  const t = String(text || '').trim()
-  if (!t) return false
-  DIAGRAM_HEADER.lastIndex = 0
-  const m = DIAGRAM_HEADER.exec(t)
-  return !!m && m.index === 0
+const mermaidBody = (text) => {
+  const fenced = fencedMermaid(text)
+  if (fenced !== null) return fenced
+  return startsAsMermaid(text)
+    ? String(text || '').replace(/\r\n?/g, '\n').replace(/\s+$/, '')
+    : null
 }
 
 function looksLikeMarkdown(text) {
@@ -47,18 +45,44 @@ function looksLikeMarkdown(text) {
 export function attachMdPasteHandler(view, parse, canEdit = () => true) {
   const onPaste = (event) => {
     if (!canEdit()) return
-    // Pasting INTO a code block should append code, not restructure.
-    if (view.state.selection.$from.parent.type.name === 'code_block') return
     const text = event.clipboardData?.getData('text/plain') || ''
     if (!text) return
     const schema = view.state.schema
+    const pastedMermaid = mermaidBody(text)
+    const target = codeBlockAtDom(view, event.target.closest?.('.milkdown-code-block'))
+
+    // A second Mermaid paste belongs beside the current diagram. Handling this
+    // at the actual paste boundary avoids scanning labels for header-like text.
+    if (
+      pastedMermaid !== null &&
+      target &&
+      String(target.node.attrs.language || '').toLowerCase() === 'mermaid'
+    ) {
+      try {
+        const node = schema.nodes.code_block.create(
+          { language: 'mermaid' },
+          pastedMermaid ? schema.text(pastedMermaid) : null
+        )
+        const tr = target.node.textContent.trim()
+          ? view.state.tr.insert(target.pos + target.node.nodeSize, node)
+          : view.state.tr.replaceWith(target.pos, target.pos + target.node.nodeSize, node)
+        view.dispatch(tr.scrollIntoView())
+        event.preventDefault()
+        event.stopImmediatePropagation()
+      } catch {
+        // Fall back to CodeMirror's normal paste if the node view is tearing down.
+      }
+      return
+    }
+
+    // Other code blocks keep normal CodeMirror paste semantics.
+    if (target || view.state.selection.$from.parent.type.name === 'code_block') return
 
     let handled = false
-    if (startsAsMermaid(text)) {
-      const body = text.replace(/\s+$/, '')
+    if (pastedMermaid !== null) {
       const node = schema.nodes.code_block.create(
         { language: 'mermaid' },
-        body ? schema.text(body) : null
+        pastedMermaid ? schema.text(pastedMermaid) : null
       )
       handled = insert(view, Fragment.from(node))
     } else if (looksLikeMarkdown(text)) {

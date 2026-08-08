@@ -104,6 +104,11 @@ import {
   displayOffsetToSourceOffset
 } from './source-position.js'
 import {
+  preserveTextareaSourceEdit,
+  sourceOffsetFromTextareaOffset,
+  textareaOffsetFromSourceOffset
+} from './source-text-fidelity.js'
+import {
   pruneNavigationHistory,
   recordNavigationLocation,
   stepNavigationHistory
@@ -311,12 +316,14 @@ const SourceEditorPane = memo(function SourceEditorPane({
   const foldViewRef = useRef(foldView)
   const lineCountRef = useRef(lineCount)
   const collapsedKeysRef = useRef(collapsedKeys)
+  const displayedValueRef = useRef(displayedValue)
   valueRef.current = value
   hasFoldsRef.current = hasFolds
   foldLinesRef.current = foldLines
   foldViewRef.current = foldView
   lineCountRef.current = lineCount
   collapsedKeysRef.current = collapsedKeys
+  displayedValueRef.current = displayedValue
   // Total line count regardless of regime (fold state derives it from the view).
   const totalLines = useCallback(
     () =>
@@ -356,12 +363,16 @@ const SourceEditorPane = memo(function SourceEditorPane({
   )
 
   const fullOffsetFromDisplay = useCallback((displayOffset) => {
-    if (!hasFoldsRef.current || !foldViewRef.current) return displayOffset
+    const rawDisplayOffset = sourceOffsetFromTextareaOffset(
+      String(displayedValueRef.current ?? ''),
+      displayOffset
+    )
+    if (!hasFoldsRef.current || !foldViewRef.current) return rawDisplayOffset
     return displayOffsetToSourceOffset(
       fullLinesNow(),
       foldViewRef.current.displayLines,
       foldViewRef.current.visibleMap,
-      displayOffset
+      rawDisplayOffset
     )
   }, [fullLinesNow])
 
@@ -369,7 +380,9 @@ const SourceEditorPane = memo(function SourceEditorPane({
     const lines = fullLinesNow()
     const full = lines.join('\n')
     const { line } = lineColumnAtOffset(full, rawOffset)
-    if (!hasFoldsRef.current || !foldViewRef.current) return rawOffset
+    if (!hasFoldsRef.current || !foldViewRef.current) {
+      return textareaOffsetFromSourceOffset(String(valueRef.current ?? ''), rawOffset)
+    }
     const hiddenBy = foldViewRef.current.hiddenByLine.get(line)
     if (hiddenBy?.length) {
       if (expand) {
@@ -381,11 +394,15 @@ const SourceEditorPane = memo(function SourceEditorPane({
       }
       return null
     }
-    return sourceOffsetToDisplayOffset(
+    const rawDisplayOffset = sourceOffsetToDisplayOffset(
       lines,
       foldViewRef.current.displayLines,
       foldViewRef.current.visibleMap,
       rawOffset
+    )
+    return textareaOffsetFromSourceOffset(
+      String(displayedValueRef.current ?? ''),
+      rawDisplayOffset
     )
   }, [fullLinesNow])
 
@@ -451,8 +468,14 @@ const SourceEditorPane = memo(function SourceEditorPane({
         lineText = all[row] || ''
       }
       if (commit) {
+        const displayedRaw = String(displayedValueRef.current ?? '')
+        const displayStart = textareaOffsetFromSourceOffset(displayedRaw, off)
+        const displayEnd = textareaOffsetFromSourceOffset(
+          displayedRaw,
+          off + lineText.replace(/\r$/, '').length
+        )
         el.focus()
-        el.setSelectionRange(off, off + lineText.length)
+        el.setSelectionRange(displayStart, displayEnd)
       }
       const cs = getComputedStyle(el)
       const lh = parseFloat(cs.lineHeight) || parseFloat(cs.fontSize) * 1.5 || 20
@@ -527,6 +550,7 @@ const SourceEditorPane = memo(function SourceEditorPane({
     const end = fullOffsetFromDisplay(el.selectionEnd)
     const insert = String(markdown ?? '').replace(/\r?\n/g, full.includes('\r\n') ? '\r\n' : '\n')
     const next = full.slice(0, start) + insert + full.slice(end)
+    valueRef.current = next
     pendingCaretRef.current = start + insert.length
     if (hasFoldsRef.current) setCollapsedKeys(new Set())
     markInteraction('edit')
@@ -636,19 +660,28 @@ const SourceEditorPane = memo(function SourceEditorPane({
   const handleChange = useCallback((e) => {
     markInteraction('edit')
     if (!collapsedKeysRef.current.size) {
-      onChange(e)
+      const next = preserveTextareaSourceEdit(valueRef.current, e.target.value)
+      valueRef.current = next
+      displayedValueRef.current = next
+      onChange({ target: { value: next } })
       return
     }
     // Folds active: the textarea edits the derived view; patch it back into the
     // full text. foldLines/foldView are computed synchronously in this regime,
     // so the patch base can never be stale.
     const fv = foldViewRef.current
+    const nextDisplayed = preserveTextareaSourceEdit(
+      displayedValueRef.current,
+      e.target.value
+    )
     const nextContent = patchFoldedSourceLines(
       foldLinesRef.current,
       fv.displayLines,
-      e.target.value.split('\n'),
+      nextDisplayed.split('\n'),
       fv.visibleMap
     )
+    valueRef.current = nextContent
+    displayedValueRef.current = nextDisplayed
     onChange({ target: { value: nextContent } })
   }, [markInteraction, onChange])
 
@@ -3132,35 +3165,58 @@ export default function App() {
   const onCloseLeftTabs = useCallback((id) => closeSide(id, 'left'), [closeSide])
   const onCloseRightTabs = useCallback((id) => closeSide(id, 'right'), [closeSide])
 
+  const flushTabMarkdown = useCallback((id) => {
+    const tab = tabsRef.current.find((item) => item.id === id)
+    if (!tab) return null
+    // A source pane remains mounted beside/over the rich editor. Its raw text is
+    // authoritative while active; serializing the hidden Milkdown document here
+    // would overwrite a just-made CRLF/BOM-preserving source edit.
+    let markdown
+    if (sourceModeIdsRef.current.has(id)) {
+      const source = sourceRef.current
+      const sourceId = source?.closest?.('.source-editor-wrap')?.dataset?.tabId
+      markdown = sourceId === id ? source.__hmSourceApi?.getFullValue?.() : null
+    } else {
+      markdown = editorApis.current[id]?.flushMarkdown?.({ force: true })
+    }
+    if (typeof markdown !== 'string' || markdown === tab.content) return tab
+    const updated = { ...tab, content: markdown }
+    const next = tabsRef.current.map((item) => item.id === id ? updated : item)
+    tabsRef.current = next
+    setTabs(next)
+    return updated
+  }, [])
+
   const writeTab = useCallback(async (tab, targetPath, { notify = true } = {}) => {
     try {
+      const liveTab = flushTabMarkdown(tab.id) || tab
       // Move pasted images (base64 blobs / global paste-folder files) into the
       // doc's ./assets and rewrite links to relative paths, so the saved file is
       // clean and portable (Typora-style). No-op when there are none / on mobile.
       const { content: written, changed } = window.api.inlineForSave
-        ? await window.api.inlineForSave(tab.content, targetPath)
-        : { content: tab.content, changed: false }
+        ? await window.api.inlineForSave(liveTab.content, targetPath)
+        : { content: liveTab.content, changed: false }
       const { mtimeMs } = await window.api.writeFile(targetPath, written)
       if (
         settings.localHistory &&
         window.api.localHistoryAdd &&
-        tab.path &&
-        tab.path.replace(/\\/g, '/') === targetPath.replace(/\\/g, '/') &&
-        tab.savedContent !== written
+        liveTab.path &&
+        liveTab.path.replace(/\\/g, '/') === targetPath.replace(/\\/g, '/') &&
+        liveTab.savedContent !== written
       ) {
         try {
           await window.api.localHistoryAdd({
             path: targetPath,
-            content: tab.savedContent,
+            content: liveTab.savedContent,
             reason: notify ? 'manual' : 'autosave'
           })
         } catch {
           /* saving succeeded; local history is best-effort and must not fail it */
         }
       }
-      setTabs((prev) =>
-        prev.map((t) =>
-          t.id === tab.id
+      setTabs((prev) => {
+        const next = prev.map((t) =>
+          t.id === liveTab.id
             ? changed
               ? // Images were moved to assets/: adopt the rewritten content and
                 // remount the editor so it shows the relative-path images.
@@ -3174,10 +3230,12 @@ export default function App() {
                   reloadNonce: t.reloadNonce + 1,
                   conflict: null
                 }
-              : { ...t, path: targetPath, title: baseName(targetPath), savedContent: t.content, mtimeMs, conflict: null }
+              : { ...t, path: targetPath, title: baseName(targetPath), savedContent: written, mtimeMs, conflict: null }
             : t
         )
-      )
+        tabsRef.current = next
+        return next
+      })
       setRefreshNonce((n) => n + 1)
       // On mobile, where files land in a system folder, confirm what + where —
       // sticky so the user can read the location before dismissing it.
@@ -3200,11 +3258,11 @@ export default function App() {
       fireToast(tRef.current('save.failed', { msg: e?.message || String(e) }), { sticky: true, kind: 'error' })
       return false
     }
-  }, [isMobile, settings.localHistory])
+  }, [flushTabMarkdown, isMobile, settings.localHistory])
 
   const saveTab = useCallback(
     async (id, forceDialog = false, opts) => {
-      const tab = tabs.find((t) => t.id === id)
+      const tab = tabsRef.current.find((t) => t.id === id)
       if (!tab) return false
       let target = tab.path
       if (!target || forceDialog) {
@@ -3220,7 +3278,7 @@ export default function App() {
       }
       return writeTab(tab, target, opts)
     },
-    [tabs, writeTab, isMobile]
+    [writeTab, isMobile]
   )
 
   // ── Autosave (opt-in) ──
@@ -3364,7 +3422,8 @@ export default function App() {
     })
   }, [])
 
-  const openPdfStudio = useCallback((tab, html) => {
+  const openPdfStudio = useCallback((tab, snapshot) => {
+    const html = typeof snapshot === 'string' ? snapshot : snapshot?.html
     if (!tab || !html || !window.api.capabilities?.pdfExport) {
       window.alert(tRef.current('error.exportPdfUnavailable'))
       return false
@@ -3373,7 +3432,7 @@ export default function App() {
     setPdfSaveError('')
     setPdfSaving(false)
     setPdfRequest({
-      source: preparePdfSource(html, base, {
+      source: preparePdfSource(snapshot, base, {
         fontWriteEn: settings.fontWriteEn,
         fontWriteZh: settings.fontWriteZh,
         fontWriteJa: settings.fontWriteJa,
@@ -3392,12 +3451,14 @@ export default function App() {
       const tab = tabsRef.current.find((t) => (t.path || '').replace(/\\/g, '/') === norm)
       if (!tab) return
       const api = await waitForEditorApi(tab.id)
-      const html = api?.getDocHTML?.()
-      if (!html) {
+      const snapshot = api?.getPdfSource
+        ? await api.getPdfSource()
+        : await api?.getDocHTML?.()
+      if (!(typeof snapshot === 'string' ? snapshot : snapshot?.html)) {
         window.alert(tRef.current('error.exportPdfUnavailable'))
         return
       }
-      openPdfStudio(tab, html)
+      openPdfStudio(tab, snapshot)
     },
     [openPaths, openPdfStudio, waitForEditorApi]
   )
@@ -4308,17 +4369,20 @@ export default function App() {
     },
     exportPdf: async () => {
       const id = pickEditableId()
-      const html = editorApis.current[id]?.getDocHTML?.()
-      if (!html) {
+      const api = editorApis.current[id]
+      const snapshot = api?.getPdfSource
+        ? await api.getPdfSource()
+        : await api?.getDocHTML?.()
+      if (!(typeof snapshot === 'string' ? snapshot : snapshot?.html)) {
         window.alert(tRef.current('error.exportPdfUnavailable'))
         return
       }
       const tab = tabs.find((x) => x.id === id)
-      openPdfStudio(tab, html)
+      openPdfStudio(tab, snapshot)
     },
     exportHtml: async () => {
       const id = pickEditableId()
-      const html = editorApis.current[id]?.getDocHTML?.()
+      const html = await editorApis.current[id]?.getDocHTML?.()
       if (!html) {
         window.alert(tRef.current('error.exportPdfUnavailable'))
         return
@@ -4334,7 +4398,7 @@ export default function App() {
     },
     print: async () => {
       const id = pickEditableId()
-      const html = editorApis.current[id]?.getDocHTML?.()
+      const html = await editorApis.current[id]?.getDocHTML?.()
       if (!html) {
         window.alert(tRef.current('error.printUnavailable'))
         return

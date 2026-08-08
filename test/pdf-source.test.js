@@ -23,4 +23,13 @@ describe('preparePdfSource', () => {
     expect(source.html).not.toContain('visual duplicate')
     expect(source.html).toContain('<pre><code>a + b</code></pre>')
   })
+
+  it('retains structured image metadata for main-process staging', () => {
+    const images = [{ placeholder: 'horsemd-pdf-resource-0001', src: 'file:///tmp/a.png' }]
+    const source = preparePdfSource({
+      html: '<img src="horsemd-pdf-resource-0001">',
+      images
+    }, 'Images')
+    expect(source.images).toEqual(images)
+  })
 })

@@ -32,6 +32,7 @@ import {
 } from './markdown-links.js'
 import { canGrantLocalFonts, createLocalFontGrant } from './security.js'
 import { createPdfExportService } from './pdf-export.js'
+import { shouldCreateMainWindow } from './window-lifecycle.js'
 import { menuAccelerator, normalizeMenuKeybindings } from './menu-keybindings.js'
 import {
   DEFAULT_FONT_WRITE_EN,
@@ -147,6 +148,8 @@ const PDF_CSS = `
 
 let mainWindow = null
 const pdfExportService = createPdfExportService({ getMainWindow: () => mainWindow })
+const isTrustedRenderer = (event) =>
+  !!mainWindow && !mainWindow.isDestroyed() && event?.sender === mainWindow.webContents
 let localFontGrant = null
 // When true, the window is allowed to close without re-prompting (the renderer
 // has confirmed there are no unsaved changes, or the user chose to discard).
@@ -204,8 +207,20 @@ function extractArgs(argv) {
   return { files, folders }
 }
 
+function ensureMainWindow() {
+  if (shouldCreateMainWindow({
+    isReady: app.isReady(),
+    windowExists: !!mainWindow,
+    isDestroyed: !!mainWindow?.isDestroyed?.()
+  })) {
+    rendererReady = false
+    createWindow()
+  }
+  return mainWindow && !mainWindow.isDestroyed() ? mainWindow : null
+}
+
 function focusMainWindow() {
-  if (!mainWindow) return
+  if (!ensureMainWindow()) return
   if (mainWindow.isMinimized()) mainWindow.restore()
   // Calling show() on an already-visible Windows window can produce an extra
   // activation flash. focus() is sufficient in that state.
@@ -237,7 +252,8 @@ function sendOpen(channel, payload) {
     pendingOpens.push([channel, payload])
   }
 }
-ipcMain.on('app:renderer-ready', () => {
+ipcMain.on('app:renderer-ready', (event) => {
+  if (!mainWindow || event?.sender !== mainWindow.webContents) return
   rendererReady = true
   for (const [channel, payload] of pendingOpens.splice(0)) sendToRenderer(channel, payload)
 })
@@ -266,12 +282,14 @@ ipcMain.on('app:open-presented', (event, requestId) => {
 // to the requested document; a plain second launch still focuses immediately.
 export function handleSecondInstance(argv) {
   const { files, folders } = extractArgs(argv)
+  ensureMainWindow()
   if (folders.length) sendOpen('open-folder', folders[0])
   if (files.length) sendOpenPathsThenFocus(files)
   else focusMainWindow()
 }
 
 export function handleOpenFile(path) {
+  ensureMainWindow()
   sendOpenPathsThenFocus([path])
 }
 
@@ -420,6 +438,7 @@ function createWindow() {
   mainWindow.on('closed', () => {
     for (const timer of pendingPresentedFocus.values()) clearTimeout(timer)
     pendingPresentedFocus.clear()
+    rendererReady = false
     mainWindow = null
   })
 }
@@ -445,9 +464,7 @@ app.whenReady().then(() => {
     allowLocalFonts(webContents, permission, details?.requestingUrl || requestingOrigin, details?.isMainFrame)
   )
   createWindow()
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow()
-  })
+  app.on('activate', focusMainWindow)
 })
 
 // A real quit is starting (Cmd/Ctrl+Q, menu Quit, app.quit()). Mark it so the
@@ -495,11 +512,15 @@ ipcMain.handle('dialog:saveAs', async (_e, defaultName) => {
 })
 
 ipcMain.handle('pdf:preview', (event, payload) =>
-  pdfExportService.createPreview(event, payload))
+  isTrustedRenderer(event)
+    ? pdfExportService.createPreview(event, payload)
+    : { ok: false, error: 'Untrusted renderer.' })
 ipcMain.handle('pdf:save-preview', (event, payload) =>
-  pdfExportService.savePreview(event, payload))
+  isTrustedRenderer(event)
+    ? pdfExportService.savePreview(event, payload)
+    : { ok: false, error: 'Untrusted renderer.' })
 ipcMain.handle('pdf:dispose-preview', (event, token) =>
-  pdfExportService.disposePreview(event, token))
+  isTrustedRenderer(event) && pdfExportService.disposePreview(event, token))
 
 // Export the current document as a self-contained .html file: same inline-
 // styled snapshot the PDF pipeline uses, wrapped in a standalone page with the
@@ -542,7 +563,8 @@ async function inlineFileImages(html) {
 const escapeHtml = (s) =>
   String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c])
 
-ipcMain.handle('export:html', async (_e, { html, defaultName, title, typography }) => {
+ipcMain.handle('export:html', async (event, { html, defaultName, title, typography }) => {
+  if (!isTrustedRenderer(event)) return { ok: false, error: 'Untrusted renderer.' }
   const res = await dialog.showSaveDialog(mainWindow, {
     defaultPath: defaultName || 'Untitled.html',
     filters: [{ name: 'HTML', extensions: ['html'] }]
@@ -878,7 +900,8 @@ ipcMain.handle('markdown-links:rename-file', async (_e, payload = {}) => {
 // Print the current document via the system print dialog. Same hidden-window
 // rendering pipeline as export:pdf, but ends in webContents.print() so the
 // user picks a printer / paper / copies natively.
-ipcMain.handle('print:html', async (_e, { html, typography }) => {
+ipcMain.handle('print:html', async (event, { html, typography }) => {
+  if (!isTrustedRenderer(event)) return { ok: false, error: 'Untrusted renderer.' }
   const doc = `<!doctype html><html><head><meta charset="utf-8"><style>${PDF_CSS}${exportTypographyCss(typography)}</style></head><body><div class="doc"${docLangAttr(html)}>${html}</div></body></html>`
   const tmp = join(app.getPath('temp'), `easymarkdown-print-${Date.now()}.html`)
   await fs.writeFile(tmp, doc, 'utf8')

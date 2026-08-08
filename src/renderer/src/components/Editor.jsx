@@ -9,7 +9,8 @@ import {
   prosePluginsCtx,
   remarkCtx,
   remarkPluginsCtx,
-  remarkStringifyOptionsCtx
+  remarkStringifyOptionsCtx,
+  serializerCtx
 } from '@milkdown/kit/core'
 import { replaceAll } from '@milkdown/kit/utils'
 import { imageBlockConfig } from '@milkdown/kit/component/image-block'
@@ -24,11 +25,17 @@ import '@milkdown/crepe/theme/common/link-tooltip.css'
 import { BLOCK_TYPES, blockById, currentBlockId } from '../blocks.js'
 import { detectDocLang } from '../keep-parser.js'
 import { useI18n } from '../i18n.jsx'
-import { fireToast } from '../ui.js'
+import { copyToClipboard } from '../ui.js'
 import { renderHtmlNodeView, convertBlock, mergeInlineHtmlRemarkPlugin } from './editor-html.js'
 import { dirOf, isRelativePath, resolveToFileUrl, uniqueImageName } from './editor-images.js'
 import { inlineRichStyles } from './editor-copy.js'
-import { createMermaidPreviewRenderer, createMermaidSplitPlugin } from './editor-mermaid.js'
+import {
+  createMermaidPreviewRenderer,
+  createMermaidSplitPlugin,
+  refreshMermaidPreviewFromCodeBlock
+} from './editor-mermaid.js'
+import { readCodeBlockSource } from './editor-codeblock-source.js'
+import { createEditorSnapshot } from './editor-pdf-content.js'
 import { tableBreakKeymap, tableCellBreakHandler, brToBreakRemarkPlugin } from './editor-tablebreak.js'
 import { normalizeEmptyTableCells } from './editor-table-markdown.js'
 import { attachMdPasteHandler } from './editor-md-paste.js'
@@ -176,6 +183,8 @@ function Editor({
   const { t } = useI18n()
   const tRef = useRef(t)
   tRef.current = t
+  const onChangeRef = useRef(onChange)
+  onChangeRef.current = onChange
   const onOpenDocLinkRef = useRef(onOpenDocLink)
   onOpenDocLinkRef.current = onOpenDocLink
   const docPathRef = useRef(docPath)
@@ -1081,12 +1090,42 @@ function Editor({
         // Crepe copies to the clipboard itself but gives no visible feedback, so
         // a click feels unresponsive. We add a transient .hm-copied class (CSS
         // turns the label green with a ✓) and fire a global toast.
-        const onCopyBtn = (e) => {
+        const onCopyBtn = async (e) => {
           const btn = e.target.closest?.('.copy-button')
           if (!btn || !view.dom.contains(btn)) return
+          const block = btn.closest('.milkdown-code-block')
+          const source = readCodeBlockSource(view, block)
+          if (!block || source === '') return
+          e.preventDefault()
+          e.stopImmediatePropagation()
+          if (!await copyToClipboard(source, tRef.current('code.copied'))) return
           btn.classList.add('hm-copied')
           setTimeout(() => btn.classList.remove('hm-copied'), 1100)
-          fireToast(tRef.current('code.copied'))
+        }
+
+        let taskFlushTimer = 0
+        const flushLiveMarkdown = () => {
+          try {
+            const serialized = normalizeEmptyTableCells(
+              crepe.editor.ctx.get(serializerCtx)(view.state.doc)
+            )
+            mappingMarkdownRef.current = serialized
+            onChangeRef.current?.(serialized, false)
+            syncDocLang(serialized)
+            return serialized
+          } catch {
+            return null
+          }
+        }
+        const onTaskPointerDown = (e) => {
+          if (!e.target.closest?.('.label-wrapper, input[type="checkbox"]')) return
+          clearTimeout(taskFlushTimer)
+          taskFlushTimer = setTimeout(flushLiveMarkdown, 0)
+        }
+        const onMermaidCodeInput = (e) => {
+          const block = e.target.closest?.('.milkdown-code-block')
+          if (!block) return
+          setTimeout(() => refreshMermaidPreviewFromCodeBlock(block, view), 0)
         }
 
         const onEmbedZoom = (e) => {
@@ -1119,6 +1158,8 @@ function Editor({
         view.dom.addEventListener('click', onEmbedZoom, true)
         view.dom.addEventListener('click', onCaptionBtn)
         view.dom.addEventListener('click', onCopyBtn, true)
+        view.dom.addEventListener('pointerdown', onTaskPointerDown, true)
+        view.dom.addEventListener('input', onMermaidCodeInput, true)
         view.dom.addEventListener('copy', onCopy, true)
         view.dom.addEventListener('paste', onPasteImage, true)
         view.dom.addEventListener('drop', onDropImage, true)
@@ -1128,10 +1169,13 @@ function Editor({
         cleanups.push(() => view.dom.removeEventListener('click', onEmbedZoom, true))
         cleanups.push(() => view.dom.removeEventListener('click', onCaptionBtn))
         cleanups.push(() => view.dom.removeEventListener('click', onCopyBtn, true))
+        cleanups.push(() => view.dom.removeEventListener('pointerdown', onTaskPointerDown, true))
+        cleanups.push(() => view.dom.removeEventListener('input', onMermaidCodeInput, true))
         cleanups.push(() => view.dom.removeEventListener('copy', onCopy, true))
         cleanups.push(() => view.dom.removeEventListener('paste', onPasteImage, true))
         cleanups.push(() => view.dom.removeEventListener('drop', onDropImage, true))
         cleanups.push(() => {
+          clearTimeout(taskFlushTimer)
           embedObserver.disconnect()
           if (embedRaf) cancelAnimationFrame(embedRaf)
         })
@@ -1396,82 +1440,37 @@ function Editor({
         // Produce a clean, inline-styled HTML snapshot of the whole document
         // for PDF export (reuses the rich-copy styling; flattens CodeMirror code
         // blocks to plain <pre><code> so they render predictably).
-        const getDocHTML = () => {
+        const getDocHTML = async () => {
           const v = viewRef.current
           if (!v) return ''
-          const clone = v.dom.cloneNode(true)
-          // Drop editor-only widgets so they don't end up in the PDF: code-block
-          // toolbar (language picker + Copy), table handles/add/align/delete
-          // buttons, block/drag handles, image resize handles, and the custom
-          // list-item bullet labels (native list markers render instead).
-          clone
-            .querySelectorAll(
-              'button, select, .language-picker, .language-list, .tools, ' +
-                '.tools-button-group, .button-group, .cm-panel, .cm-tooltip, ' +
-                '.preview-panel, .cell-handle, .line-handle, .handle, .add-button, ' +
-                '.operation, .operation-item, .drag-preview, .milkdown-block-handle, ' +
-                '.milkdown-toolbar, .image-resize-handle, .label-wrapper'
-            )
-            .forEach((el) => el.remove())
-          // Mermaid: the rendered diagram lives in a `.hm-mermaid-preview` widget
-          // right after its source code block. For the PDF we want the DIAGRAM, not
-          // the ```mermaid source — so when a preview holds a finished <svg>, drop
-          // the source block; if it never rendered (still a hint / an error), keep
-          // the source instead and drop the placeholder.
-          clone.querySelectorAll('.hm-mermaid-preview').forEach((prev) => {
-            const svg = prev.querySelector('svg')
-            const src = prev.previousElementSibling
-            if (svg) {
-              if (src && (src.matches?.('.milkdown-code-block') || src.querySelector?.('.cm-editor'))) {
-                src.remove()
-              }
-            } else {
-              prev.remove()
-            }
-          })
-          // Flatten CodeMirror editors to plain <pre><code>.
-          clone.querySelectorAll('.cm-editor').forEach((cm) => {
-            const lines = [...cm.querySelectorAll('.cm-line')].map((l) => l.textContent)
-            const pre = document.createElement('pre')
-            const code = document.createElement('code')
-            code.textContent = (lines.length ? lines.join('\n') : cm.textContent).replace(/\n+$/, '')
-            pre.appendChild(code)
-            cm.replaceWith(pre)
-          })
-          // KaTeX duplicates every formula as visual HTML and semantic MathML.
-          // Printing both produces doubled formulas, while printing only the
-          // visual layer can lose glyphs in a hidden export window. Keep the
-          // self-contained MathML representation and preserve block display.
-          clone.querySelectorAll('.katex').forEach((katex) => {
-            const math = katex.querySelector('.katex-mathml math')?.cloneNode(true)
-            if (!math) return
-            if (katex.closest('.katex-display')) math.setAttribute('display', 'block')
-            katex.replaceWith(math)
-          })
-          // Strip editor-only attributes but keep semantic tags + src/href/alt,
-          // so the print stylesheet (in the main process) fully controls the look.
-          clone.querySelectorAll('*').forEach((el) => {
-            // Leave the mermaid <svg> subtree untouched — its class/style/viewBox
-            // carry the diagram's geometry and colors; stripping them blanks it.
-            if (el.closest('svg')) return
-            // Front matter uses these hooks in the print stylesheet; its source
-            // must remain visible even though the rich editor wraps it in UI.
-            const isFrontmatter = !!el.closest('.hm-frontmatter-wrap, .hm-frontmatter')
-            if (!isFrontmatter) el.removeAttribute('class')
-            el.removeAttribute('style')
-            el.removeAttribute('contenteditable')
-            ;[...el.attributes].forEach((a) => {
-              if (a.name.startsWith('data-') || a.name.startsWith('aria-')) el.removeAttribute(a.name)
-            })
-          })
-          return clone.innerHTML
+          const snapshot = await createEditorSnapshot(v)
+          if (typeof snapshot === 'string') return snapshot
+          return ''
         }
-        const getMarkdown = () => {
+        const serializeCurrentDocument = () => {
+          try {
+            const v = viewRef.current
+            if (v) {
+              return normalizeEmptyTableCells(
+                crepe.editor.ctx.get(serializerCtx)(v.state.doc)
+              )
+            }
+          } catch {
+            // Fall through to Crepe's cached snapshot during teardown.
+          }
           try {
             return normalizeEmptyTableCells(crepe.getMarkdown())
           } catch {
             return ''
           }
+        }
+        const getMarkdown = () => serializeCurrentDocument()
+        const flushMarkdown = ({ force = false } = {}) => {
+          if (destroyed || !crepeRef.current) return null
+          const serialized = serializeCurrentDocument()
+          if (!force && serialized === mappingMarkdownRef.current) return mappingMarkdownRef.current
+          mappingMarkdownRef.current = serialized
+          return serialized
         }
         const replaceMarkdown = (markdown) => {
           if (destroyed || readOnlyRef.current || !crepeRef.current) return false
@@ -1608,7 +1607,9 @@ function Editor({
           applyTextFormat,
           getView: () => viewRef.current,
           getDocHTML,
+          getPdfSource: () => createEditorSnapshot(viewRef.current, { stageImages: true }),
           getMarkdown,
+          flushMarkdown,
           getScroller: () => viewRef.current?.dom.closest('.editor-scroll') || null,
           replaceMarkdown,
           insertMarkdown,
