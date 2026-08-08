@@ -91,7 +91,7 @@ import {
   sessionSnapshotEqual, MD_DOC_RE,
   rememberRecent, removeRecentPath, clearUnpinnedRecents, toggleRecentPinned,
   reorderTabsList, openPreviewTabInList, promotePreviewTabInList,
-  toggleTabPinnedInList, pathInWorkspace, workspaceRootForPath
+  toggleTabPinnedInList, pathInWorkspace, workspaceRootForPath, docLinkPathCandidates
 } from './paths.js'
 import {
   countSourceLines,
@@ -148,18 +148,6 @@ const OUTLINE_HEADING_SELECTOR = [
   '.km-doc h6'
 ].join(', ')
 
-// Resolve a relative link path against a base directory (handles ./ and ../).
-function resolveRelPath(dir, rel) {
-  const base = (dir || '').replace(/\\/g, '/').replace(/\/+$/, '')
-  const parts = base ? base.split('/') : []
-  rel.replace(/\\/g, '/').split('/').forEach((seg) => {
-    if (seg === '' || seg === '.') return
-    if (seg === '..') parts.pop()
-    else parts.push(seg)
-  })
-  return parts.join('/')
-}
-
 const escapeRegExp = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 // Heading-anchor slug, Typora/GitHub-ish: trim, spaces→'-', drop punctuation.
 const slugifyAnchor = (s) =>
@@ -214,7 +202,7 @@ function markdownContextAtOffset(content, rawOffset) {
   }
 }
 
-function resolveReferenceTarget(tab, context) {
+function resolveReferenceTarget(tab, context, workspaces = []) {
   if (!tab?.path || !context) return null
   if (context.type === 'heading') {
     const explicit = String(context.text || '').match(/\s*\{#([^}\s]+)\}\s*$/)?.[1]
@@ -237,9 +225,8 @@ function resolveReferenceTarget(tab, context) {
   let targetPath = tab.path
   if (rawPath) {
     const decoded = safeDecodeURIComponent(rawPath)
-    targetPath = isAbsolutePath(decoded)
-      ? decoded
-      : resolveRelPath(dirName(tab.path), decoded)
+    targetPath = docLinkPathCandidates(decoded, tab.path, workspaces)[0]
+    if (!targetPath) return null
     if (!/\.[a-z0-9]+$/i.test(targetPath)) targetPath += '.md'
   }
   return {
@@ -1586,7 +1573,8 @@ export default function App() {
     try {
       const result = await window.api.diagnoseMarkdownLinks?.({
         docPath: tab.path,
-        content: tab.content
+        content: tab.content,
+        workspaceRoots: workspacesRef.current.map((workspace) => workspace.rootPath)
       })
       if (generation !== linkDiagnosisGenerationRef.current) return []
       const problems = result?.problems || []
@@ -1647,7 +1635,7 @@ export default function App() {
   const findMarkdownReferencesForContext = useCallback(async (context = null) => {
     const tab = tabsRef.current.find((item) => item.id === activeIdRef.current)
     const actualContext = context || currentReferenceContext()
-    const target = resolveReferenceTarget(tab, actualContext)
+    const target = resolveReferenceTarget(tab, actualContext, workspacesRef.current)
     if (!target?.targetPath) {
       fireToast(tRef.current('links.noReferenceTarget'), { sticky: true })
       return
@@ -1669,6 +1657,7 @@ export default function App() {
       const roots = markdownLinkRootsForPath(target.targetPath)
       const result = await window.api.findMarkdownReferences?.({
         roots,
+        workspaceRoots: workspacesRef.current.map((workspace) => workspace.rootPath),
         targetPath: target.targetPath,
         anchor: target.anchor,
         overrides: openMarkdownOverrides(roots),
@@ -1764,6 +1753,7 @@ export default function App() {
     try {
       const plan = await window.api.planHeadingRename?.({
         roots: markdownLinkRootsForPath(state.path),
+        workspaceRoots: workspacesRef.current.map((workspace) => workspace.rootPath),
         targetPath: state.path,
         line: state.line,
         newHeading,
@@ -2849,6 +2839,7 @@ export default function App() {
   }) => {
     const plan = await window.api.planFileRename?.({
       roots: markdownLinkRootsForPath(oldPath),
+      workspaceRoots: workspacesRef.current.map((workspace) => workspace.rootPath),
       oldPath,
       newPath,
       showHidden: settings.showHiddenFiles
@@ -5901,14 +5892,24 @@ export default function App() {
       let targetTab = tabsRef.current.find((t) => t.id === sourceTabId) || null
       if (relPath) {
         const p = relPath.replace(/\\/g, '/')
-        targetPath = isAbsolutePath(p) ? p : resolveRelPath(dirName(base), p)
+        const candidates = docLinkPathCandidates(p, base, workspacesRef.current)
         // Only markdown opens in-app; extensionless links are treated as `.md`
-        // (wiki-style). Other file types are out of scope (ignored).
-        let openable = null
-        if (MD_DOC_RE.test(targetPath)) openable = targetPath
-        else if (!/\.[a-z0-9]+$/i.test(targetPath)) openable = targetPath + '.md'
-        if (!openable) return
-        targetPath = openable
+        // (wiki-style). Other file types are out of scope (ignored). A
+        // workspace-root candidate is preferred, while an existing native
+        // absolute target remains a compatibility fallback on POSIX.
+        const openableCandidates = candidates.map((candidate) => {
+          if (MD_DOC_RE.test(candidate)) return candidate
+          if (!/\.[a-z0-9]+$/i.test(candidate)) return candidate + '.md'
+          return null
+        }).filter(Boolean)
+        if (!openableCandidates.length) return
+        targetPath = openableCandidates[0]
+        for (const candidate of openableCandidates) {
+          if (await window.api.pathExists?.(candidate)) {
+            targetPath = candidate
+            break
+          }
+        }
         const already = tabsRef.current.find(
           (t) => (t.path || '').replace(/\\/g, '/') === targetPath.replace(/\\/g, '/')
         )

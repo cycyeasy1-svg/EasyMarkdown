@@ -687,6 +687,10 @@ const LINK_INDEX_MAX_FILES = 5000
 const LINK_INDEX_MAX_FILE_BYTES = 1024 * 1024
 const LINK_INDEX_MAX_DEPTH = 12
 
+const markdownWorkspaceRoots = (payload = {}) =>
+  [...new Set(Array.isArray(payload.workspaceRoots) ? payload.workspaceRoots : [])]
+    .filter((root) => typeof root === 'string' && !isRestrictedRoot(root))
+
 async function readMarkdownWorkspaceFiles(roots, options = {}) {
   const files = []
   const seen = new Set()
@@ -762,6 +766,7 @@ ipcMain.handle('markdown-links:diagnose', async (_e, payload = {}) => {
   const problems = await diagnoseMarkdownContent({
     docPath,
     content,
+    workspaceRoots: markdownWorkspaceRoots(payload),
     exists: async (path) => {
       try {
         return (await fs.stat(path)).isFile()
@@ -783,7 +788,9 @@ ipcMain.handle('markdown-links:references', async (_e, payload = {}) => {
     overrides: payload.overrides
   })
   return {
-    groups: findMarkdownReferences(indexed.files, targetPath, String(payload.anchor || '')),
+    groups: findMarkdownReferences(indexed.files, targetPath, String(payload.anchor || ''), {
+      workspaceRoots: markdownWorkspaceRoots(payload)
+    }),
     filesScanned: indexed.filesScanned,
     truncated: indexed.truncated,
     error: ''
@@ -803,7 +810,8 @@ ipcMain.handle('markdown-links:plan-heading-rename', async (_e, payload = {}) =>
       indexed.files,
       targetPath,
       payload.line,
-      payload.newHeading
+      payload.newHeading,
+      { workspaceRoots: markdownWorkspaceRoots(payload) }
     ),
     filesScanned: indexed.filesScanned,
     truncated: indexed.truncated
@@ -820,7 +828,9 @@ ipcMain.handle('markdown-links:plan-file-rename', async (_e, payload = {}) => {
     overrides: payload.overrides
   })
   return {
-    ...createFileRenamePlan(indexed.files, oldPath, newPath),
+    ...createFileRenamePlan(indexed.files, oldPath, newPath, {
+      workspaceRoots: markdownWorkspaceRoots(payload)
+    }),
     filesScanned: indexed.filesScanned,
     truncated: indexed.truncated
   }
@@ -936,6 +946,14 @@ ipcMain.handle('fs:readFile', async (_e, path) => {
   const content = await fs.readFile(path, 'utf8')
   const stat = await fs.stat(path)
   return { content, mtimeMs: stat.mtimeMs }
+})
+
+ipcMain.handle('fs:pathExists', async (_e, path) => {
+  try {
+    return (await fs.stat(path)).isFile()
+  } catch {
+    return false
+  }
 })
 
 ipcMain.handle('fs:writeFile', async (_e, path, content) => {

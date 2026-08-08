@@ -1,5 +1,6 @@
 const vscode = require('vscode')
 const { isSplitScrollPeer } = require('./scrollSync')
+const { parseWorkspaceRootLink } = require('./linkPath')
 // Pure filename sanitizer shared with the desktop app's image:save IPC — same
 // naming convention for pasted images on both sides.
 const {
@@ -362,8 +363,8 @@ class KeepEditorProvider {
   }
 
   /**
-   * Open a document-relative link from the webview: `guide/setup.md#install`,
-   * `../notes.md`, `./spec.pdf`, … Resolved against the document's folder. A
+   * Open a local link from the webview: ordinary relative paths resolve against
+   * the document folder; `/docs/guide.md` prefers the containing workspace root. A
    * markdown target honors the user's preferred mode (the tab watcher reopens it
    * in keep mode when that's the preference); other files open with whatever
    * editor VSCode associates. A #fragment on the same document just scrolls; on
@@ -384,16 +385,42 @@ class KeepEditorProvider {
         if (fragment) webview.postMessage({ type: 'scrollToAnchor', slug: fragment })
         return
       }
-      const target = vscode.Uri.joinPath(document.uri, '..', ...rel.split(/[\\/]+/))
+      const workspaceLink = parseWorkspaceRootLink(rel)
+      if (workspaceLink && !workspaceLink.valid) {
+        vscode.window.showWarningMessage(`EasyMarkdown: invalid workspace-root link - ${rel}`)
+        return
+      }
+      const candidates = []
+      const pushCandidate = (uri) => {
+        if (uri && !candidates.some((candidate) => candidate.toString() === uri.toString())) {
+          candidates.push(uri)
+        }
+      }
+      if (workspaceLink) {
+        const folder = vscode.workspace.getWorkspaceFolder(document.uri)
+        if (folder) pushCandidate(vscode.Uri.joinPath(folder.uri, ...workspaceLink.segments))
+        if (document.uri.scheme === 'file') pushCandidate(vscode.Uri.file(rel))
+      } else {
+        pushCandidate(vscode.Uri.joinPath(document.uri, '..', ...rel.split(/[\\/]+/)))
+      }
+
+      let target = null
+      for (const candidate of candidates) {
+        try {
+          await vscode.workspace.fs.stat(candidate)
+          target = candidate
+          break
+        } catch {
+          /* try the native absolute fallback, when present */
+        }
+      }
+      if (!target) {
+        vscode.window.showWarningMessage(`EasyMarkdown: file not found - ${rel}`)
+        return
+      }
       const targetKey = target.toString()
       if (targetKey === document.uri.toString()) {
         if (fragment) webview.postMessage({ type: 'scrollToAnchor', slug: fragment })
-        return
-      }
-      try {
-        await vscode.workspace.fs.stat(target)
-      } catch {
-        vscode.window.showWarningMessage(`EasyMarkdown: file not found — ${rel}`)
         return
       }
       const existing = this.panels.get(targetKey)

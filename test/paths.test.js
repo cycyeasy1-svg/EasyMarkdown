@@ -12,6 +12,7 @@ import {
   joinPath,
   pathInWorkspace,
   workspaceRootForPath,
+  docLinkPathCandidates,
   isMarkdownName,
   isPlainTextDoc,
   isValidName,
@@ -133,6 +134,44 @@ describe('pathInWorkspace', () => {
   it('returns the original Windows root while matching case-insensitively', () => {
     const workspaces = [{ rootPath: 'C:\\Users\\me\\Notes', rootName: 'Notes' }]
     expect(workspaceRootForPath('c:/users/me/notes/today.md', workspaces)).toBe('C:\\Users\\me\\Notes')
+  })
+})
+
+describe('docLinkPathCandidates', () => {
+  it('prefers a workspace-root target for slash-prefixed repository links', () => {
+    expect(
+      docLinkPathCandidates(
+        '/docs/guide.md',
+        'E:\\work\\project\\specs\\source.md',
+        [{ rootPath: 'E:\\work\\project' }]
+      )
+    ).toEqual(['E:/work/project/docs/guide.md', '/docs/guide.md'])
+  })
+
+  it('uses the most specific containing workspace in a multi-root setup', () => {
+    expect(
+      docLinkPathCandidates('/docs/guide.md', '/work/project/specs/source.md', [
+        { rootPath: '/work' },
+        { rootPath: '/work/project' }
+      ])[0]
+    ).toBe('/work/project/docs/guide.md')
+  })
+
+  it('keeps document-relative and standalone absolute paths compatible', () => {
+    expect(docLinkPathCandidates('../guide.md', '/work/specs/source.md')).toEqual([
+      '/work/guide.md'
+    ])
+    expect(docLinkPathCandidates('/opt/docs/guide.md', '/work/source.md')).toEqual([
+      '/opt/docs/guide.md'
+    ])
+  })
+
+  it('does not allow a workspace-root link to escape through dot segments', () => {
+    expect(
+      docLinkPathCandidates('/../secret.md', '/work/project/source.md', [
+        { rootPath: '/work/project' }
+      ])
+    ).toEqual([])
   })
 })
 

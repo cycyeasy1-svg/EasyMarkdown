@@ -51,6 +51,7 @@ const api = {
 
   // fs
   readFile: (path) => ipcRenderer.invoke('fs:readFile', path),
+  pathExists: (path) => ipcRenderer.invoke('fs:pathExists', path),
   writeFile: (path, content) => ipcRenderer.invoke('fs:writeFile', path, content),
   rename: (oldPath, newPath) => ipcRenderer.invoke('fs:rename', oldPath, newPath),
   deleteItem: (path) => ipcRenderer.invoke('fs:delete', path),

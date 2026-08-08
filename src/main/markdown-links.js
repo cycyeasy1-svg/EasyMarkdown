@@ -37,6 +37,35 @@ const matchesMarkdownTargetPath = (resolvedPath, targetPath) =>
   sameMarkdownPath(resolvedPath, targetPath) ||
   (!extname(resolvedPath || '') && sameMarkdownPath(`${resolvedPath}.md`, targetPath))
 
+const isWorkspaceRootLink = (value) => /^\/(?!\/)/.test(String(value || ''))
+
+const pathInsideRoot = (path, root) => {
+  const api = pathApiFor(path, root)
+  const rel = api.relative(api.normalize(root), api.normalize(path))
+  return rel === '' || (rel !== '..' && !rel.startsWith(`..${api.sep}`) && !api.isAbsolute(rel))
+}
+
+export function markdownWorkspaceRootForPath(filePath, workspaceRoots = []) {
+  if (!filePath) return null
+  let match = null
+  let matchLength = -1
+  for (const root of workspaceRoots || []) {
+    if (typeof root !== 'string' || !root || !pathInsideRoot(filePath, root)) continue
+    const length = comparablePath(root).length
+    if (length > matchLength) {
+      match = root
+      matchLength = length
+    }
+  }
+  return match
+}
+
+const resolvedTargetPaths = (resolved) =>
+  [...new Set([resolved?.path, resolved?.fallbackPath].filter(Boolean).map((path) => path))]
+
+const resolvedTargetMatches = (resolved, targetPath) =>
+  resolvedTargetPaths(resolved).some((path) => matchesMarkdownTargetPath(path, targetPath))
+
 export function splitMarkdownTarget(value) {
   const raw = String(value ?? '').trim()
   const hash = raw.indexOf('#')
@@ -51,7 +80,7 @@ export function splitMarkdownTarget(value) {
   }
 }
 
-export function resolveMarkdownTarget(fromPath, target) {
+export function resolveMarkdownTarget(fromPath, target, options = {}) {
   const parts = splitMarkdownTarget(target)
   if (!parts.raw) return { ...parts, kind: 'empty', path: null }
   if (/^data:image\//i.test(parts.raw)) return { ...parts, kind: 'embedded-image', path: null }
@@ -63,10 +92,25 @@ export function resolveMarkdownTarget(fromPath, target) {
   if (!parts.path) return { ...parts, kind: 'local', path: fromPath }
   const decoded = safeDecode(parts.path).replace(/\//g, pathApiFor(fromPath, parts.path).sep)
   const api = pathApiFor(fromPath, decoded)
-  const resolved = isAbsolutePath(decoded)
-    ? api.normalize(decoded)
-    : api.resolve(api.dirname(fromPath), decoded)
-  return { ...parts, kind: 'local', path: resolved }
+  const workspaceRoot = isWorkspaceRootLink(parts.path)
+    ? markdownWorkspaceRootForPath(fromPath, options.workspaceRoots)
+    : null
+  if (workspaceRoot) {
+    const candidate = api.resolve(workspaceRoot, decoded.replace(/^[\\/]+/, ''))
+    if (pathInsideRoot(candidate, workspaceRoot)) {
+      const nativeAbsolute = api.normalize(decoded)
+      return {
+        ...parts,
+        kind: 'local',
+        path: candidate,
+        fallbackPath: sameMarkdownPath(candidate, nativeAbsolute) ? null : nativeAbsolute,
+        workspaceRoot,
+        rootRelative: true
+      }
+    }
+  }
+  const resolved = isAbsolutePath(decoded) ? api.normalize(decoded) : api.resolve(api.dirname(fromPath), decoded)
+  return { ...parts, kind: 'local', path: resolved, fallbackPath: null, rootRelative: false }
 }
 
 export function collectMarkdownAnchors(content) {
@@ -112,12 +156,13 @@ export async function diagnoseMarkdownContent({
   docPath,
   content,
   exists,
-  readFile
+  readFile,
+  workspaceRoots = []
 }) {
   const problems = []
   const currentAnchors = collectMarkdownAnchors(content)
   for (const link of extractMarkdownLinks(content)) {
-    const resolved = resolveMarkdownTarget(docPath, link.target)
+    const resolved = resolveMarkdownTarget(docPath, link.target, { workspaceRoots })
     const base = {
       ...excerptForLink(content, link),
       target: link.target,
@@ -135,12 +180,20 @@ export async function diagnoseMarkdownContent({
     if (resolved.kind === 'unsaved') continue
 
     let targetPath = resolved.path
-    let targetExists = await exists(targetPath)
-    if (!targetExists && !link.isImage && !extname(targetPath)) {
-      const markdownPath = `${targetPath}.md`
-      if (await exists(markdownPath)) {
-        targetPath = markdownPath
+    let targetExists = false
+    for (const candidate of resolvedTargetPaths(resolved)) {
+      if (await exists(candidate)) {
+        targetPath = candidate
         targetExists = true
+        break
+      }
+      if (!link.isImage && !extname(candidate)) {
+        const markdownPath = `${candidate}.md`
+        if (await exists(markdownPath)) {
+          targetPath = markdownPath
+          targetExists = true
+          break
+        }
       }
     }
     if (!targetExists) {
@@ -169,13 +222,13 @@ export async function diagnoseMarkdownContent({
   return problems
 }
 
-export function findMarkdownReferences(files, targetPath, anchor = '') {
+export function findMarkdownReferences(files, targetPath, anchor = '', options = {}) {
   const groups = []
   for (const file of files) {
     const items = []
     for (const link of extractMarkdownLinks(file.content)) {
-      const resolved = resolveMarkdownTarget(file.path, link.target)
-      if (resolved.kind !== 'local' || !matchesMarkdownTargetPath(resolved.path, targetPath)) continue
+      const resolved = resolveMarkdownTarget(file.path, link.target, options)
+      if (resolved.kind !== 'local' || !resolvedTargetMatches(resolved, targetPath)) continue
       if (anchor && (!resolved.hasAnchor || resolved.anchor !== anchor)) continue
       items.push({ ...excerptForLink(file.content, link), target: link.target })
     }
@@ -189,8 +242,16 @@ const encodeMarkdownPath = (value) =>
     .replace(/#/g, '%23')
     .replace(/\?/g, '%3F')
 
-export function relativeMarkdownPath(fromPath, targetPath, originalTarget = '') {
+export function relativeMarkdownPath(fromPath, targetPath, originalTarget = '', options = {}) {
   const originalPath = splitMarkdownTarget(originalTarget).path
+  if (isWorkspaceRootLink(originalPath)) {
+    const workspaceRoot = markdownWorkspaceRootForPath(targetPath, options.workspaceRoots)
+    if (workspaceRoot && pathInsideRoot(targetPath, workspaceRoot)) {
+      const api = pathApiFor(workspaceRoot, targetPath)
+      const rel = api.relative(workspaceRoot, targetPath).replace(/\\/g, '/')
+      return `/${encodeMarkdownPath(rel)}`
+    }
+  }
   if (isAbsolutePath(safeDecode(originalPath))) return encodeMarkdownPath(targetPath)
   const api = pathApiFor(fromPath, targetPath)
   let rel = api.relative(api.dirname(fromPath), targetPath).replace(/\\/g, '/')
@@ -245,7 +306,7 @@ const parseHeadingLine = (line) => {
   }
 }
 
-export function createHeadingRenamePlan(files, targetPath, line, newHeading) {
+export function createHeadingRenamePlan(files, targetPath, line, newHeading, options = {}) {
   const target = files.find((file) => sameMarkdownPath(file.path, targetPath))
   const lines = target?.content.split('\n') || []
   const lineIndex = Math.max(0, Number(line) - 1)
@@ -270,10 +331,10 @@ export function createHeadingRenamePlan(files, targetPath, line, newHeading) {
     }
     if (oldAnchor !== newAnchor) {
       for (const link of extractMarkdownLinks(file.content)) {
-        const resolved = resolveMarkdownTarget(file.path, link.target)
+        const resolved = resolveMarkdownTarget(file.path, link.target, options)
         if (
           resolved.kind === 'local' &&
-          matchesMarkdownTargetPath(resolved.path, targetPath) &&
+          resolvedTargetMatches(resolved, targetPath) &&
           resolved.hasAnchor &&
           resolved.anchor === oldAnchor
         ) {
@@ -301,15 +362,15 @@ export function createHeadingRenamePlan(files, targetPath, line, newHeading) {
   }
 }
 
-export function createFileRenamePlan(files, oldPath, newPath) {
+export function createFileRenamePlan(files, oldPath, newPath, options = {}) {
   const planned = []
   for (const file of files) {
     const replacements = []
     const fileWillMove = sameMarkdownPath(file.path, oldPath)
     for (const link of extractMarkdownLinks(file.content)) {
-      const resolved = resolveMarkdownTarget(file.path, link.target)
+      const resolved = resolveMarkdownTarget(file.path, link.target, options)
       if (resolved.kind !== 'local' || !splitMarkdownTarget(link.target).path) continue
-      const targetsRenamedFile = matchesMarkdownTargetPath(resolved.path, oldPath)
+      const targetsRenamedFile = resolvedTargetMatches(resolved, oldPath)
       if (!fileWillMove && !targetsRenamedFile) continue
       const nextTarget = targetsRenamedFile ? newPath : resolved.path
       replacements.push({
@@ -317,7 +378,7 @@ export function createFileRenamePlan(files, oldPath, newPath) {
         end: link.end,
         value: replaceTargetPath(
           link.target,
-          relativeMarkdownPath(fileWillMove ? newPath : file.path, nextTarget, link.target)
+          relativeMarkdownPath(fileWillMove ? newPath : file.path, nextTarget, link.target, options)
         )
       })
     }

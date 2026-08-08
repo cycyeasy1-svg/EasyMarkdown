@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -7,16 +7,18 @@ import { launchApp } from './helpers.js'
 
 test('internal link hover explains the target and Alt+click opens it in the right pane', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'em-internal-link-'))
-  const sourcePath = join(dir, 'source.md')
-  const targetPath = join(dir, 'target.md')
-  writeFileSync(sourcePath, '# Source\n\n[Open target](target.md#destination)\n', 'utf8')
+  const sourcePath = join(dir, 'specs', 'source.md')
+  const targetPath = join(dir, 'docs', 'target.md')
+  mkdirSync(join(dir, 'specs'))
+  mkdirSync(join(dir, 'docs'))
+  writeFileSync(sourcePath, '# Source\n\n[Open target](/docs/target.md#destination)\n', 'utf8')
   writeFileSync(
     targetPath,
     ['# Top', '', ...Array.from({ length: 80 }, (_, i) => `Paragraph ${i + 1}`), '', '## Destination', '', 'Reached'].join('\n'),
     'utf8'
   )
 
-  const { page, cleanup } = await launchApp([sourcePath])
+  const { page, cleanup } = await launchApp([sourcePath, dir])
   try {
     await page.locator('.tab', { hasText: 'source.md' }).click()
     const link = page.locator('.km-doc:visible a', { hasText: 'Open target' })

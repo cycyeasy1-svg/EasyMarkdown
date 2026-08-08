@@ -66,6 +66,64 @@ export function workspaceRootForPath(path, workspaces) {
 
 export const pathInWorkspace = (path, workspaces) => !!workspaceRootForPath(path, workspaces)
 
+const comparableLocalPath = (value) => {
+  const normalized = String(value || '').replace(/\\/g, '/').replace(/\/+$/, '') || '/'
+  return isWindowsPath(normalized) ? normalized.toLowerCase() : normalized
+}
+
+const pushUniquePath = (paths, value) => {
+  if (!value) return
+  const comparable = comparableLocalPath(value)
+  if (!paths.some((path) => comparableLocalPath(path) === comparable)) paths.push(value)
+}
+
+// Resolve a Markdown document link without assuming that a leading slash means
+// only a filesystem root. In documentation repositories `/docs/guide.md` is
+// conventionally workspace-root-relative, so that candidate comes first when
+// the source document belongs to an opened workspace. The native absolute path
+// remains as a fallback for POSIX documents that intentionally use one.
+export function docLinkPathCandidates(linkPath, fromPath, workspaces = []) {
+  const raw = String(linkPath || '').replace(/\\/g, '/')
+  if (!raw) return []
+  const candidates = []
+  const isRootRelative = /^\/(?!\/)/.test(raw)
+  if (isRootRelative) {
+    const root = workspaceRootForPath(fromPath, workspaces)
+    if (root) {
+      const rootParts = root.replace(/\\/g, '/').replace(/\/+$/, '').split('/')
+      const floor = rootParts.length
+      let valid = true
+      for (const segment of raw.slice(1).split('/')) {
+        if (!segment || segment === '.') continue
+        if (segment === '..') {
+          if (rootParts.length <= floor) {
+            valid = false
+            break
+          }
+          rootParts.pop()
+        } else {
+          rootParts.push(segment)
+        }
+      }
+      if (!valid) return []
+      pushUniquePath(candidates, rootParts.join('/'))
+    }
+  }
+  if (isAbsolutePath(raw)) {
+    pushUniquePath(candidates, raw)
+    return candidates
+  }
+
+  const baseParts = dirName(fromPath).replace(/\\/g, '/').replace(/\/+$/, '').split('/')
+  for (const segment of raw.split('/')) {
+    if (!segment || segment === '.') continue
+    if (segment === '..') baseParts.pop()
+    else baseParts.push(segment)
+  }
+  pushUniquePath(candidates, baseParts.join('/'))
+  return candidates
+}
+
 // Files that open in the rich Markdown editor. Anything else with a path (e.g.
 // .txt) is treated as plain text and opened in the fast textarea — feeding plain
 // text through Milkdown collapses its line breaks and bogs down on large files.
