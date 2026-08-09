@@ -134,6 +134,12 @@ const api = {
   // update check (notify-only)
   checkUpdate: () => ipcRenderer.invoke('update:check'),
 
+  // Privacy-bounded local diagnostics. Renderer callers may submit only small
+  // structured metadata; main redacts it again before writing rotating logs.
+  logDiagnostic: (level, event, details) =>
+    ipcRenderer.invoke('diagnostics:log', level, event, details),
+  exportDiagnostics: () => ipcRenderer.invoke('diagnostics:export'),
+
   // report the UI language so the native application menu follows it
   setAppLang: (lang) => ipcRenderer.invoke('app:setLang', lang),
   setMenuKeybindings: (keybindings) => ipcRenderer.invoke('menu:setKeybindings', keybindings),
@@ -170,6 +176,7 @@ const api = {
   onAppCloseRequest: on('app-close-request'),
 
   platform: process.platform,
+  safeMode: process.argv.includes('--easymarkdown-safe-mode'),
 
   // Feature capabilities for the renderer to gate UI uniformly across desktop /
   // mobile (mobile provides its own set via the Capacitor shim). Exposed HERE,
@@ -191,7 +198,8 @@ const api = {
     splitView: true,
     defaultOpener: true,
     fileAttachments: true,
-    localHistory: true
+    localHistory: true,
+    diagnostics: true
   }
 }
 

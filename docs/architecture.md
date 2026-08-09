@@ -2,7 +2,7 @@
 
 ## 技术栈
 
-- **Electron 34** —— 桌面外壳（主进程 + 渲染进程）
+- **Electron 43** —— 桌面外壳（主进程 + 渲染进程）
 - **electron-vite + Vite 6** —— 构建工具
 - **React 18** —— 渲染层 UI
 - **Milkdown Crepe 7**（基于 ProseMirror）—— 所见即所得 Markdown 编辑器引擎
@@ -41,12 +41,20 @@
 ```
 src/
   main/index.js            主进程：窗口、IPC、文件监听、菜单
-  preload/index.js         contextBridge：window.api 桥接
+  main/window-ipc.js       窗口控制与关闭确认 IPC（Electron 非依存、単体テスト可能）
+  main/update-ipc.js       更新检查 contract／IPC（Electron net.fetch は index から注入）
+  main/trusted-ipc.js      全 IPC 共通的 sender frame／payload gate
+  main/ipc-policy.js       文件路径与小型 scalar IPC contract
+  main/diagnostics.js      診断 data redaction／record／fatal policy（pure logic）
+  main/local-logger.js     rotation 付き local NDJSON log／diagnostic bundle
+  main/crash-loop.js       unclean launch 検出／automatic safe mode
+  preload/index.js         contextBridge：window.api 桥接（CJS bundle、sandbox 対応）
   renderer/
     index.html             渲染入口（CSP、标题）
     src/
       main.jsx             React 挂载点
       App.jsx              应用外壳（最核心，详见下文）
+      recovery.js          renderer safe mode／session・settings 限定 reset
       paths.js             纯工具：路径/文件名/版本/重文档判定/genId/会话
       find.js              文档内查找的高亮/匹配纯函数
       ui.js                fireToast + copyToClipboard（toast 通道单一来源）
@@ -70,6 +78,7 @@ src/
         WindowControls.jsx Windows 自绘窗口按钮
         UpdateToast.jsx    更新提示浮层
         RenameModal.jsx    标签重命名弹窗（Electron 无 window.prompt）
+        AppErrorBoundary.jsx 白画面を防止する recovery UI
         Outline.jsx        大纲面板（从内容解析标题）
         CommandPalette.jsx 命令面板（Ctrl+P 模糊跳转）
         StatusBar.jsx      底部状态栏（字数统计 / 编辑模式切换 / 设置入口）
@@ -84,6 +93,8 @@ build/
 ```
 
 > 跨平台：渲染层根节点按 `window.api.platform` 挂 `.app.is-win` / `.app.is-mac` 类，平台相关样式（标题栏让位红绿灯等）只写在这两个选择器下；主进程用 `process.platform` 分支。改顶栏/平台代码时两个系统都要顾到。
+
+main window は `contextIsolation: true`、`nodeIntegration: false`、`sandbox: true` で起動する。sandboxed preload は単一 CJS bundle とし、全 privileged IPC は `trusted-ipc.js` を経由する。Renderer root は `AppErrorBoundary` で保護し、safe mode では既存 data を上書きせず session 復元と custom theme を無効化する。詳細は [診断・復旧設計](./diagnostics-and-recovery.md) を参照する。
 
 ## App.jsx：外壳的核心职责
 

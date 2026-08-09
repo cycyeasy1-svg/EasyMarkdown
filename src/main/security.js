@@ -22,6 +22,17 @@ export function isTrustedRendererUrl(candidate, currentUrl, devRendererUrl = '')
   }
 }
 
+export function isTrustedIpcEvent({ event, trustedWebContents, devRendererUrl = '' }) {
+  if (!event || !trustedWebContents || event.sender !== trustedWebContents) return false
+  const senderFrame = event.senderFrame
+  if (!senderFrame || senderFrame !== trustedWebContents.mainFrame) return false
+  return isTrustedRendererUrl(
+    senderFrame.url,
+    trustedWebContents.getURL?.() || '',
+    devRendererUrl
+  )
+}
+
 export function canGrantLocalFonts({
   permission,
   webContentsId,

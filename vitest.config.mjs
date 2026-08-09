@@ -4,6 +4,11 @@ import { defineConfig } from 'vitest/config'
 // most). Default env is `node`; a test that touches `localStorage`/`document`
 // opts in per-file with a `// @vitest-environment happy-dom` comment at its top.
 export default defineConfig({
+  esbuild: {
+    // Match Vite's React plugin runtime when a unit test imports a .jsx
+    // component directly (e.g. the top-level Error Boundary).
+    jsx: 'automatic'
+  },
   define: {
     // Renderer modules are built with this Vite `define` (electron.vite.config.mjs).
     // Mirror it here so any module that references __APP_VERSION__ resolves under

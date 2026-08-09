@@ -393,6 +393,51 @@ button:focus-visible,
   opacity: 0.72;
 }
 
+.app.safe-mode {
+  grid-template-rows: var(--topbar-h) 38px 1fr var(--status-h);
+}
+.app.safe-mode > .body { grid-row: 3; }
+.app.safe-mode > .statusbar { grid-row: 4; }
+.hm-safe-mode-banner {
+  grid-column: 2;
+  grid-row: 2;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 12px;
+  color: var(--text);
+  background: color-mix(in srgb, var(--accent-soft) 86%, var(--bg-elevated));
+  border-bottom: 1px solid color-mix(in srgb, var(--accent) 28%, var(--border-soft));
+  font-size: 11px;
+  -webkit-app-region: no-drag;
+}
+.hm-safe-mode-banner > span {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.hm-safe-mode-banner svg { flex: 0 0 auto; color: var(--accent-strong); }
+.hm-safe-mode-banner strong { flex: 0 0 auto; font-size: 11.5px; }
+.hm-safe-mode-banner small {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.hm-safe-mode-actions { flex: 0 0 auto; }
+.hm-safe-mode-actions button {
+  padding: 4px 8px;
+  color: var(--accent-strong);
+  border-radius: var(--radius-sm);
+  font-size: 10.5px;
+  font-weight: 650;
+}
+.hm-safe-mode-actions button:hover { background: var(--accent-soft); }
+
 /* Activity Bar — VSCode style */
 .activity-bar {
   grid-row: 1 / -1;
@@ -7910,4 +7955,99 @@ body.hm-table-auto-wrap .km-table td {
 
 @media (prefers-reduced-motion: reduce) {
   .hm-help { animation: none; }
+}
+
+/* Fatal renderer recovery is intentionally independent from App's component
+   tree: it must remain readable even when the normal shell cannot render. */
+.hm-recovery {
+  width: 100%;
+  height: 100%;
+  display: grid;
+  place-items: center;
+  overflow: auto;
+  padding: 28px;
+  color: var(--text);
+  background:
+    radial-gradient(circle at 50% 10%, var(--accent-soft), transparent 42%),
+    var(--bg-editor);
+}
+.hm-recovery-card {
+  width: min(620px, 100%);
+  padding: clamp(26px, 5vw, 44px);
+  background: color-mix(in srgb, var(--bg-elevated) 96%, transparent);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  box-shadow: var(--shadow-lg);
+}
+.hm-recovery-mark {
+  width: 42px;
+  height: 42px;
+  display: grid;
+  place-items: center;
+  margin-bottom: 18px;
+  color: #fff;
+  background: var(--danger, #c75146);
+  border-radius: 12px;
+  font-size: 23px;
+  font-weight: 800;
+}
+.hm-recovery-eyebrow {
+  margin-bottom: 7px;
+  color: var(--accent-strong);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.hm-recovery h1 {
+  margin: 0 0 12px;
+  color: var(--text-strong);
+  font-size: clamp(23px, 4vw, 31px);
+  line-height: 1.25;
+}
+.hm-recovery p { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.75; }
+.hm-recovery-primary-actions,
+.hm-recovery-reset-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 9px;
+  margin-top: 24px;
+}
+.hm-recovery button {
+  min-height: 36px;
+  padding: 7px 12px;
+  color: var(--text);
+  background: var(--bg-editor);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  font-weight: 650;
+}
+.hm-recovery button:hover { border-color: var(--accent); background: var(--accent-soft); }
+.hm-recovery button.primary { color: #fff; background: var(--accent); border-color: var(--accent); }
+.hm-recovery button:disabled { opacity: 0.55; cursor: wait; }
+.hm-recovery-reset-actions { margin-top: 12px; }
+.hm-recovery-reset-actions button { color: var(--muted); background: transparent; border-color: transparent; }
+.hm-recovery-status { margin-top: 12px; color: var(--muted); font-size: 11px; }
+.hm-recovery-status.done { color: var(--success, #43845d); }
+.hm-recovery-status.failed { color: var(--danger, #c75146); }
+.hm-recovery details { margin-top: 20px; color: var(--faint); font-size: 11px; }
+.hm-recovery summary { cursor: pointer; }
+.hm-recovery pre {
+  max-height: 140px;
+  overflow: auto;
+  margin: 9px 0 0;
+  padding: 10px;
+  color: var(--muted);
+  background: var(--bg-editor);
+  border-radius: var(--radius-sm);
+  font: 10.5px/1.55 var(--font-mono);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 680px) {
+  .hm-safe-mode-banner small { display: none; }
+  .hm-recovery-primary-actions { flex-direction: column; }
+  .hm-recovery-primary-actions button { width: 100%; }
 }

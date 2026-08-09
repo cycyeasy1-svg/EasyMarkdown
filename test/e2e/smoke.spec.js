@@ -20,6 +20,17 @@ test('app boots: shell, preload bridge and status bar are present', async () => 
   }
 })
 
+test('safe mode boots without restoring session or custom themes', async () => {
+  const { page, cleanup } = await launchApp(['--safe-mode'])
+  try {
+    await expect(page.locator('#root .app')).toHaveClass(/\bsafe-mode\b/)
+    await expect(page.locator('.hm-safe-mode-banner')).toBeVisible()
+    expect(await page.evaluate(() => window.api.safeMode)).toBe(true)
+  } finally {
+    await cleanup()
+  }
+})
+
 test('opening a markdown fixture renders its heading in the editor', async () => {
   const { page, cleanup } = await launchApp([fixture('welcome.md')])
   try {

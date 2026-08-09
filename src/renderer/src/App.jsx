@@ -753,8 +753,10 @@ const SourceEditorPane = memo(function SourceEditorPane({
   )
 })
 
-export default function App() {
-  const session = useRef(loadSession()).current
+export default function App({ safeMode = false, onExitSafeMode = null }) {
+  // Safe mode deliberately ignores persisted session state and custom themes,
+  // while leaving the stored data untouched for a later normal launch.
+  const session = useRef(safeMode ? {} : loadSession()).current
   // Mobile (Capacitor) builds run the same renderer; a few affordances differ
   // (drawer sidebar, no split button). Desktop is unaffected.
   const isMobile = window.api.platform === 'ios' || window.api.platform === 'android'
@@ -940,7 +942,7 @@ export default function App() {
       ? settings.systemDarkTheme
       : settings.systemLightTheme
     : theme
-  const effectiveCustomTheme = followsSystemTheme ? null : customTheme
+  const effectiveCustomTheme = safeMode || followsSystemTheme ? null : customTheme
   const mobileReadOnly = isMobile && settings.mobileReadOnly
   const keybindings = useKeybindings(window.api.platform)
   // Keep-mode table-filter results per tab id ({ shown, total } or null) — drives
@@ -996,14 +998,14 @@ export default function App() {
   // Write the latest snapshot now (close / pagehide / debounce all funnel here,
   // so the persisted shape lives in exactly one place).
   const flushSession = useCallback(() => {
-    if (!sessionRef.current) return
+    if (safeMode || !sessionRef.current) return
     try {
       localStorage.setItem(LS, JSON.stringify(sessionRef.current))
       lastWrittenSessionRef.current = sessionRef.current
     } catch {
       /* quota / serialization failure — skip this snapshot */
     }
-  }, [])
+  }, [safeMode])
   // Lazy mounting: an editor is only created once its tab has been activated.
   // Clean Keep editors may later hibernate outside a small MRU warm set; editors
   // carrying drafts/history/filter state and every Milkdown editor stay mounted.
@@ -4234,6 +4236,21 @@ export default function App() {
     return result
   }, [])
 
+  const exportDiagnostics = useCallback(async () => {
+    if (!window.api.exportDiagnostics) return { ok: false, unavailable: true }
+    try {
+      const result = await window.api.exportDiagnostics()
+      if (result?.ok) fireToast(tRef.current('diagnostics.exported'), { kind: 'success' })
+      else if (!result?.canceled) {
+        fireToast(tRef.current('diagnostics.exportFailed'), { kind: 'error', sticky: true })
+      }
+      return result
+    } catch {
+      fireToast(tRef.current('diagnostics.exportFailed'), { kind: 'error', sticky: true })
+      return { ok: false }
+    }
+  }, [])
+
   const runKeepTableCommand = (command) => {
     const id = pickEditableId()
     const tab = tabsRef.current.find((item) => item.id === id)
@@ -6065,7 +6082,24 @@ export default function App() {
 
   return (
     <I18nProvider lang={lang} setLang={setLang}>
-    <div className={`app${platformClass}${isMobile && sidebarOpen ? ' drawer-open' : ''}${zenMode ? ' zen-mode' : ''}${zenReveal ? ' zen-reveal' : ''}`}>
+    <div className={`app${platformClass}${isMobile && sidebarOpen ? ' drawer-open' : ''}${zenMode ? ' zen-mode' : ''}${zenReveal ? ' zen-reveal' : ''}${safeMode ? ' safe-mode' : ''}`}>
+      {safeMode && (
+        <div className="hm-safe-mode-banner" role="status">
+          <span>
+            <Icon name="alert" size={14} />
+            <strong>{t('safeMode.title')}</strong>
+            <small>{t('safeMode.description')}</small>
+          </span>
+          <span className="hm-safe-mode-actions">
+            {window.api.exportDiagnostics && (
+              <button type="button" onClick={exportDiagnostics}>{t('diagnostics.export')}</button>
+            )}
+            {onExitSafeMode && (
+              <button type="button" onClick={onExitSafeMode}>{t('safeMode.exit')}</button>
+            )}
+          </span>
+        </div>
+      )}
       <div className="activity-bar">
         <button
           className={`activity-item activity-home${home === 'home' ? ' active' : ''}`}
@@ -6752,6 +6786,7 @@ export default function App() {
             onOpenThemesFolder={onOpenThemesFolder}
             onGetMoreThemes={onGetMoreThemes}
             onClearLocalHistory={clearAllLocalHistory}
+            onExportDiagnostics={exportDiagnostics}
             onOpenHelp={openHelp}
             keybindings={keybindings}
           />

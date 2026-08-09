@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, dialog, Menu, MenuItem, shell, net, nativeTheme, session, clipboard } from 'electron'
+import { app, BrowserWindow, ipcMain as electronIpcMain, dialog, Menu, MenuItem, shell, net, nativeTheme, session, clipboard } from 'electron'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { dirname, join, basename, extname, resolve, relative, sep } from 'node:path'
 import fs from 'node:fs/promises'
@@ -30,10 +30,17 @@ import {
   diagnoseMarkdownContent,
   findMarkdownReferences
 } from './markdown-links.js'
-import { canGrantLocalFonts, createLocalFontGrant } from './security.js'
+import { canGrantLocalFonts, createLocalFontGrant, isTrustedIpcEvent } from './security.js'
+import { createTrustedIpcMain } from './trusted-ipc.js'
+import { validateIpcArgs } from './ipc-policy.js'
+import { diagnosticErrorDetails, isRecoverableBackgroundError } from './diagnostics.js'
+import { createLocalLogger } from './local-logger.js'
+import { createCrashLoopTracker } from './crash-loop.js'
 import { createPdfExportService } from './pdf-export.js'
 import { createHtmlExportService } from './html-export.js'
 import { shouldCreateMainWindow } from './window-lifecycle.js'
+import { registerWindowIpc } from './window-ipc.js'
+import { registerUpdateIpc } from './update-ipc.js'
 import { menuAccelerator, normalizeMenuKeybindings } from './menu-keybindings.js'
 import {
   DEFAULT_FONT_WRITE_EN,
@@ -151,7 +158,37 @@ let mainWindow = null
 const pdfExportService = createPdfExportService({ getMainWindow: () => mainWindow })
 const htmlExportService = createHtmlExportService({ getMainWindow: () => mainWindow })
 const isTrustedRenderer = (event) =>
-  !!mainWindow && !mainWindow.isDestroyed() && event?.sender === mainWindow.webContents
+  !!mainWindow &&
+  !mainWindow.isDestroyed() &&
+  isTrustedIpcEvent({
+    event,
+    trustedWebContents: mainWindow.webContents,
+    devRendererUrl: process.env.ELECTRON_RENDERER_URL
+  })
+const ipcMain = createTrustedIpcMain({
+  ipcMain: electronIpcMain,
+  isTrustedEvent: isTrustedRenderer,
+  validateArgs: validateIpcArgs
+})
+const diagnosticsLogger = createLocalLogger({
+  directory: join(app.getPath('userData'), 'diagnostics'),
+  context: {
+    appVersion: app.getVersion(),
+    electronVersion: process.versions.electron,
+    platform: process.platform,
+    arch: process.arch
+  }
+})
+const crashLoopTracker = createCrashLoopTracker({
+  filePath: join(app.getPath('userData'), 'diagnostics', 'launch-state.json')
+})
+const safeModeRequested = process.argv.includes('--safe-mode')
+const safeMode = safeModeRequested || crashLoopTracker.safeMode
+diagnosticsLogger.info('app.launch', {
+  safeMode,
+  safeModeReason: safeModeRequested ? 'command-line' : crashLoopTracker.safeMode ? 'crash-loop' : 'none',
+  consecutiveFailures: crashLoopTracker.getState().consecutiveFailures
+})
 let localFontGrant = null
 // When true, the window is allowed to close without re-prompting (the renderer
 // has confirmed there are no unsaved changes, or the user chose to discard).
@@ -163,18 +200,29 @@ let isQuitting = false
 const watchers = new Map() // folder path -> watcher
 const fileWatchers = new Map() // file path -> { watcher, timer }
 
-// ---- Safety net: never let a stray async error abort the whole app ----
-// chokidar (and other fs/network async work) can reject with EACCES/EPERM when
-// it touches a path we can't read — e.g. watching a folder whose subtree
-// includes restricted system files. With Node's default unhandled-rejection
-// behaviour an unhandled one of these would crash (SIGABRT) the main process on
-// launch. Log and swallow instead; the watcher's own error handler does the rest.
-process.on('unhandledRejection', (reason) => {
-  console.error('Unhandled rejection (ignored):', reason?.message || reason)
-})
-process.on('uncaughtException', (err) => {
-  console.error('Uncaught exception (ignored):', err?.message || err)
-})
+// ---- Process safety net ---------------------------------------------------
+// Known permission/busy failures from background filesystem work remain
+// recoverable. Continuing after an unknown uncaught exception is unsafe, so it
+// is logged as fatal and the process exits; the launch marker then enables safe
+// mode after a repeated boot loop.
+let fatalExitScheduled = false
+let fatalShutdown = false
+function handleMainProcessFailure(kind, error) {
+  const details = diagnosticErrorDetails(error)
+  if (isRecoverableBackgroundError(error)) {
+    diagnosticsLogger.warn(`main.${kind}.recoverable`, details)
+    console.error(`${kind} (recoverable):`, error?.message || error)
+    return
+  }
+  diagnosticsLogger.fatal(`main.${kind}`, details)
+  console.error(`${kind} (fatal):`, error?.message || error)
+  fatalShutdown = true
+  if (fatalExitScheduled) return
+  fatalExitScheduled = true
+  setImmediate(() => app.exit(1))
+}
+process.on('unhandledRejection', (reason) => handleMainProcessFailure('unhandled-rejection', reason))
+process.on('uncaughtException', (error) => handleMainProcessFailure('uncaught-exception', error))
 
 // Split launch args into markdown files and folders. A folder argument (from
 // the Explorer "Open with EasyMarkdown" folder menu) opens as a workspace; markdown
@@ -257,6 +305,8 @@ function sendOpen(channel, payload) {
 ipcMain.on('app:renderer-ready', (event) => {
   if (!mainWindow || event?.sender !== mainWindow.webContents) return
   rendererReady = true
+  crashLoopTracker.markHealthy()
+  diagnosticsLogger.info('renderer.ready', { safeMode })
   for (const [channel, payload] of pendingOpens.splice(0)) sendToRenderer(channel, payload)
 })
 
@@ -322,14 +372,15 @@ function createWindow() {
     // states). macOS keeps its native traffic lights via hiddenInset above.
     titleBarOverlay: false,
     webPreferences: {
-      preload: join(__dirname, '../preload/index.mjs'),
+      preload: join(__dirname, '../preload/index.cjs'),
+      additionalArguments: safeMode ? ['--easymarkdown-safe-mode'] : [],
       // Security: keep the renderer isolated from Node. These are Electron's
       // defaults, but we set them explicitly so the posture is obvious and
-      // robust against future default changes. sandbox stays off because the
-      // preload is an ES module (the sandbox requires a CommonJS preload).
+      // robust against future default changes. The preload is bundled as one
+      // CommonJS file because sandboxed preload scripts cannot use ESM.
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false,
+      sandbox: true,
       spellcheck: true,
       // Don't throttle rendering/timers when the window is in the background —
       // the per-window twin of the disable-background-timer-throttling switch
@@ -372,6 +423,18 @@ function createWindow() {
   // it as not-ready again so launch-file sends queue instead of vanishing.
   mainWindow.webContents.on('did-start-loading', () => {
     rendererReady = false
+  })
+
+  mainWindow.webContents.on('render-process-gone', (_event, details) => {
+    diagnosticsLogger.error('renderer.process-gone', {
+      reason: details?.reason,
+      exitCode: details?.exitCode
+    })
+    if (!['clean-exit', 'killed'].includes(details?.reason)) fatalShutdown = true
+  })
+
+  mainWindow.webContents.on('did-fail-load', (_event, errorCode, errorDescription) => {
+    diagnosticsLogger.error('renderer.load-failed', { errorCode, errorDescription })
   })
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
@@ -473,6 +536,8 @@ app.whenReady().then(() => {
 // window 'close' handler quits the app rather than just closing the window.
 app.on('before-quit', () => {
   isQuitting = true
+  if (!fatalShutdown) crashLoopTracker.markHealthy()
+  diagnosticsLogger.info('app.before-quit', { fatalShutdown })
 })
 
 app.on('window-all-closed', () => {
@@ -922,12 +987,25 @@ ipcMain.handle('markdown-links:rename-file', async (_e, payload = {}) => {
 // Print the current document via the system print dialog. Same hidden-window
 // rendering pipeline as export:pdf, but ends in webContents.print() so the
 // user picks a printer / paper / copies natively.
-ipcMain.handle('print:html', async (event, { html, typography }) => {
+ipcMain.handle('print:html', async (event, payload = {}) => {
   if (!isTrustedRenderer(event)) return { ok: false, error: 'Untrusted renderer.' }
-  const doc = `<!doctype html><html><head><meta charset="utf-8"><style>${PDF_CSS}${exportTypographyCss(typography)}</style></head><body><div class="doc"${docLangAttr(html)}>${html}</div></body></html>`
+  const html = typeof payload?.html === 'string' ? payload.html : ''
+  const body = await inlineFileImages(html)
+  const csp = "default-src 'none'; img-src data:; style-src 'unsafe-inline'; font-src data:"
+  const doc = `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${csp}"><style>${PDF_CSS}${exportTypographyCss(payload?.typography)}</style></head><body><div class="doc"${docLangAttr(body)}>${body}</div></body></html>`
   const tmp = join(app.getPath('temp'), `easymarkdown-print-${Date.now()}.html`)
   await fs.writeFile(tmp, doc, 'utf8')
-  const win = new BrowserWindow({ show: false, webPreferences: { webSecurity: false } })
+  const win = new BrowserWindow({
+    show: false,
+    webPreferences: {
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+      webSecurity: true
+    }
+  })
+  win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+  win.webContents.on('will-navigate', (navigationEvent) => navigationEvent.preventDefault())
   try {
     await win.loadFile(tmp)
     // The window must stay alive until the dialog is done — print() resolves
@@ -1305,7 +1383,10 @@ ipcMain.handle('watch:start', async (_e, dir) => {
   })
   // Swallow watcher errors (EACCES/EPERM on protected paths) so they never become
   // an unhandled rejection that crashes the process.
-  w.on('error', (err) => console.error('watch:start error (ignored):', err?.message || err))
+  w.on('error', (error) => {
+    diagnosticsLogger.warn('watch.directory-error', diagnosticErrorDetails(error))
+    console.error('watch:start error (recoverable):', error?.message || error)
+  })
   let timer = null
   // Coalesce bursts of fs events (git checkout, bulk writes, save-heavy flows) into
   // a single renderer notification — each `watch:changed` makes the Sidebar reload
@@ -1360,7 +1441,10 @@ ipcMain.handle('watch:file', async (_e, path) => {
     }, 80)
   }
   w.on('change', notify).on('add', notify)
-  w.on('error', (err) => console.error('watch:file error (ignored):', err?.message || err))
+  w.on('error', (error) => {
+    diagnosticsLogger.warn('watch.file-error', diagnosticErrorDetails(error))
+    console.error('watch:file error (recoverable):', error?.message || error)
+  })
   fileWatchers.set(path, entry)
   return true
 })
@@ -1637,59 +1721,63 @@ ipcMain.handle('fs:duplicate', async (_e, path) => {
 // ----------------------------- window controls -----------------------------
 // Custom min/max/close buttons (the native overlay is disabled so the renderer
 // can style their hover states). macOS keeps its native traffic lights.
-ipcMain.handle('window:minimize', () => mainWindow?.minimize())
-ipcMain.handle('window:toggleMaximize', () => {
-  if (!mainWindow) return false
-  if (mainWindow.isMaximized()) mainWindow.unmaximize()
-  else mainWindow.maximize()
-  return mainWindow.isMaximized()
-})
-ipcMain.handle('window:close', () => mainWindow?.close())
-ipcMain.handle('window:isMaximized', () => mainWindow?.isMaximized() ?? false)
-
-// The renderer confirmed it's safe to close (no unsaved changes, or the user
-// chose to discard). If a quit is underway (Cmd/Ctrl+Q), quit the whole app;
-// otherwise just close the window (macOS keeps the app running).
-ipcMain.on('app:confirm-close', () => {
-  allowClose = true
-  if (isQuitting) app.quit()
-  else mainWindow?.close()
-})
-// The user cancelled the close. Clear the quit intent so a later window-close
-// (e.g. the macOS traffic light) isn't mistaken for a quit.
-ipcMain.on('app:cancel-close', () => {
-  isQuitting = false
+registerWindowIpc({
+  ipcMain,
+  app,
+  getMainWindow: () => mainWindow,
+  getIsQuitting: () => isQuitting,
+  setAllowClose: (value) => {
+    allowClose = value
+  },
+  setIsQuitting: (value) => {
+    isQuitting = value
+  }
 })
 
 // ----------------------------- update check --------------------------------
 // Notify-only update check: ask GitHub for the latest *published* release
 // (drafts/prereleases are excluded by this endpoint) and report its version so
 // the renderer can show a "new version available" prompt. No download here.
-ipcMain.handle('update:check', async () => {
+// Use Electron's net (Chromium's network stack), NOT Node's global fetch:
+// Node's c-ares resolver can abort an unsigned app launched by Finder/launchd.
+registerUpdateIpc({
+  ipcMain,
+  fetchRelease: (...args) => net.fetch(...args),
+  getCurrentVersion: () => app.getVersion()
+})
+
+// ----------------------------- diagnostics --------------------------------
+// Reports contain only bounded, redacted operational events. Document text,
+// credentials, and absolute paths are removed before they ever reach disk.
+ipcMain.handle('diagnostics:log', (_event, level, event, details) => {
+  const writer = diagnosticsLogger[level] || diagnosticsLogger.info
+  writer(`renderer.${event}`, { origin: 'renderer', ...details })
+  return { ok: true }
+})
+
+ipcMain.handle('diagnostics:export', async () => {
+  diagnosticsLogger.info('diagnostics.export-requested')
+  const stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\..+$/, '').replace('T', '-')
+  const result = await dialog.showSaveDialog(mainWindow, {
+    title: 'Export EasyMarkdown diagnostics',
+    defaultPath: join(app.getPath('documents'), `EasyMarkdown-diagnostics-${stamp}.json`),
+    filters: [{ name: 'JSON', extensions: ['json'] }]
+  })
+  if (result.canceled || !result.filePath) return { ok: false, canceled: true }
   try {
-    // Use Electron's net (Chromium's network stack), NOT Node's global fetch:
-    // Node's fetch resolves DNS via the bundled c-ares, which can abort() the
-    // whole main process for an unsigned app launched by Finder/launchd (observed
-    // as an instant crash on open). net.fetch goes through Chromium's resolver,
-    // which fails gracefully instead of crashing.
-    const res = await net.fetch('https://api.github.com/repos/cycyeasy1-svg/EasyMarkdown/releases/latest', {
-      headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'EasyMarkdown-Updater' }
+    const bundle = diagnosticsLogger.createBundle({
+      safeMode,
+      safeModeReason: safeModeRequested ? 'command-line' : crashLoopTracker.safeMode ? 'crash-loop' : 'none',
+      consecutiveFailures: crashLoopTracker.getState().consecutiveFailures,
+      chromeVersion: process.versions.chrome,
+      nodeVersion: process.versions.node
     })
-    if (!res.ok) return { ok: false }
-    const data = await res.json()
-    const latest = String(data.tag_name || '').replace(/^v/i, '')
-    return {
-      ok: true,
-      latest,
-      current: app.getVersion(),
-      url: data.html_url || 'https://github.com/cycyeasy1-svg/EasyMarkdown/releases',
-      // The release notes (Markdown) so the prompt can show "what's new". Capped
-      // so a huge changelog can't bloat the IPC payload / the toast.
-      name: typeof data.name === 'string' ? data.name : '',
-      notes: typeof data.body === 'string' ? data.body.slice(0, 4000) : ''
-    }
-  } catch {
-    return { ok: false }
+    await fs.writeFile(result.filePath, `${JSON.stringify(bundle, null, 2)}\n`, 'utf8')
+    diagnosticsLogger.info('diagnostics.exported')
+    return { ok: true }
+  } catch (error) {
+    diagnosticsLogger.error('diagnostics.export-failed', diagnosticErrorDetails(error))
+    return { ok: false, error: 'Diagnostic export failed.' }
   }
 })
 

@@ -1,16 +1,56 @@
 name: CI
 
-# Sanity check on every push / PR: make sure the app still bundles cleanly.
-# This does NOT package installers (that only runs on tags, in release.yml).
+# Pull requests receive the fast gate plus Electron smoke E2E. Pushes to main
+# and the nightly schedule receive the fast gate plus the complete E2E suite.
 on:
   push:
     branches: [main]
   pull_request:
     branches: [main]
+  schedule:
+    - cron: '17 10 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  build:
+  quality-fast:
+    name: Fast quality gate
     runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            packages/vscode-extension/package-lock.json
+
+      - name: Install app dependencies
+        run: npm ci
+
+      - name: Install VS Code extension dependencies
+        run: npm ci --prefix packages/vscode-extension
+
+      - name: Version, lint, unit tests, and all product builds
+        run: npm run quality:fast
+
+  e2e-smoke:
+    name: Electron smoke E2E
+    if: github.event_name == 'pull_request'
+    needs: quality-fast
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -24,5 +64,27 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Build (main + preload + renderer)
-        run: npm run build
+      - name: Build and run smoke E2E
+        run: xvfb-run --auto-servernum npm run test:e2e:smoke
+
+  e2e-full:
+    name: Electron full E2E
+    if: github.event_name != 'pull_request'
+    needs: quality-fast
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build and run full E2E
+        run: xvfb-run --auto-servernum npm run test:e2e
