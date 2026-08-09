@@ -32,7 +32,7 @@ EasyMarkdown は、既にデスクトップ／モバイル／VS Code 拡張、�
 
 ### P1 — 正式運用の前提
 
-#### P1-1 品質ゲートを CI／Release に強制する — `IN PROGRESS`（実装・ローカル検証完了、初回 CI 待ち）
+#### P1-1 品質ゲートを CI／Release に強制する — `DONE`
 
 **実施内容**
 
@@ -45,7 +45,7 @@ EasyMarkdown は、既にデスクトップ／モバイル／VS Code 拡張、�
 **受入条件**
 
 - [x] `npm run quality:fast` がローカルで成功する。
-- [ ] `npm run quality:fast` が初回 GitHub Actions で成功する。
+- [x] `npm run quality:fast` が初回 GitHub Actions で成功する。
 - [x] `npm run test:e2e:smoke:built` が build 済み成果物を検証する。
 - [x] PR workflow に fast gate と smoke E2E が独立 job として定義されている。
 - [x] tag release が full gate を通過しない限り publish されない dependency になっている。
@@ -57,6 +57,7 @@ EasyMarkdown は、既にデスクトップ／モバイル／VS Code 拡張、�
 - `npm run test:e2e:smoke:built`: 5／5 成功（safe mode 実起動を含む）。
 - `npm run test:e2e:built`: 101／101 成功（161.1 秒）。
 - `.github/workflows/ci.yml` と `.github/workflows/release.yml`: YAML parse 成功。
+- GitHub Actions CI Run #47（PR #1）: Fast quality gate／Electron smoke E2E 成功。PR 方針どおり full E2E は skip。
 
 #### P1-2 巨大モジュールを責務別に段階分割する — `DONE`（第一 feature slice）
 
