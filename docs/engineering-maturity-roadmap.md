@@ -141,7 +141,7 @@ EasyMarkdown は、既にデスクトップ／モバイル／VS Code 拡張、�
 
 ### P2 — 継続開発をチーム化できる状態
 
-#### P2-1 リスク別 Feature Dossier
+#### P2-1 リスク別 Feature Dossier — `DONE`
 
 | 変更区分 | 必須資料 |
 | --- | --- |
@@ -150,6 +150,22 @@ EasyMarkdown は、既にデスクトップ／モバイル／VS Code 拡張、�
 | L: 複数 platform／storage／IPC／architecture | `feature.md`、ADR、security／migration／rollback |
 
 `feature.md` の最小項目は Context、Goal、Non-goal、対象 platform、`AC-xx`、UX／data／contract、risk、test mapping、rollout／rollback とする。設計レビューでは実装前に AC を確定し、テストレビューでは AC と test ID の欠落だけを機械的に検出する。
+
+**受入条件**
+
+- [x] S／M／L の判定基準、必須成果物、lifecycle、ID 規則が一つの運用規約に定義されている。
+- [x] `feature.md`、`test-spec.md`、ADR の template があり、L level の実例が一組存在する。
+- [x] AC-ID／TEST-ID の欠落、重複、未定義参照と evidence／ADR／security review の参照切れを機械的に検出する。
+- [x] `npm run feature:check` が `quality:fast` に含まれ、local で成功する。
+- [x] `npm run feature:check` が初回 GitHub Actions で成功する。
+
+**2026-08-09 検証 evidence**
+
+- `diagnostics-recovery`: L level 実例、5 AC、7 TEST mapping、ADR-0001 を追加した。
+- `npm run feature:check`: 1 dossier／5 AC／7 tests 成功。
+- Checker unit test: 6／6 成功。欠落 mapping、未定義 AC、L level 必須 evidence を検証した。
+- `npm run quality:fast`: lint、73 files／533 unit tests、desktop／mobile／VS Code build 成功。
+- GitHub Actions CI Run #50（PR #2）: Fast quality gate／Electron smoke E2E 成功。PR 方針どおり full E2E は skip。
 
 #### P2-2 Product Support Matrix
 

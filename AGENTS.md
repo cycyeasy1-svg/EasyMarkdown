@@ -224,6 +224,12 @@ docs/                  architecture / features / implementation-notes / developm
 
 ## Testing
 
+- **Feature Dossier check** — `npm run feature:check` は
+  `docs/feature-dossiers/` の metadata、必須 section、AC-ID／TEST-ID 対応、
+  evidence／ADR／security review の参照を検査する。M／L level の新規変更は
+  [`docs/feature-dossiers/README.md`](./docs/feature-dossiers/README.md) に従い、
+  実装前に AC を確定する。Template は `_template/`、最初の L level 実例は
+  `diagnostics-recovery/`。この check は `quality:fast` に含まれる。
 - **Lint (ESLint 9, flat config)** — run `npm run lint` (`npm run lint:fix` to
   auto-fix). Config is `eslint.config.mjs`, scoped per runtime context: renderer
   (browser globals + React/JSX, the two classic `react-hooks` rules), main /
