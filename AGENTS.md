@@ -35,12 +35,14 @@ macOS Gatekeeper blocks first launch (right-click → Open, or
 
 ```
 src/main/index.js      main process: window, IPC (fs/dialog/watch), menu, file watching
+src/main/{diagnostics,local-logger,crash-loop}.js  local diagnostics · redaction · safe-mode launch state
 src/preload/index.js   contextBridge → window.api (whitelisted IPC)
 src/renderer/src/
   App.jsx              shell: tabs, state, session, split, theme, lang, editor routing
   components/Editor.jsx  Crepe wrapper + block controls + enhancements
   components/{Sidebar,Tabs,Outline,CommandPalette,StatusBar,icons}.jsx
   components/{Welcome,WindowControls,UpdateToast,RenameModal}.jsx  leaf views split out of App
+  components/AppErrorBoundary.jsx  fatal renderer recovery UI · diagnostics export · limited reset
   components/{Settings,TypographyControls}.jsx  unified settings modal · shared typography adjusters
   components/SearchPanel.jsx  workspace full-text search view (streams from search:* IPC)
   components/editor-{html,images,copy,mermaid,tablebreak}.js  Editor helpers: HTML node view · img paths · rich-copy · mermaid widget · table-cell <br>
@@ -110,6 +112,14 @@ docs/                  architecture / features / implementation-notes / developm
   tabs and calls `confirmAppClose()` to let it close. Covers the macOS traffic
   light, the Windows close button, and Cmd/Ctrl+Q (closing a tab is separate, in
   `closeTab`).
+- **Diagnostics stay local and privacy-bounded.** Main writes rotating NDJSON
+  under `userData/diagnostics`; every record is redacted before disk write and
+  again before user-triggered export. Never log document/clipboard content,
+  credentials, or raw absolute paths. `AppErrorBoundary` owns renderer recovery;
+  safe mode skips session restore and custom themes without overwriting the saved
+  session. `EACCES`/`EPERM`/`EAGAIN`/`EBUSY`/`EMFILE`/`ENFILE` remain recoverable
+  background-fs failures; unknown process-level exceptions are fatal and exit so
+  crash-loop recovery can activate. See `docs/diagnostics-and-recovery.md`.
 - **App version** is injected at build time via Vite `define` (`__APP_VERSION__`
   in `electron.vite.config.mjs`, from `package.json`); shown on the welcome page.
 - **Split view**: `splitId` in `App.jsx` is the tab shown in the right pane

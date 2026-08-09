@@ -20,7 +20,14 @@ export default defineConfig({
   preload: {
     build: {
       rollupOptions: {
-        input: { index: resolve(__dirname, 'src/preload/index.js') }
+        input: { index: resolve(__dirname, 'src/preload/index.js') },
+        // Sandboxed preload scripts do not have an ESM loader. Bundle the
+        // isolated bridge as one CommonJS file and keep the extension explicit
+        // because the repository package.json uses `type: module`.
+        output: {
+          format: 'cjs',
+          entryFileNames: '[name].cjs'
+        }
       }
     }
   },

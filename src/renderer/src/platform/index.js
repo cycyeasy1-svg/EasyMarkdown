@@ -16,7 +16,8 @@ const DESKTOP_CAPABILITIES = {
   nativeMenus: true,
   externalShell: true,
   revealInFolder: true,
-  splitView: true
+  splitView: true,
+  diagnostics: true
 }
 
 export async function installPlatformApi() {

@@ -104,6 +104,7 @@ export default function Settings({
   onGetMoreThemes,
   systemIsDark,
   onClearLocalHistory,
+  onExportDiagnostics,
   onOpenHelp,
   keybindings
 }) {
@@ -516,6 +517,18 @@ export default function Settings({
               ))}
             </div>
           </div>
+
+          {caps.diagnostics && onExportDiagnostics && (
+            <div className="hm-settings-help">
+              <span>
+                <strong>{t('diagnostics.title')}</strong>
+                <small>{t('diagnostics.description')}</small>
+              </span>
+              <button type="button" onClick={onExportDiagnostics}>
+                <Icon name="shield" size={14} /> {t('diagnostics.export')}
+              </button>
+            </div>
+          )}
 
           <div className="hm-settings-help">
             <span>

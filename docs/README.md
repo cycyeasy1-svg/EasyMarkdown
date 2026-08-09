@@ -13,6 +13,9 @@
 | [implementation-notes.md](./implementation-notes.md) | 开发过程中踩的坑、关键 bug 的根因与修法、设计决策 |
 | [performance.md](./performance.md) | 性能优化：内存与渲染卡顿的根因、已做改动与待办方向 |
 | [ux-improvement-roadmap.md](./ux-improvement-roadmap.md) | App 用户体验改善路线图、优先级、完成状态与验收条件 |
+| [engineering-maturity-roadmap.md](./engineering-maturity-roadmap.md) | 軽量な正式開発レベルへ移行するための P1〜P3 計画、受入条件、進捗 |
+| [security-threat-model.md](./security-threat-model.md) | Electron／IPC／local file／release の trust boundary、脅威、対策、残課題 |
+| [diagnostics-and-recovery.md](./diagnostics-and-recovery.md) | 構造化 local log、privacy redaction、診断 export、Error Boundary、safe mode の設計 |
 | [development.md](./development.md) | 本地开发、构建、打包（Windows / macOS）、自动化测试方法 |
 | [mobile.md](./mobile.md) | 移动端（iOS / Android · Capacitor）方案、接口适配、打包发布 |
 | [mobile-usage.md](./mobile-usage.md) | 移动端**使用说明**(安装、界面、保存/导出等操作) |
