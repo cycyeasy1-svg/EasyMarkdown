@@ -14,6 +14,8 @@
 | [performance.md](./performance.md) | 性能优化：内存与渲染卡顿的根因、已做改动与待办方向 |
 | [ux-improvement-roadmap.md](./ux-improvement-roadmap.md) | App 用户体验改善路线图、优先级、完成状态与验收条件 |
 | [engineering-maturity-roadmap.md](./engineering-maturity-roadmap.md) | 軽量な正式開発レベルへ移行するための P1〜P3 計画、受入条件、進捗 |
+| [feature-dossiers/README.md](./feature-dossiers/README.md) | リスク別 Feature Dossier、AC-ID／TEST-ID、設計・テスト review の運用規約 |
+| [adr/README.md](./adr/README.md) | Architecture Decision Record の作成条件、status、index |
 | [security-threat-model.md](./security-threat-model.md) | Electron／IPC／local file／release の trust boundary、脅威、対策、残課題 |
 | [diagnostics-and-recovery.md](./diagnostics-and-recovery.md) | 構造化 local log、privacy redaction、診断 export、Error Boundary、safe mode の設計 |
 | [development.md](./development.md) | 本地开发、构建、打包（Windows / macOS）、自动化测试方法 |
