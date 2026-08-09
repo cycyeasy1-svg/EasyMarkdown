@@ -1,5 +1,7 @@
 # Support
 
+Current product tiers, compatibility baselines, and release readiness are defined in the [Product Support Matrix](./docs/product-support-matrix.md). A buildable target is not necessarily an officially supported or published product.
+
 Use GitHub Issues for public bug reports and feature requests:
 
 https://github.com/cycyeasy1-svg/EasyMarkdown/issues

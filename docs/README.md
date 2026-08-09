@@ -16,6 +16,9 @@
 | [engineering-maturity-roadmap.md](./engineering-maturity-roadmap.md) | 軽量な正式開発レベルへ移行するための P1〜P3 計画、受入条件、進捗 |
 | [feature-dossiers/README.md](./feature-dossiers/README.md) | リスク別 Feature Dossier、AC-ID／TEST-ID、設計・テスト review の運用規約 |
 | [adr/README.md](./adr/README.md) | Architecture Decision Record の作成条件、status、index |
+| [product-support-matrix.md](./product-support-matrix.md) | Desktop／Mobile／VS Code／Website の support tier、compatibility baseline、release gate |
+| [release-evidence/README.md](./release-evidence/README.md) | Beta／Stable product を公開する際の release evidence と authorization 運用 |
+| [release.md](./release.md) | Desktop release の品質 gate、署名、manual smoke、公開、rollback 手順 |
 | [security-threat-model.md](./security-threat-model.md) | Electron／IPC／local file／release の trust boundary、脅威、対策、残課題 |
 | [diagnostics-and-recovery.md](./diagnostics-and-recovery.md) | 構造化 local log、privacy redaction、診断 export、Error Boundary、safe mode の設計 |
 | [development.md](./development.md) | 本地开发、构建、打包（Windows / macOS）、自动化测试方法 |

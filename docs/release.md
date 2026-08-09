@@ -4,6 +4,16 @@
 
 > local で作成する desktop package は未署名の場合がある。公式 tag workflow は fail-closed とし、Windows code signing と macOS signing／notarization の credential がない場合は publish しない。初回の署名済み release 実績、checksum／provenance は P1-3 の残課題として確認すること。
 
+## 0. 公開 authorization
+
+[Product Support Matrix](./product-support-matrix.md) を product tier、compatibility baseline、publication readiness の source of truth とする。Version 番号、build 成功、local package、download link だけでは official release と判断しない。
+
+- `BLOCKED` の product は不足 gate を解消するまで tag／Store／Marketplace／production deployment を公開しない。
+- `NOT ELIGIBLE` の Experimental product は official publication 対象外とする。
+- Beta／Stable を外部公開する場合は [release evidence template](./release-evidence/_template.md) を複製し、source commit、artifact、automated gate、manual smoke、signing、rollback、final decision を記録する。
+- Evidence の final decision が `APPROVED` になるまで、draft artifact を official と案内しない。
+- Secret、certificate、password、token、user document は evidence に保存しない。
+
 ## 1. Tag 作成前
 
 ### 1.1 Version とリリースノート
