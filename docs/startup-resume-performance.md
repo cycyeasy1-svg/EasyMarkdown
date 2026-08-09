@@ -1,3 +1,10 @@
+---
+doc_version: 1
+doc_status: active
+doc_owner: maintainers
+last_verified: 2026-08-09
+---
+
 # 起動・復帰パフォーマンス調査記録
 
 - 更新日: 2026-08-01
@@ -191,11 +198,11 @@ minify によりディスク読み込み・解析対象は縮小するが、単�
    - 重複排除、入力順維持、最大 6 並列、ディレクトリ単位の失敗分離を行う `readDirectoriesBatched` を追加した。
 3. [`App.jsx`](../src/renderer/src/App.jsx)
    - 初回マウントの `themes:list` 呼び出しを削除した。設定画面とモバイルテーマ選択 UI の open 時 refresh は維持した。
-4. [`electron.vite.config.mjs`](../../electron.vite.config.mjs)
+4. [`electron.vite.config.mjs`](../electron.vite.config.mjs)
    - renderer build に `minify: 'esbuild'` を明示した。
 5. [`app.css`](../src/renderer/src/styles/app.css)
    - CSP により利用されていなかった Google Fonts の `@import` を削除した。
-6. [`perf-app.mjs`](../../scripts/perf-app.mjs)
+6. [`perf-app.mjs`](../scripts/perf-app.mjs)
    - 既に廃止された `Ctrl+/` title 依存の selector を、現行の単一 view-cycle button の安定した class/data contract へ更新した。
 7. テスト
    - `readDirectoriesBatched` の重複排除・順序・失敗分離・最大並列数を単体テスト化した。

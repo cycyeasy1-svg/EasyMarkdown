@@ -1,3 +1,10 @@
+---
+doc_version: 1
+doc_status: template
+doc_owner: maintainers
+last_verified: 2026-08-09
+---
+
 # Release Evidence: RELEASE-ID
 
 - Status: Draft

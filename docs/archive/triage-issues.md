@@ -1,3 +1,10 @@
+---
+doc_version: 1
+doc_status: archived
+doc_owner: maintainers
+last_verified: 2026-08-09
+---
+
 # 待办梳理：Issue #10 / #11 + 字号 + 粘贴图片丢失
 
 > 本批改动的目标、根因分析与实施方案。**约束:不引入 bug、不影响现有功能;

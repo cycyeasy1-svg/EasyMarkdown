@@ -1,11 +1,15 @@
+---
+doc_version: 1
+doc_status: active
+doc_owner: maintainers
+last_verified: 2026-08-09
+---
+
 # EasyMarkdown セキュリティ脅威モデル
 
 | 項目 | 内容 |
 | --- | --- |
-| Status | Active |
-| Owner | Maintainers |
 | Created | 2026-08-09 |
-| Last verified | 2026-08-09 |
 | Scope | Desktop Electron app（main／preload／renderer／local file／release） |
 
 ## 1. 目的と前提

@@ -1,11 +1,15 @@
+---
+doc_version: 1
+doc_status: active
+doc_owner: maintainers
+last_verified: 2026-08-09
+---
+
 # EasyMarkdown エンジニアリング成熟度改善ロードマップ
 
 | 項目 | 内容 |
 | --- | --- |
-| Status | Active |
-| Owner | Maintainers |
 | Created | 2026-08-09 |
-| Last verified | 2026-08-09 |
 | Target | 軽量な正式開発レベル（継続的に安全な変更・リリースができる状態） |
 
 ## 1. 目的
@@ -190,11 +194,31 @@ EasyMarkdown は、既にデスクトップ／モバイル／VS Code 拡張、�
 - `npm run quality:fast`: version／dossier／lint、73 files／533 unit tests、desktop／mobile／VS Code build 成功。
 - GitHub Actions CI Run #53（PR #3）: Fast quality gate／Electron smoke E2E 成功。PR 方針どおり full E2E は skip。
 
-#### P2-3 Docs as Code
+#### P2-3 Docs as Code — `IN PROGRESS`（local 検証完了、初回 CI 待ち）
 
 - version、status、owner、last verified、broken link を `docs:check` で検査する。
 - 重複した仕様を削り、architecture／feature／ADR／test evidence の source of truth を決める。
 - 完了済み計画は archive し、現行仕様と履歴を混在させない。
+
+**受入条件**
+
+- [x] `docs/**/*.md` に version、status、owner、last verified metadata が存在する。
+- [x] Local file／directory／heading link と repository boundary を `docs:check` が検査する。
+- [x] Architecture／feature／implementation note／Feature Dossier／ADR／test／release／roadmap の source of truth が定義されている。
+- [x] 完了済み Keep mode plan、issue batch、UX roadmap が archive index へ移動している。
+- [x] `docs:check` が `quality:fast` に含まれている。
+- [x] `npm run quality:fast` が local で成功する。
+- [ ] P2-3 の初回 GitHub Actions が成功する。
+
+**2026-08-09 検証 evidence**
+
+- `npm run docs:check`: 35 documents／52 link sources／211 local links 成功。
+- Docs checker unit test: 8／8 成功。Metadata、code exclusion、heading anchor、missing target、repository escape、separator、path case を検証した。
+- 完了済み plan 3 件を `docs/archive/` へ移動し、public roadmap と mobile install 表示を Product Support Matrix に整合させた。
+- `docs-as-code`: L level Feature Dossier、5 AC、5 TEST mapping、ADR-0003 を追加した。
+- `npm run feature:check`: 3 dossier／15 AC／17 tests 成功。
+- `npm run quality:fast`: version／dossier／docs／lint、74 files／541 unit tests、desktop／mobile／VS Code build 成功。
+- GitHub Actions の初回成功は未確認のため、P2-3 は `IN PROGRESS` を維持する。
 
 #### P2-4 型・契約・回帰検査の段階導入
 

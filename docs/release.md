@@ -1,3 +1,10 @@
+---
+doc_version: 1
+doc_status: active
+doc_owner: maintainers
+last_verified: 2026-08-09
+---
+
 # EasyMarkdown リリース手順
 
 本書は、EasyMarkdown の desktop 正式版を GitHub Release へ公開するための手順と品質ゲートを定義する。Mobile と VS Code 拡張は独立した version／配布 cadence を持つ。

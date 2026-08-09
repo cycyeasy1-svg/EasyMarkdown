@@ -231,6 +231,12 @@ docs/                  architecture / features / implementation-notes / developm
 
 ## Testing
 
+- **Docs as Code check** — `npm run docs:check` は `docs/**/*.md` の
+  `doc_version`／`doc_status`／`doc_owner`／`last_verified`、local file／directory／
+  heading link、template／archive path を検査する。Document の責務と source of truth は
+  [`docs/documentation-governance.md`](./docs/documentation-governance.md) に従う。
+  完了済み plan は `docs/archive/` へ移動し、現行仕様と混在させない。この check は
+  `quality:fast` に含まれる。
 - **Feature Dossier check** — `npm run feature:check` は
   `docs/feature-dossiers/` の metadata、必須 section、AC-ID／TEST-ID 対応、
   evidence／ADR／security review の参照を検査する。M／L level の新規変更は

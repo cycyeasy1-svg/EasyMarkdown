@@ -1,3 +1,10 @@
+---
+doc_version: 1
+doc_status: active
+doc_owner: maintainers
+last_verified: 2026-08-09
+---
+
 # 性能优化：内存与渲染卡顿的根因、已做改动与待办方向
 
 这份文档记录针对"内存占用偏高"和"功能变多后某些场景卡顿"两类反馈做的性能排查、已落地的改动，以及还没做的方向（留作后续按需推进）。排查方式以阅读代码 + 构建产物分析为主；运行时数值需在本地打包版上实测（见 [development.md](./development.md)）。

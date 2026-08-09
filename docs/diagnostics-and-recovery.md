@@ -1,6 +1,11 @@
-# 診断・復旧設計
+---
+doc_version: 1
+doc_status: active
+doc_owner: maintainers
+last_verified: 2026-08-09
+---
 
-Last verified: 2026-08-09
+# 診断・復旧設計
 
 ## 1. 目的
 

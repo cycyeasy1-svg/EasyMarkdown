@@ -1,3 +1,10 @@
+---
+doc_version: 1
+doc_status: archived
+doc_owner: maintainers
+last_verified: 2026-08-09
+---
+
 # 「保持モード（source-backed 編集）」実装計画
 
 > 本書は **新しいセッション（会話履歴なし）でそのまま着手できる**ことを目的とした自己完結型の実装計画である。

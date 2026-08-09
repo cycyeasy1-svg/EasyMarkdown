@@ -1,4 +1,7 @@
 ---
+doc_version: 1
+doc_status: active
+doc_owner: maintainers
 feature_id: FD-DIAGNOSTICS-RECOVERY
 title: ローカル診断とセーフモード復旧
 risk: L

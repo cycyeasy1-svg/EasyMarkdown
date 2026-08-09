@@ -1,4 +1,7 @@
 ---
+doc_version: 1
+doc_status: template
+doc_owner: maintainers
 feature_id: FD-EXAMPLE
 title: 機能名
 risk: M

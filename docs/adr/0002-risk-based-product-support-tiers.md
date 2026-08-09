@@ -1,3 +1,10 @@
+---
+doc_version: 1
+doc_status: active
+doc_owner: maintainers
+last_verified: 2026-08-09
+---
+
 # ADR-0002: Product 別 tier と release 別 readiness を分離する
 
 - Status: Accepted
