@@ -221,6 +221,13 @@ docs/                  architecture / features / implementation-notes / developm
   use Electron's `net.fetch` (Chromium stack), not Node's global `fetch` (its
   c-ares resolver can abort an unsigned app under launchd).
 - **Don't commit `dist/` or `out/`** (gitignored). `build/icon.*` IS tracked.
+- **Product support と official publication** —
+  [`docs/product-support-matrix.md`](./docs/product-support-matrix.md) を product tier、
+  compatibility baseline、release gate の source of truth とする。Build 成功、version、
+  local artifact だけを support evidence とみなさない。Beta／Stable の公開前は
+  `docs/release-evidence/` に release record を作成し、`BLOCKED`／`NOT ELIGIBLE` を
+  official tag、Store／Marketplace publish、production deploy しない。Platform、runtime、
+  packaging、signing、distribution contract の変更時は matrix と L level dossier を更新する。
 
 ## Testing
 

@@ -24,3 +24,4 @@ ADR は、L level 変更のうち、後から理由を復元しにくい archite
 | ADR | Status | Decision |
 | --- | --- | --- |
 | [0001](./0001-local-diagnostics-and-safe-mode.md) | Accepted | 診断情報を local-only とし、safe mode で復旧する |
+| [0002](./0002-risk-based-product-support-tiers.md) | Accepted | Product 別 support tier と release 別 publication readiness を分離する |

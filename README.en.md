@@ -169,36 +169,23 @@ switchable with `Ctrl+Shift+T` or the status-bar picker.
 
 ## Install
 
-Grab the latest installer from the [**Releases page**](https://github.com/cycyeasy1-svg/EasyMarkdown/releases/latest).
+> **No official installer has been published yet.** [GitHub Releases](https://github.com/cycyeasy1-svg/EasyMarkdown/releases) is empty; Desktop Windows and macOS are currently `Beta / BLOCKED`. See the [Product Support Matrix](./docs/product-support-matrix.md) for the current compatibility baseline and release gates.
 
-> ℹ️ Builds aren't code-signed yet, so Windows / macOS will warn on first launch — it's **not malware and not actually damaged**. Follow the steps below to allow it. The source is fully open; build it yourself if you prefer.
+To try EasyMarkdown now, build it from source using the development commands below or the [development guide](./docs/development.md). Local builds may be unsigned and must not be redistributed or presented as official EasyMarkdown installers. Future official artifacts will only be published through this repository's Releases workflow after Windows signing and macOS signing/notarization checks pass.
 
-### 🍎 macOS (step by step)
+### 🍎 macOS (after an official Release is published)
 
 1. Check your chip: **Apple menu → "About This Mac"**:
    - **"Apple M1 / M2 / M3…"** (Apple Silicon) → download **`EasyMarkdown-x.x.x-arm64.dmg`**.
    - **"Intel"** → download **`EasyMarkdown-x.x.x.dmg`** (the one without the `-arm64` suffix).
 2. Double-click the `.dmg` and **drag the EasyMarkdown icon into the Applications folder**.
-3. **First launch** (important): double-clicking usually shows **"damaged and can't be opened"** or **"can't verify the developer"** — that's just the missing signature. Use either:
+3. Verify the version, checksum, signature, and notarization in the Release evidence. If macOS still reports a source or signature problem, do not bypass Gatekeeper; report it through GitHub Issues.
 
-   - **Option A (easiest, recommended)**: in Finder → **Applications**, **Control-click (or right-click) EasyMarkdown → Open**, then click **Open** in the dialog. After this it opens normally by double-click.
-   - **Option B (if A still says "damaged")**: open **Terminal** (Launchpad → Other → Terminal), paste this line and press Return:
-
-     ```bash
-     xattr -cr /Applications/EasyMarkdown.app
-     ```
-
-     then double-click EasyMarkdown again.
-
-> You only need to do this **once per Mac**; updates generally won't require it again.
-
-### 🪟 Windows
+### 🪟 Windows (after an official Release is published)
 
 1. Download **`EasyMarkdown-Setup-x.x.x.exe`** and run it.
-2. If a blue **SmartScreen** "Windows protected your PC" prompt appears, click **More info → Run anyway**.
+2. Verify the version, SHA-256 checksum, and digital signature in the Release evidence. If SmartScreen reports an unknown publisher or invalid signature, do not bypass it; report it through GitHub Issues.
 3. Follow the installer (you can choose the install folder), then launch from Start menu / desktop.
-
-> Signing & notarization are planned — see the [CHANGELOG](./CHANGELOG.md).
 
 ## Feedback & support
 

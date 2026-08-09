@@ -149,36 +149,23 @@
 
 ## 安装
 
-去 [**Releases 页面**](https://github.com/cycyeasy1-svg/EasyMarkdown/releases/latest) 下载最新版安装包。
+> **当前尚未发布官方安装包。** [GitHub Releases](https://github.com/cycyeasy1-svg/EasyMarkdown/releases) 为空；Desktop Windows／macOS 当前为 `Beta / BLOCKED`。最新状态、兼容范围和正式发布条件以 [Product Support Matrix](./docs/product-support-matrix.md) 为准。
 
-> ℹ️ 安装包目前**没有花钱买签名**，所以 Windows / macOS 第一次打开都会拦一下——**不是病毒、不是真的损坏**，按下面步骤放行即可。代码完全开源，可自行查看 / 构建。
+现在想试用请从源码构建（见下方「开发」或 [开发文档](./docs/development.md)）。本地构建可能没有签名，不应转发或标记为 EasyMarkdown 官方安装包。后续正式安装包只会通过本仓库 Releases 发布，并由发布流程校验 Windows 签名、macOS 签名与公证。
 
-### 🍎 macOS 安装（新手请按这个来）
+### 🍎 macOS 安装（官方 Release 发布后）
 
 1. 确认你的芯片：左上角 **苹果菜单 →「关于本机」**：
    - 看到 **「Apple M1 / M2 / M3…」**（Apple Silicon）→ 下载 **`EasyMarkdown-x.x.x-arm64.dmg`**。
    - 看到 **「Intel」** → 下载 **`EasyMarkdown-x.x.x.dmg`**（不带 `-arm64` 后缀的那个）。
 2. 双击下载好的 `.dmg`，把里面的 **EasyMarkdown 图标拖到「应用程序」文件夹**。
-3. **第一次打开**（重要）：直接双击通常会提示 **「已损坏，无法打开」或「无法验证开发者」**——这是因为没签名，正常现象。任选一种方法放行：
+3. 在 Release evidence 中核对版本、checksum、签名与 notarization。若系统仍提示来源或签名异常，请不要绕过 Gatekeeper，先在 GitHub Issues 报告。
 
-   - **方法 A（最简单，推荐）**：打开「访达 →『应用程序』」，找到 EasyMarkdown，**按住 Control 键点它（或右键）→ 选「打开」**，在弹窗里再点一次 **「打开」**。之后就能像普通软件一样双击使用了。
-   - **方法 B（如果方法 A 仍提示「已损坏」）**：打开「**终端**」（在「启动台 → 其他 → 终端」，或 Spotlight 搜 `终端`），把下面这行**整段复制粘贴进去、按回车**：
-
-     ```bash
-     xattr -cr /Applications/EasyMarkdown.app
-     ```
-
-     然后再回到「应用程序」双击 EasyMarkdown 即可正常打开。
-
-> 这一步**每台电脑只需做一次**，以后更新版本一般也不用再弄。
-
-### 🪟 Windows 安装
+### 🪟 Windows 安装（官方 Release 发布后）
 
 1. 下载 **`EasyMarkdown-Setup-x.x.x.exe`**，双击运行。
-2. 若弹出蓝色的 **SmartScreen**「Windows 已保护你的电脑」，点 **「更多信息」→「仍要运行」**。
+2. 核对 Release evidence 中的版本、SHA-256 与数字签名。若 SmartScreen 显示未知发布者或签名异常，请不要直接绕过，先在 GitHub Issues 报告。
 3. 按提示安装（可以自己选安装目录），完成后从开始菜单或桌面打开。
-
-> 签名与公证在计划中 —— 见 [CHANGELOG](./CHANGELOG.md)。
 
 ## 反馈 & 支持
 
