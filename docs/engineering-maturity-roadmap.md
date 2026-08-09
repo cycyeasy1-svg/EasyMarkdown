@@ -194,7 +194,7 @@ EasyMarkdown は、既にデスクトップ／モバイル／VS Code 拡張、�
 - `npm run quality:fast`: version／dossier／lint、73 files／533 unit tests、desktop／mobile／VS Code build 成功。
 - GitHub Actions CI Run #53（PR #3）: Fast quality gate／Electron smoke E2E 成功。PR 方針どおり full E2E は skip。
 
-#### P2-3 Docs as Code — `IN PROGRESS`（local 検証完了、初回 CI 待ち）
+#### P2-3 Docs as Code — `DONE`
 
 - version、status、owner、last verified、broken link を `docs:check` で検査する。
 - 重複した仕様を削り、architecture／feature／ADR／test evidence の source of truth を決める。
@@ -208,7 +208,7 @@ EasyMarkdown は、既にデスクトップ／モバイル／VS Code 拡張、�
 - [x] 完了済み Keep mode plan、issue batch、UX roadmap が archive index へ移動している。
 - [x] `docs:check` が `quality:fast` に含まれている。
 - [x] `npm run quality:fast` が local で成功する。
-- [ ] P2-3 の初回 GitHub Actions が成功する。
+- [x] P2-3 の初回 GitHub Actions が成功する。
 
 **2026-08-09 検証 evidence**
 
@@ -218,7 +218,7 @@ EasyMarkdown は、既にデスクトップ／モバイル／VS Code 拡張、�
 - `docs-as-code`: L level Feature Dossier、5 AC、5 TEST mapping、ADR-0003 を追加した。
 - `npm run feature:check`: 3 dossier／15 AC／17 tests 成功。
 - `npm run quality:fast`: version／dossier／docs／lint、74 files／541 unit tests、desktop／mobile／VS Code build 成功。
-- GitHub Actions の初回成功は未確認のため、P2-3 は `IN PROGRESS` を維持する。
+- GitHub Actions CI Run #56（PR #4）: Fast quality gate／Electron smoke E2E 成功。PR 方針どおり full E2E は skip。
 
 #### P2-4 型・契約・回帰検査の段階導入
 
