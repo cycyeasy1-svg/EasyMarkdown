@@ -167,7 +167,7 @@ EasyMarkdown は、既にデスクトップ／モバイル／VS Code 拡張、�
 - `npm run quality:fast`: lint、73 files／533 unit tests、desktop／mobile／VS Code build 成功。
 - GitHub Actions CI Run #50（PR #2）: Fast quality gate／Electron smoke E2E 成功。PR 方針どおり full E2E は skip。
 
-#### P2-2 Product Support Matrix — `IN PROGRESS`（local 検証完了、初回 CI 待ち）
+#### P2-2 Product Support Matrix — `DONE`
 
 - Desktop Windows／macOS、Mobile iOS／Android、VS Code extension、Website の release tier を Stable／Beta／Experimental で宣言する。
 - tier ごとに必要な build、test、manual smoke、署名、rollback 条件を定義する。
@@ -179,7 +179,7 @@ EasyMarkdown は、既にデスクトップ／モバイル／VS Code 拡張、�
 - [x] Product 固有 gate、promotion／demotion 条件、未検証範囲が明示されている。
 - [x] Beta／Stable の公開を release evidence で authorization し、不足時は fail-closed にする。
 - [x] `npm run quality:fast` が local で成功する。
-- [ ] P2-2 の初回 GitHub Actions が成功する。
+- [x] P2-2 の初回 GitHub Actions が成功する。
 
 **2026-08-09 検証 evidence**
 
@@ -188,7 +188,7 @@ EasyMarkdown は、既にデスクトップ／モバイル／VS Code 拡張、�
 - `product-support-matrix`: L level Feature Dossier、5 AC、5 TEST mapping、ADR-0002 を追加した。
 - `npm run feature:check`: 2 dossier／10 AC／12 tests 成功。
 - `npm run quality:fast`: version／dossier／lint、73 files／533 unit tests、desktop／mobile／VS Code build 成功。
-- GitHub Actions の初回成功は未確認のため、P2-2 は `IN PROGRESS` を維持する。
+- GitHub Actions CI Run #53（PR #3）: Fast quality gate／Electron smoke E2E 成功。PR 方針どおり full E2E は skip。
 
 #### P2-3 Docs as Code
 
