@@ -1,4 +1,7 @@
 ---
+doc_version: 1
+doc_status: active
+doc_owner: maintainers
 feature_id: FD-PRODUCT-SUPPORT
 title: Product Support Matrix と release authorization
 risk: L

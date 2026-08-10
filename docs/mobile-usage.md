@@ -1,3 +1,10 @@
+---
+doc_version: 1
+doc_status: active
+doc_owner: maintainers
+last_verified: 2026-08-09
+---
+
 # EasyMarkdown 移动端使用说明(Android / iOS)
 
 面向手机/平板用户的使用指南。技术实现见 [mobile.md](./mobile.md)。
@@ -6,14 +13,19 @@
 
 ## 一、安装
 
+> 当前发布状态以 [Product Support Matrix](./product-support-matrix.md) 为准。能够本地构建不等于已经正式发布；不要从第三方来源下载或转发标记为“官方”的安装包。
+
 ### Android
-- 拿到 `EasyMarkdown-x.x.x-release.apk`(GitHub Releases / 作者分享)。
-- 传到手机(微信文件传输助手 / 网盘 / 数据线),点开安装;首次会提示「未知来源」,允许即可。
-- 安装包未做花钱签名公证,但已用开发者证书签名,正常可用。
+
+- Android 当前为 `Beta / BLOCKED`，尚无官方 APK／Google Play 下载。
+- 开发验证请按 [mobile.md](./mobile.md) 从源码生成受控测试包，并核对 applicationId、version、签名与来源 commit。
+- 未经 release evidence 批准的本地包仅供测试，不应对外分发；不要为来源不明的 APK 绕过系统安全提示。
 
 ### iOS
-- 目前需用 Xcode 安装到自己的设备(免费 Apple ID 即可,App 7 天后需重连 Xcode 续期);
-  正式分发将走 TestFlight / App Store(需 Apple 开发者账号)。详见 [mobile.md](./mobile.md) §10。
+
+- iOS 当前为 `Experimental / NOT ELIGIBLE`，没有官方 TestFlight／App Store 下载。
+- Maintainer 的开发验证可通过 Xcode 安装到受控设备；这不构成正式分发或兼容性承诺。
+- Beta 昇格需要 signing、TestFlight、iOS 15+ simulator／真机 smoke 和 rollback evidence。详见 [mobile.md](./mobile.md) §10。
 
 ## 二、界面速览
 

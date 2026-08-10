@@ -1,8 +1,11 @@
-# Release Evidence 運用規約
+---
+doc_version: 1
+doc_status: active
+doc_owner: maintainers
+last_verified: 2026-08-09
+---
 
-- Status: Active
-- Owner: maintainers
-- Last verified: 2026-08-09
+# Release Evidence 運用規約
 
 Beta／Stable product を外部公開する release ごとに、[_template.md](./_template.md) を複製して evidence を作成する。File 名は desktop の例では `v1.5.0.md`、VS Code の例では `vscode-v1.7.0.md` とする。
 

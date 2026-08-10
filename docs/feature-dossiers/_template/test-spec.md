@@ -1,4 +1,7 @@
 ---
+doc_version: 1
+doc_status: template
+doc_owner: maintainers
 feature_id: FD-EXAMPLE
 last_verified: 2026-08-09
 ---

@@ -1,3 +1,10 @@
+---
+doc_version: 1
+doc_status: active
+doc_owner: maintainers
+last_verified: 2026-08-09
+---
+
 # 移动端适配方案(iOS / Android)
 
 > 状态（2026-08-09）：Capacitor 实现已合并。Android 已在华为 Android 10 与 MatePad Android 12 做过代表性验证，当前为 `Beta / BLOCKED`；iOS 工程已存在，但尚无 TestFlight／真机发布证据，当前为 `Experimental / NOT ELIGIBLE`。支持范围与发布条件以 [Product Support Matrix](./product-support-matrix.md) 为准；本文保留方案背景和原生打包手册。

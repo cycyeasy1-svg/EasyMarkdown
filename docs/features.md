@@ -1,3 +1,10 @@
+---
+doc_version: 1
+doc_status: active
+doc_owner: maintainers
+last_verified: 2026-08-09
+---
+
 # 功能与实现
 
 下面按功能列出**怎么用**和**怎么实现的**（附对应文件）。

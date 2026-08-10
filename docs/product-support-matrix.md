@@ -1,8 +1,11 @@
-# Product Support Matrix
+---
+doc_version: 1
+doc_status: active
+doc_owner: maintainers
+last_verified: 2026-08-09
+---
 
-- Status: Active
-- Owner: maintainers
-- Last verified: 2026-08-09
+# Product Support Matrix
 
 ## 1. 目的
 

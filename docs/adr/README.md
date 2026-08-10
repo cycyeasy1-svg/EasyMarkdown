@@ -1,6 +1,11 @@
-# Architecture Decision Record 運用規約
+---
+doc_version: 1
+doc_status: active
+doc_owner: maintainers
+last_verified: 2026-08-09
+---
 
-Last verified: 2026-08-09
+# Architecture Decision Record 運用規約
 
 ADR は、L level 変更のうち、後から理由を復元しにくい architecture／data／security／platform 判断を記録する。実装手順や進捗管理には使用しない。
 
@@ -25,3 +30,4 @@ ADR は、L level 変更のうち、後から理由を復元しにくい archite
 | --- | --- | --- |
 | [0001](./0001-local-diagnostics-and-safe-mode.md) | Accepted | 診断情報を local-only とし、safe mode で復旧する |
 | [0002](./0002-risk-based-product-support-tiers.md) | Accepted | Product 別 support tier と release 別 publication readiness を分離する |
+| [0003](./0003-document-metadata-and-local-link-gate.md) | Accepted | Document 内 metadata と deterministic local link gate を採用する |

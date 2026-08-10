@@ -1,3 +1,10 @@
+---
+doc_version: 1
+doc_status: archived
+doc_owner: maintainers
+last_verified: 2026-08-09
+---
+
 # App 用户体验改善路线图
 
 最后更新日期：2026-07-16

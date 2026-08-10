@@ -1,3 +1,10 @@
+---
+doc_version: 1
+doc_status: active
+doc_owner: maintainers
+last_verified: 2026-08-09
+---
+
 # EasyMarkdown 开发文档
 
 这套文档记录 **EasyMarkdown** 的架构、功能实现方式、开发/打包流程，以及开发过程中发现并修复的关键问题与设计决策。
@@ -12,8 +19,9 @@
 | [features.md](./features.md) | 每个功能的用法 + 实现方式（对应到具体文件） |
 | [implementation-notes.md](./implementation-notes.md) | 开发过程中踩的坑、关键 bug 的根因与修法、设计决策 |
 | [performance.md](./performance.md) | 性能优化：内存与渲染卡顿的根因、已做改动与待办方向 |
-| [ux-improvement-roadmap.md](./ux-improvement-roadmap.md) | App 用户体验改善路线图、优先级、完成状态与验收条件 |
+| [startup-resume-performance.md](./startup-resume-performance.md) | 起動・復帰 performance の計測、対応履歴、残課題 |
 | [engineering-maturity-roadmap.md](./engineering-maturity-roadmap.md) | 軽量な正式開発レベルへ移行するための P1〜P3 計画、受入条件、進捗 |
+| [documentation-governance.md](./documentation-governance.md) | Document metadata、source of truth、link gate、archive の運用規約 |
 | [feature-dossiers/README.md](./feature-dossiers/README.md) | リスク別 Feature Dossier、AC-ID／TEST-ID、設計・テスト review の運用規約 |
 | [adr/README.md](./adr/README.md) | Architecture Decision Record の作成条件、status、index |
 | [product-support-matrix.md](./product-support-matrix.md) | Desktop／Mobile／VS Code／Website の support tier、compatibility baseline、release gate |
@@ -24,6 +32,7 @@
 | [development.md](./development.md) | 本地开发、构建、打包（Windows / macOS）、自动化测试方法 |
 | [mobile.md](./mobile.md) | 移动端（iOS / Android · Capacitor）方案、接口适配、打包发布 |
 | [mobile-usage.md](./mobile-usage.md) | 移动端**使用说明**(安装、界面、保存/导出等操作) |
+| [archive/README.md](./archive/README.md) | 完了済み plan／roadmap の履歴 index（現行仕様ではない） |
 
 ## 一句话技术概览
 
@@ -40,4 +49,4 @@ npm start          # 运行已构建的应用
 npm run dist       # 打当前系统安装包（Windows NSIS / macOS dmg+zip）
 ```
 
-> 仓库根目录的 [CLAUDE.md](../CLAUDE.md) 是给 AI / 新同学的速查（命令、约定、跨平台规则），细节看本目录各篇。
+> 仓库根目录的 [AGENTS.md](../AGENTS.md) 是 AI / 新同学的速查（命令、约定、跨平台规则），细节看本目录各篇。

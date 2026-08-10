@@ -1,3 +1,10 @@
+---
+doc_version: 1
+doc_status: active
+doc_owner: maintainers
+last_verified: 2026-08-09
+---
+
 # 实现笔记：踩过的坑、根因与决策
 
 这份文档记录开发过程中发现的关键问题、根本原因、修复方式，以及一些设计决策。很多 bug 是用 CDP 端到端实测（见 [development.md](./development.md)）才定位到的。

@@ -1,6 +1,11 @@
-# Feature Dossier 運用規約
+---
+doc_version: 1
+doc_status: active
+doc_owner: maintainers
+last_verified: 2026-08-09
+---
 
-Last verified: 2026-08-09
+# Feature Dossier 運用規約
 
 ## 1. 目的
 
