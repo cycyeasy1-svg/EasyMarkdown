@@ -101,6 +101,7 @@ Accessibility semantics／style／test／performance selector／document を同�
 - `node scripts/perf-resume.mjs --runs=1`: 5／5 budget 成功。Resident Keep editor 4、DOM node 16,424、resume 48.4 ms、hibernate reopen 192.6 ms、scroll ratio 0.701。
 - `npm run quality:fast`: 81 files／579 unit tests、coverage statements 73.59%／branches 76.52%／functions 74.57%／lines 73.57%、Desktop／Mobile／VS Code build を含む全 gate 成功。
 - `npm run dependencies:check`: root／VS Code とも 2026-08-09 baseline 比 no-regression。既知 vulnerability は本 dossier の non-goal とし、release eligibility の根拠にはしない。
+- GitHub Actions CI Run #65（PR #8）: Fast quality gate／Dependency baseline scan／Electron smoke E2E 成功。Draft PR 方針どおり full E2E は skip、local full E2E は 103／103 成功。
 - Windows automation では macOS／mobile 実機、VoiceOver／Narrator／TalkBack、OS text scaling、任意 Markdown／custom theme を検証していない。Product Support Matrix と official publication eligibility は変更しない。
 
 ## Open Questions

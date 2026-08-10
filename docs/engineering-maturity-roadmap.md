@@ -303,7 +303,7 @@ EasyMarkdown は、既にデスクトップ／モバイル／VS Code 拡張、�
 - `npm run docs:check`: 45 documents／62 link sources／248 local links 成功。`npm run feature:check`: 6 dossier／34 AC／39 tests 成功。
 - GitHub Actions CI Run #63（PR #7）: Fast quality gate／Dependency baseline scan／Electron smoke E2E 成功。PR 方針どおり full E2E は skip。
 
-#### P3-3 UI residual risk audit — `IN PROGRESS`
+  #### P3-3 UI residual risk audit — `DONE`
 
 - UI の残課題は `/harden` → `/optimize` → `/adapt` → `/polish` の順で再監査する。
 - Visual redesign ではなく、reproducible な accessibility、minimum-window、keyboard、performance evidence の residual risk を対象とする。
@@ -316,7 +316,7 @@ EasyMarkdown は、既にデスクトップ／モバイル／VS Code 拡張、�
   - [x] `perf-app`／`perf-resume` が selector timeout なく report を生成し、既存 budget を維持する。
   - [x] Desktop／Mobile／VS Code の fast quality gate と Electron smoke／focused E2E が成功する。
   - [x] Windows automation で代替できない macOS／mobile／assistive technology／custom content の residual risk を記録する。
-  - [ ] P3-3 の初回 GitHub Actions が成功する。
+  - [x] P3-3 の初回 GitHub Actions が成功する。
 
   **2026-08-09 local 検証 evidence**
 
@@ -326,6 +326,7 @@ EasyMarkdown は、既にデスクトップ／モバイル／VS Code 拡張、�
   - `npm run quality:fast`: 81 files／579 unit tests、coverage statements 73.59%／branches 76.52%／functions 74.57%／lines 73.57%、Desktop／Mobile／VS Code build 成功。
   - `npm run dependencies:check`: root／VS Code とも 2026-08-09 baseline 比 no-regression。
   - 自動化外の macOS／mobile 実機、assistive technology、OS text scaling、任意 Markdown／custom theme は [Feature Dossier](./feature-dossiers/ui-residual-risk/feature.md) の residual risk として維持する。Product Support Matrix と release eligibility は変更しない。
+  - GitHub Actions CI Run #65（PR #8）: Fast quality gate／Dependency baseline scan／Electron smoke E2E 成功。Draft PR 方針どおり full E2E は skip、local full E2E は 103／103 成功。
 
 ## 4. 推奨スケジュール
 
