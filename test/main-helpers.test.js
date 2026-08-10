@@ -10,6 +10,8 @@ import {
   isRestrictedRoot,
   imageNameParts,
   attachmentNameParts,
+  BLOCKED_ATTACHMENT_EXTENSIONS,
+  blockedAttachmentExtension,
   attachmentLinkMarkdown,
   shouldSkipWorkspaceEntry,
   getAllowedExternalUrl,
@@ -17,9 +19,7 @@ import {
   extractMarkdownHeadings,
   extractMarkdownLinks,
   slugifyMarkdownAnchor,
-  docLangAttr,
-  WIN_MD_PROGID,
-  winDefaultOpenerRegOps
+  docLangAttr
 } from '../src/main/helpers.js'
 import {
   collectMarkdownAnchors,
@@ -53,9 +53,14 @@ describe('Markdown link intelligence', () => {
       '[skip](also-no.md)',
       '```'
     ].join('\n')
-    expect(extractMarkdownLinks(source).map(({ target, isImage, kind, line }) => ({
-      target, isImage, kind, line
-    }))).toEqual([
+    expect(
+      extractMarkdownLinks(source).map(({ target, isImage, kind, line }) => ({
+        target,
+        isImage,
+        kind,
+        line
+      }))
+    ).toEqual([
       { target: 'folder/a b.md#top', isImage: false, kind: 'inline', line: 1 },
       { target: 'img.png', isImage: true, kind: 'inline', line: 1 },
       { target: 'target.md', isImage: false, kind: 'definition', line: 3 }
@@ -82,7 +87,9 @@ describe('Markdown link intelligence', () => {
   })
 
   it('collects duplicate and explicit heading anchors', () => {
-    const anchors = collectMarkdownAnchors('# One\n## One\n### Stable {#fixed}\n<div id="raw"></div>')
+    const anchors = collectMarkdownAnchors(
+      '# One\n## One\n### Stable {#fixed}\n<div id="raw"></div>'
+    )
     expect([...anchors.entries()]).toEqual([
       ['one', 1],
       ['one-1', 2],
@@ -132,18 +139,18 @@ describe('Markdown link intelligence', () => {
       newAnchor: 'install-now',
       totalChanges: 3
     })
-    expect(plan.files.find((file) => file.path.endsWith('guide.md')).updated).toContain('## Install Now')
+    expect(plan.files.find((file) => file.path.endsWith('guide.md')).updated).toContain(
+      '## Install Now'
+    )
     expect(plan.files.find((file) => file.path.endsWith('index.md')).updated).toContain(
       'guide.md#install-now'
     )
   })
 
   it('creates encoded relative paths and a file rename plan without touching unrelated text', () => {
-    expect(relativeMarkdownPath(
-      'C:\\notes\\index.md',
-      'C:\\notes\\Guide New.md',
-      './guide.md'
-    )).toBe('./Guide%20New.md')
+    expect(
+      relativeMarkdownPath('C:\\notes\\index.md', 'C:\\notes\\Guide New.md', './guide.md')
+    ).toBe('./Guide%20New.md')
     const plan = createFileRenamePlan(winFiles, 'C:\\notes\\guide.md', 'C:\\notes\\Guide New.md')
     expect(plan.files.map((file) => file.path)).toEqual(['C:\\notes\\index.md'])
     expect(plan.files[0].updated).toBe(
@@ -222,26 +229,6 @@ describe('getAllowedExternalUrl', () => {
       null
     ]) {
       expect(getAllowedExternalUrl(value)).toBe(null)
-    }
-  })
-})
-
-describe('winDefaultOpenerRegOps', () => {
-  const exe = 'C:\\Program Files\\EasyMarkdown\\EasyMarkdown.exe'
-  it('registers a per-user (HKCU) ProgId with a quoted open command', () => {
-    const ops = winDefaultOpenerRegOps(exe, ['md'])
-    expect(ops.every(([verb, key]) => verb === 'add' && key.startsWith('HKCU\\Software\\Classes\\'))).toBe(true)
-    expect(ops.every((args) => args.includes('/f'))).toBe(true)
-    const command = ops.find(([, key]) => key.endsWith('\\shell\\open\\command'))
-    expect(command).toContain(`"${exe}" "%1"`)
-  })
-  it('adds OpenWithProgids + class default per extension', () => {
-    const ops = winDefaultOpenerRegOps(exe, ['md', 'markdown'])
-    for (const ext of ['md', 'markdown']) {
-      const openWith = ops.find(([, key]) => key === `HKCU\\Software\\Classes\\.${ext}\\OpenWithProgids`)
-      expect(openWith).toContain(WIN_MD_PROGID)
-      const def = ops.find(([, key, flag]) => key === `HKCU\\Software\\Classes\\.${ext}` && flag === '/ve')
-      expect(def).toContain(WIN_MD_PROGID)
     }
   })
 })
@@ -330,8 +317,25 @@ describe('attachment helpers', () => {
     expect(attachmentNameParts('a/b:c.pdf')).toEqual({ stem: 'a_b_c', ext: '.pdf' })
   })
   it('escapes Markdown labels and wraps link targets safely', () => {
-    expect(attachmentLinkMarkdown('a[b].pdf', 'assets/a b.pdf')).toBe('[a\\[b\\].pdf](<assets/a b.pdf>)')
+    expect(attachmentLinkMarkdown('a[b].pdf', 'assets/a b.pdf')).toBe(
+      '[a\\[b\\].pdf](<assets/a b.pdf>)'
+    )
     expect(attachmentLinkMarkdown('x', 'assets/a<b>.txt')).toBe('[x](<assets/a%3Cb%3E.txt>)')
+  })
+  it('blocks executable, installer, script, shortcut and system-control extensions', () => {
+    for (const extension of BLOCKED_ATTACHMENT_EXTENSIONS) {
+      expect(blockedAttachmentExtension(`payload${extension}`)).toBe(extension)
+    }
+  })
+  it('normalizes case and Windows trailing dots/spaces and catches double extensions', () => {
+    expect(blockedAttachmentExtension('invoice.pdf.EXE')).toBe('.exe')
+    expect(blockedAttachmentExtension('payload.ps1.  ')).toBe('.ps1')
+    expect(blockedAttachmentExtension('.CMD')).toBe('.cmd')
+  })
+  it('allows ordinary documents, images, archives and misleading non-final extensions', () => {
+    for (const name of ['report.pdf', 'photo.png', 'archive.zip', 'script.js.txt', 'LICENSE', '']) {
+      expect(blockedAttachmentExtension(name)).toBe('')
+    }
   })
 })
 
@@ -351,17 +355,32 @@ describe('searchContentLines (workspace full-text search)', () => {
 
   it('finds case-insensitive hits with 1-based line numbers and columns', () => {
     const { matches } = searchContentLines(content, 'alpha')
-    expect(matches.map((m) => [m.line, m.col])).toEqual([[1, 0], [2, 6], [4, 0]])
+    expect(matches.map((m) => [m.line, m.col])).toEqual([
+      [1, 0],
+      [2, 6],
+      [4, 0]
+    ])
     expect(matches[0]).toMatchObject({ len: 5, text: 'Alpha beta', textCol: 0 })
   })
   it('honors caseSensitive and wholeWord', () => {
-    expect(searchContentLines(content, 'alpha', { caseSensitive: true }).matches.map((m) => m.line)).toEqual([4])
-    expect(searchContentLines(content, 'alpha', { wholeWord: true }).matches.map((m) => m.line)).toEqual([1, 2])
+    expect(
+      searchContentLines(content, 'alpha', { caseSensitive: true }).matches.map((m) => m.line)
+    ).toEqual([4])
+    expect(
+      searchContentLines(content, 'alpha', { wholeWord: true }).matches.map((m) => m.line)
+    ).toEqual([1, 2])
   })
   it('supports regex and reports invalid patterns without throwing', () => {
     const { matches } = searchContentLines('a1 b22\nc333', '[a-z](\\d+)', { regex: true })
-    expect(matches.map((m) => [m.line, m.col, m.len])).toEqual([[1, 0, 2], [1, 3, 3], [2, 0, 4]])
-    expect(searchContentLines('x', '[', { regex: true })).toMatchObject({ matches: [], error: 'regex' })
+    expect(matches.map((m) => [m.line, m.col, m.len])).toEqual([
+      [1, 0, 2],
+      [1, 3, 3],
+      [2, 0, 4]
+    ])
+    expect(searchContentLines('x', '[', { regex: true })).toMatchObject({
+      matches: [],
+      error: 'regex'
+    })
   })
   it('caps the number of hits per file', () => {
     const many = Array(30).fill('hit hit hit').join('\n')

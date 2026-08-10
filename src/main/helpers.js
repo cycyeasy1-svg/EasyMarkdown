@@ -160,49 +160,6 @@ export function extractMarkdownHeadings(content, cap = 200) {
   return out
 }
 
-// reg.exe argument lists that register `exePath` as a per-user (HKCU, no admin)
-// handler for the given Markdown extensions, so "set as default opener" works
-// for zip/portable builds too (the NSIS installer already registers a
-// per-machine class). Windows 10+ refuses programmatic UserChoice writes, so
-// this only *registers* the app — index.js then opens the system "open with"
-// picker for the user's one confirming click. Pure (arg building only) so it
-// can be unit-tested; index.js executes the lists via reg.exe.
-export const WIN_MD_PROGID = 'EasyMarkdown.Markdown'
-export function winDefaultOpenerRegOps(exePath, exts) {
-  const classes = 'HKCU\\Software\\Classes'
-  const progKey = `${classes}\\${WIN_MD_PROGID}`
-  const ops = [
-    ['add', progKey, '/ve', '/t', 'REG_SZ', '/d', 'Markdown Document', '/f'],
-    ['add', `${progKey}\\DefaultIcon`, '/ve', '/t', 'REG_SZ', '/d', `${exePath},0`, '/f'],
-    [
-      'add',
-      `${progKey}\\shell\\open\\command`,
-      '/ve',
-      '/t',
-      'REG_SZ',
-      '/d',
-      `"${exePath}" "%1"`,
-      '/f'
-    ]
-  ]
-  for (const ext of exts) {
-    // Make the app appear in the picker's list for this extension, and set the
-    // per-user class default — the latter only takes effect when the user has
-    // never picked a handler (no UserChoice); the picker covers the rest.
-    ops.push([
-      'add',
-      `${classes}\\.${ext}\\OpenWithProgids`,
-      '/v',
-      WIN_MD_PROGID,
-      '/t',
-      'REG_NONE',
-      '/f'
-    ])
-    ops.push(['add', `${classes}\\.${ext}`, '/ve', '/t', 'REG_SZ', '/d', WIN_MD_PROGID, '/f'])
-  }
-  return ops
-}
-
 // Split a desired image filename into a filesystem-safe { stem, ext }, stripping
 // path/reserved chars. The fs collision check (appending -1, -2…) lives in
 // uniqueImageFile in index.js — this is just the pure naming part.
@@ -225,6 +182,56 @@ export const attachmentNameParts = (name) => {
     stem: (hasExt ? safe.slice(0, dot) : safe) || 'attachment',
     ext: hasExt ? safe.slice(dot) : ''
   }
+}
+
+// High-confidence executable, installer, script, shortcut and system-control
+// file types. Copying one from EasyMarkdown into a document's assets folder can
+// look like executable payload creation to endpoint protection, even though the
+// app never launches attachments. Keep the main-process check authoritative.
+export const BLOCKED_ATTACHMENT_EXTENSIONS = Object.freeze([
+  '.bat',
+  '.chm',
+  '.cmd',
+  '.com',
+  '.cpl',
+  '.dll',
+  '.exe',
+  '.hta',
+  '.jar',
+  '.js',
+  '.jse',
+  '.lnk',
+  '.msi',
+  '.msp',
+  '.mst',
+  '.pif',
+  '.ps1',
+  '.psd1',
+  '.psm1',
+  '.reg',
+  '.scf',
+  '.scr',
+  '.sys',
+  '.url',
+  '.vbe',
+  '.vbs',
+  '.wsf',
+  '.wsh'
+])
+
+const BLOCKED_ATTACHMENT_EXTENSION_SET = new Set(BLOCKED_ATTACHMENT_EXTENSIONS)
+
+export function blockedAttachmentExtension(name) {
+  // Windows ignores trailing dots/spaces in ordinary file names. Normalize them
+  // before extracting the final extension so "payload.exe. " cannot bypass the
+  // denylist; double extensions such as "invoice.pdf.exe" are caught naturally.
+  const normalized = String(name ?? '')
+    .trimEnd()
+    .replace(/[. ]+$/g, '')
+  const dot = normalized.lastIndexOf('.')
+  if (dot < 0) return ''
+  const extension = normalized.slice(dot).toLowerCase()
+  return BLOCKED_ATTACHMENT_EXTENSION_SET.has(extension) ? extension : ''
 }
 
 const ALWAYS_IGNORED_WORKSPACE_DIRS = new Set(['.git', 'node_modules', '.obsidian', 'out', 'dist'])

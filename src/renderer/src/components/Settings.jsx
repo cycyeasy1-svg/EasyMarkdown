@@ -117,7 +117,6 @@ export default function Settings({
 }) {
   const { lang, t, setLang } = useI18n()
   const caps = window.api.capabilities || {}
-  const isMac = window.api.platform === 'darwin'
   const fontsLoadedRef = useRef(false)
   const [fontFamilies, setFontFamilies] = useState([])
 
@@ -157,16 +156,6 @@ export default function Settings({
     () => resolveDefaultFontName('mono', window.api.platform, fontFamilies),
     [fontFamilies]
   )
-
-  // "Set as default Markdown app" — Windows pops the system "open with" picker
-  // (main registers the exe first); macOS has no API, so the row's description
-  // carries the Finder steps and there is no button.
-  const onSetDefaultOpener = async () => {
-    const res = await window.api.setDefaultOpener?.()
-    if (res?.ok) fireToast(t('settings.defaultOpenerHint'), { duration: 7000 })
-    else if (!res?.manual)
-      fireToast(t('settings.defaultOpenerFail'), { kind: 'error', duration: 7000 })
-  }
 
   const clearLocalHistory = async () => {
     if (!window.confirm(t('settings.localHistoryClearConfirm'))) return
@@ -497,33 +486,16 @@ export default function Settings({
             )}
           </div>
 
-          {/* ── System (default Markdown opener) ── */}
-          {(caps.defaultOpener || caps.folderWorkspace) && (
+          {/* ── System ── */}
+          {caps.folderWorkspace && (
             <div className="hm-set-section">
               <div className="hm-set-section-title">{t('settings.sectionSystem')}</div>
-              {caps.folderWorkspace && (
-                <SwitchRow
-                  label={t('settings.showHiddenFiles')}
-                  desc={t('settings.showHiddenFilesDesc')}
-                  checked={settings.showHiddenFiles}
-                  onChange={(showHiddenFiles) => updateSettings({ showHiddenFiles })}
-                />
-              )}
-              {caps.defaultOpener && (
-                <div className="hm-set-row">
-                  <div className="hm-set-text">
-                    <div className="hm-set-label">{t('settings.defaultOpener')}</div>
-                    <div className="hm-set-desc">
-                      {t(isMac ? 'settings.defaultOpenerDescMac' : 'settings.defaultOpenerDescWin')}
-                    </div>
-                  </div>
-                  {!isMac && (
-                    <button className="hm-set-btn" onClick={onSetDefaultOpener}>
-                      {t('settings.defaultOpenerButton')}
-                    </button>
-                  )}
-                </div>
-              )}
+              <SwitchRow
+                label={t('settings.showHiddenFiles')}
+                desc={t('settings.showHiddenFilesDesc')}
+                checked={settings.showHiddenFiles}
+                onChange={(showHiddenFiles) => updateSettings({ showHiddenFiles })}
+              />
             </div>
           )}
 

@@ -4403,6 +4403,13 @@ export default function App({ safeMode = false, onExitSafeMode = null }) {
       for (const sourcePath of picked) {
         const res = await window.api.saveAttachment?.(tab.path, sourcePath)
         if (!res?.ok) {
+          if (res?.code === 'dangerous-attachment-type') {
+            fireToast(
+              tRef.current('attach.blockedType', { name: res.name || baseName(sourcePath) }),
+              { kind: 'error', sticky: true }
+            )
+            continue
+          }
           fireToast(tRef.current('attach.failed', { msg: res?.error || baseName(sourcePath) }), {
             kind: 'error',
             sticky: true
@@ -4411,6 +4418,7 @@ export default function App({ safeMode = false, onExitSafeMode = null }) {
         }
         links.push(attachmentLinkMarkdown(res.name || baseName(sourcePath), res.path))
       }
+      if (!links.length) return
       const markdown = links.join('\n')
       const sourceApi = id === activeIdRef.current && sourceModeRef.current
         ? sourceRef.current?.__hmSourceApi

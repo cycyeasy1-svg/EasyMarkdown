@@ -72,7 +72,7 @@ capacitor.config.ts    // Capacitor 配置(appId / webDir / 插件设置)
 capabilities = {
   folderWorkspace, workspaceSearch, watch, windowControls,
   pdfExport, htmlExport, print, spellcheck, nativeMenus,
-  externalShell, revealInFolder, splitView, defaultOpener,
+  externalShell, revealInFolder, splitView,
   fileAttachments, localHistory, diagnostics, canShare,
 }
 ```

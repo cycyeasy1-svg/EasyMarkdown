@@ -80,8 +80,7 @@ const api = {
   localHistoryAdd: (payload) => ipcRenderer.invoke('history:add', payload),
   localHistoryList: (path) => ipcRenderer.invoke('history:list', path),
   localHistoryRead: (path, snapshotId) => ipcRenderer.invoke('history:read', path, snapshotId),
-  localHistoryDelete: (path, snapshotId) =>
-    ipcRenderer.invoke('history:delete', path, snapshotId),
+  localHistoryDelete: (path, snapshotId) => ipcRenderer.invoke('history:delete', path, snapshotId),
   localHistoryClear: () => ipcRenderer.invoke('history:clear'),
 
   // watch
@@ -109,8 +108,7 @@ const api = {
 
   // save a pasted/dropped image into the document's assets/ folder; returns
   // { ok, path } with a relative path to insert into Markdown.
-  saveImage: (docPath, name, bytes) =>
-    ipcRenderer.invoke('image:save', docPath, name, bytes),
+  saveImage: (docPath, name, bytes) => ipcRenderer.invoke('image:save', docPath, name, bytes),
   saveAttachment: (docPath, sourcePath) =>
     ipcRenderer.invoke('attachment:save', docPath, sourcePath),
   // save an image pasted into an UNSAVED doc to the global paste folder; returns
@@ -151,11 +149,6 @@ const api = {
   // Short-lived permission handshake used only immediately before the Settings
   // font picker calls Chromium's Local Font Access API.
   allowLocalFonts: () => ipcRenderer.invoke('permissions:allowLocalFonts'),
-
-  // "set as default Markdown app": Windows registers + opens the system picker
-  // and resolves { ok }; macOS resolves { manual: true } (no supported API) and
-  // the renderer shows Finder instructions instead.
-  setDefaultOpener: () => ipcRenderer.invoke('app:setDefaultOpener'),
 
   // app close: main asks before closing so the renderer can warn about unsaved
   // changes, then calls confirmAppClose() to proceed or cancelAppClose() to abort.

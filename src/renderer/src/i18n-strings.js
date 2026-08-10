@@ -303,6 +303,8 @@ export const STRINGS = {
     'attach.needsSave': 'Save this document before adding attachments.',
     'attach.unsupported': 'Attachments are not available on this platform.',
     'attach.failed': 'Could not add attachment: {msg}',
+    'attach.blockedType':
+      'For security reasons, executable files and scripts cannot be attached: {name}',
     'attach.inserted': 'Added {n} attachment(s).',
     'cmd.sidebar': 'Toggle Sidebar',
     'nav.home': 'Home',
@@ -419,15 +421,6 @@ export const STRINGS = {
     'settings.sectionSystem': 'System',
     'settings.showHiddenFiles': 'Show hidden files',
     'settings.showHiddenFilesDesc': 'Show dotfiles in the file tree and workspace search. .git and node_modules stay hidden.',
-    'settings.defaultOpener': 'Default app for Markdown files',
-    'settings.defaultOpenerDescWin':
-      'Opens the Windows "how do you want to open .md files?" picker — choose EasyMarkdown and pick "Always".',
-    'settings.defaultOpenerDescMac':
-      'In Finder, right-click any .md file → Get Info → "Open with" → choose EasyMarkdown → click "Change All…".',
-    'settings.defaultOpenerButton': 'Set as default…',
-    'settings.defaultOpenerHint': 'In the system dialog, choose EasyMarkdown and confirm "Always".',
-    'settings.defaultOpenerFail':
-      'Could not open the system dialog — set it manually in Windows Settings → Default apps.',
     'settings.keyboard': 'Keyboard shortcuts',
     'settings.keyboardDesc': 'Select a shortcut field, then press the new key combination.',
     'settings.keyboardResetAll': 'Restore all defaults',
@@ -1179,6 +1172,7 @@ export const STRINGS = {
     'attach.needsSave': '请先保存当前文档，再添加附件。',
     'attach.unsupported': '当前平台不支持添加附件。',
     'attach.failed': '添加附件失败：{msg}',
+    'attach.blockedType': '出于安全原因，无法附加可执行文件或脚本：“{name}”。',
     'attach.inserted': '已添加 {n} 个附件。',
     'cmd.sidebar': '切换侧边栏',
     'nav.home': '主页',
@@ -1294,14 +1288,6 @@ export const STRINGS = {
     'settings.sectionSystem': '系统',
     'settings.showHiddenFiles': '显示隐藏文件',
     'settings.showHiddenFilesDesc': '在文件树和工作区搜索中显示点文件；.git 与 node_modules 始终隐藏。',
-    'settings.defaultOpener': 'Markdown 默认打开方式',
-    'settings.defaultOpenerDescWin':
-      '调出系统"打开方式"选择框，选中 EasyMarkdown 并选择"始终"即可设为默认。',
-    'settings.defaultOpenerDescMac':
-      '在访达中右键任意 .md 文件 → 显示简介 → "打开方式"选择 EasyMarkdown → 点击"全部更改…"。',
-    'settings.defaultOpenerButton': '设为默认…',
-    'settings.defaultOpenerHint': '请在系统弹窗中选择 EasyMarkdown，并确认"始终使用此应用"。',
-    'settings.defaultOpenerFail': '无法调出系统对话框，请到 Windows 设置 → 默认应用中手动设置。',
     'settings.keyboard': '键盘快捷键',
     'settings.keyboardDesc': '选中快捷键框后，直接按下新的组合键。',
     'settings.keyboardResetAll': '全部恢复默认',
@@ -2052,6 +2038,8 @@ export const STRINGS = {
     'attach.needsSave': '添付ファイルを追加する前に、このドキュメントを保存してください。',
     'attach.unsupported': 'この環境では添付ファイルを追加できません。',
     'attach.failed': '添付ファイルを追加できませんでした：{msg}',
+    'attach.blockedType':
+      'セキュリティ上の理由により、実行ファイルまたはスクリプト「{name}」は添付できません。',
     'attach.inserted': '{n} 件の添付ファイルを追加しました。',
     'cmd.sidebar': 'サイドバーの切り替え',
     'nav.home': 'ホーム',
@@ -2168,15 +2156,6 @@ export const STRINGS = {
     'settings.sectionSystem': 'システム',
     'settings.showHiddenFiles': '隠しファイルを表示',
     'settings.showHiddenFilesDesc': 'ファイルツリーとワークスペース検索にドットファイルを表示します。.git と node_modules は常に除外します。',
-    'settings.defaultOpener': 'Markdown の既定のアプリ',
-    'settings.defaultOpenerDescWin':
-      'Windows の「開き方を選択」ダイアログを表示します。EasyMarkdown を選び「常に」を選択してください。',
-    'settings.defaultOpenerDescMac':
-      'Finder で .md ファイルを右クリック → 情報を見る → 「このアプリケーションで開く」で EasyMarkdown を選び「すべてを変更…」をクリックします。',
-    'settings.defaultOpenerButton': '既定に設定…',
-    'settings.defaultOpenerHint': 'システムのダイアログで EasyMarkdown を選び、「常に」を確認してください。',
-    'settings.defaultOpenerFail':
-      'システムダイアログを開けませんでした。Windows の設定 → 既定のアプリから設定してください。',
     'settings.keyboard': 'キーボードショートカット',
     'settings.keyboardDesc': 'ショートカット欄を選択し、新しいキーの組み合わせを押してください。',
     'settings.keyboardResetAll': 'すべて既定に戻す',
