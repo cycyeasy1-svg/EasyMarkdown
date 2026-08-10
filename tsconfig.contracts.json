@@ -16,6 +16,7 @@
     "src/shared/api-contract.js",
     "src/shared/fonts.js",
     "src/shared/i18n-contract.js",
+    "src/shared/markdown.js",
     "src/renderer/src/session.js",
     "src/renderer/src/settings.js"
   ]

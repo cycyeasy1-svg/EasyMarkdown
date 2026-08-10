@@ -250,7 +250,7 @@ EasyMarkdown は、既にデスクトップ／モバイル／VS Code 拡張、�
 
 ### P3 — 開発体験と最終整備
 
-#### P3-1 Contributor workflow と Definition of Done — `IN PROGRESS`（local 検証完了、初回 CI 待ち）
+#### P3-1 Contributor workflow と Definition of Done — `DONE`
 
 - `.editorconfig`、incremental formatter、PR template、risk-based Definition of Done を統一する。
 - Existing source の mass-format は行わず、新規／変更 file から formatter contract を適用する。
@@ -263,7 +263,7 @@ EasyMarkdown は、既にデスクトップ／モバイル／VS Code 拡張、�
 - [x] PR template が risk、platform、evidence、impact、rollback、DoD を案内する。
 - [x] Risk-based Definition of Done が source of truth として定義され、Contributor guide／AGENTS から参照される。
 - [x] Local `quality:fast` と Electron smoke が成功する。
-- [ ] P3-1 の初回 GitHub Actions が成功する。
+- [x] P3-1 の初回 GitHub Actions が成功する。
 
 **2026-08-09 検証 evidence**
 
@@ -274,10 +274,33 @@ EasyMarkdown は、既にデスクトップ／モバイル／VS Code 拡張、�
 - `npm run dependencies:check`: root／VS Code とも baseline 比 no-regression。CI／release workflow の YAML parse 成功。
 - `npm run docs:check`: 42 documents／59 link sources／236 local links 成功。`npm run feature:check`: 5 dossier／27 AC／32 tests 成功。
 - `npm run test:e2e:smoke:built`: axe app-chrome check を含む 6／6 成功。
+- GitHub Actions CI Run #60（PR #6）: Fast quality gate／Dependency baseline scan／Electron smoke E2E 成功。PR 方針どおり full E2E は skip。
 
-#### P3-2 Architecture import boundary
+#### P3-2 Architecture import boundary — `IN PROGRESS`（local 検証完了、初回 CI 待ち）
 
 - Main／preload／renderer／shared／platform adapter の import boundary を自動検査する。
+- Existing cross-layer pure logic を shared source of truth へ移し、violation baseline／ignore は導入しない。
+
+**受入条件**
+
+- [x] Static import、re-export、literal dynamic import、require を JS／JSX AST から抽出する。
+- [x] Main／preload／renderer／shared／platform の許可 dependency direction を定義・検査する。
+- [x] Electron／Node.js／Capacitor dependency を runtime owner に限定する。
+- [x] Renderer が platform public entry 以外を deep import できない。
+- [x] Existing renderer → main helper edge を shared module へ移し、compatibility test を維持する。
+- [x] `architecture:check` が `quality:fast` と contributor／architecture document に統合される。
+- [x] Local `quality:fast`、dependency no-regression、Electron smoke が成功する。
+- [ ] P3-2 の初回 GitHub Actions が成功する。
+
+**2026-08-09 検証 evidence**
+
+- `npm run architecture:check`: 137 managed files／376 imports、main 22／preload 1／renderer 104／shared 8／platform 2、zero-waiver で成功。
+- Architecture policy unit test 9／9、既存 main helper characterization test 36／36 成功。
+- `src/shared/markdown.js` を source of truth とし、Renderer の main direct import を解消した。Main は compatibility re-export を維持する。
+- ADR-0005、L level Feature Dossier、7 AC／7 TEST mapping を追加した。
+- `npm run quality:fast`: 81 files／579 unit tests、coverage statements 73.59%／branches 76.52%／functions 74.57%／lines 73.57%、Desktop／Mobile／VS Code build 成功。
+- `npm run dependencies:check`: root／VS Code とも baseline 比 no-regression。`npm run test:e2e:smoke:built`: axe app-chrome check を含む 6／6 成功。
+- `npm run docs:check`: 45 documents／62 link sources／248 local links 成功。`npm run feature:check`: 6 dossier／34 AC／39 tests 成功。
 
 #### P3-3 UI residual risk audit
 

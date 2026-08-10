@@ -15,6 +15,7 @@ last_verified: 2026-08-09
 
 | Gate | Command | Scope | Fail condition |
 | --- | --- | --- | --- |
+| Architecture import | `npm run architecture:check` | Main、preload、renderer、shared、platform adapter | 禁止 layer direction、runtime owner 違反、platform deep import、non-literal dynamic dependency |
 | API contract | `npm run api:check` | Desktop preload、Capacitor shim、17 capability | 必須 method／flag の欠落、`true` capability の実装欠落、runtime assertion 欠落 |
 | Boundary type | `npm run type:check` | API、session、settings、i18n contract 等の選定済み JavaScript | `checkJs` type error |
 | i18n parity | `npm run i18n:check` | `en` を基準とする全 locale | key の欠落／余剰、placeholder 不一致、非 string value |
@@ -23,7 +24,13 @@ last_verified: 2026-08-09
 | Accessibility smoke | Electron smoke E2E | startup app chrome | axe の `serious`／`critical` violation |
 | Dependency audit | `npm run dependencies:check` | root と VS Code extension の lockfile | severity 別件数が committed baseline より増加、audit 実行不能、baseline 不整合 |
 
-`npm run quality:fast` は network 非依存の API、type、i18n、incremental format、coverage gate を既存 document／lint／build gate と直列実行する。Dependency audit は registry availability に依存するため GitHub Actions と release workflow の独立 job とし、後続 E2E／publish を fail-closed で block する。
+`npm run quality:fast` は network 非依存の architecture、API、type、i18n、incremental format、coverage gate を既存 document／lint／build gate と直列実行する。Dependency audit は registry availability に依存するため GitHub Actions と release workflow の独立 job とし、後続 E2E／publish を fail-closed で block する。
+
+### Architecture import policy
+
+Layer direction と runtime dependency owner は [Architecture](./architecture.md#import-boundary-contract) を source of truth とする。Checker は `src/` の current JavaScript／JSX graph を waiver なしで検査し、static import、re-export、literal dynamic import、CommonJS require を同じ edge として扱う。`shared` は dependency-free、sandboxed `preload` は `electron` だけ、Capacitor dependency は platform adapter だけに限定する。Renderer は `platform/index.js` 以外の adapter 実装を直接 import しない。
+
+Non-literal dynamic dependency と管理対象外への relative import は fail-closed とする。TypeScript source を追加する場合は parser coverage を同じ PR で追加する。誤検出の回避を目的とする baseline／ignore は導入せず、共通 pure logic を `shared` へ移すか dependency direction を修正する。
 
 ### Incremental format policy
 
@@ -38,7 +45,7 @@ Formatter は working tree、staged change、branch base との差分から supp
 3. 新規に抽出した dependency-free module。
 4. 回帰 risk が高く、pure test と組み合わせられる既存 module。
 
-現時点の対象は `src/shared/api-contract.js`、`src/shared/i18n-contract.js`、`src/renderer/src/session.js`、`src/renderer/src/settings.js`、`src/renderer/src/fonts.js` である。対象追加は `tsconfig.contracts.json` の `include` へ明示し、error を `any` や除外で隠さない。既存巨大 component の一括変換は本 gate の責務外とする。
+現時点の対象は `src/shared/api-contract.js`、`src/shared/fonts.js`、`src/shared/i18n-contract.js`、`src/shared/markdown.js`、`src/renderer/src/session.js`、`src/renderer/src/settings.js` である。対象追加は `tsconfig.contracts.json` の `include` へ明示し、error を `any` や除外で隠さない。既存巨大 component の一括変換は本 gate の責務外とする。
 
 ## 4. Platform API contract
 
@@ -83,7 +90,7 @@ Baseline の変更時は audit JSON、変更理由、増減した advisory、own
 
 ## 9. Change workflow
 
-1. 変更が API、session、settings、i18n、dependency、app chrome に触れるか確認する。
+1. 変更が architecture、API、session、settings、i18n、dependency、app chrome に触れるか確認する。
 2. 対応する contract／test／document を同じ branch で更新する。
 3. `npm run quality:fast`、UI／Electron 変更時は `npm run test:e2e:smoke:built` を実行する。
 4. Dependency 変更時は `npm run dependencies:check` を実行し、baseline 差分を review する。

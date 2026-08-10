@@ -80,11 +80,11 @@ Windows 与 macOS 共用一份配置，在 macOS 上 `npm run dist` 即出 `.dmg
 通常の変更では、個別 test に加えて次の一括 gate を使用する。
 
 ```bash
-npm run quality:fast       # docs／API／type／i18n／lint／coverage／全 build
+npm run quality:fast       # docs／architecture／API／type／i18n／lint／coverage／全 build
 npm run dependencies:check # root＋VS Code lockfile の audit no-regression
 ```
 
-`quality:fast` は network 非依存とし、dependency audit は GitHub Actions／release の独立 job で後続処理を block する。Desktop／Mobile API の追加時は `npm run api:check`、locale 変更時は `npm run i18n:check`、UI／Electron 変更時は build 後に `npm run test:e2e:smoke:built` も実行する。Threshold、対象範囲、baseline 更新規則は [Quality Gate 運用規約](./quality-gates.md) を参照する。
+`quality:fast` は network 非依存とし、dependency audit は GitHub Actions／release の独立 job で後続処理を block する。Layer／runtime import を変更した場合は `npm run architecture:check`、Desktop／Mobile API の追加時は `npm run api:check`、locale 変更時は `npm run i18n:check`、UI／Electron 変更時は build 後に `npm run test:e2e:smoke:built` も実行する。Threshold、対象範囲、baseline 更新規則は [Quality Gate 運用規約](./quality-gates.md) を参照する。
 
 纯函数（不依赖 DOM / Electron 的逻辑）用 **vitest** 做单元测试。对没有设计书的存量代码，采用**特征测试（characterization test）**思路：把"当前正确运行的行为"本身当作规格锁定，目的是在频繁迭代中挡住回归。
 
@@ -96,7 +96,7 @@ npm run test:watch # 监视模式（开发时用）
 - 测试放在 `test/`（与 `src/` 同级），按被测模块命名（如 `test/keep-parser.test.js`）。
 - 默认运行环境是 `node`。需要 `localStorage` / `document` 的测试在文件首行加 `// @vitest-environment happy-dom`（见 `test/settings.test.js`）。
 - 配置在 `vitest.config.mjs`，镜像了 `electron.vite.config.mjs` 的 `define`（`__APP_VERSION__`）。
-- **只测纯函数**。当前覆盖包括：`keep-parser`（Markdown 解析 / 表格编辑 / 任务列表）、`keep-history`（最小行补丁、事务元数据与容量限制）、`keep-review`（局部差异、部分恢复、CRLF 保持、2 万行表格性能上限与大范围改写降级）、`navigation-history`（后退/前进栈）、`link-navigation`（内部链接提示与右侧打开判定）、`sidebar-tree`（延迟树可见项顺序）、`paths`（跨平台路径 / 会话 / 预览标签 / 最近文件 / 工作区净化）、`components/editor-images`、`editor-math`、`editor-mermaid`、`editor-tablescroll` 性能守卫、`sourceFold` / `source-position`、`main/helpers`、`main/markdown-links`、`main/local-history`、`settings` / `find` / `blocks` 等。
+- **只测纯函数**。当前覆盖包括：architecture import policy、`keep-parser`（Markdown 解析 / 表格编辑 / 任务列表）、`keep-history`（最小行补丁、事务元数据与容量限制）、`keep-review`（局部差异、部分恢复、CRLF 保持、2 万行表格性能上限与大范围改写降级）、`navigation-history`（后退/前进栈）、`link-navigation`（内部链接提示与右侧打开判定）、`sidebar-tree`（延迟树可见项顺序）、`paths`（跨平台路径 / 会话 / 预览标签 / 最近文件 / 工作区净化）、`components/editor-images`、`editor-math`、`editor-mermaid`、`editor-tablescroll` 性能守卫、`sourceFold` / `source-position`、`main/helpers`、`main/markdown-links`、`main/local-history`、`settings` / `find` / `blocks` 等。
 - **主进程纯函数已抽到 [src/main/helpers.js](../src/main/helpers.js)、[src/main/markdown-links.js](../src/main/markdown-links.js) 与 [src/main/local-history.js](../src/main/local-history.js)**（`index.js` 顶部 import 了 `electron`，测试无法直接 import index.js）。以后要单测新的主进程纯逻辑，先移到不依赖 Electron 的模块再 import。
 - 新增 / 改动纯函数时，同步补 / 改对应用例。DOM、ProseMirror 命令、异步渲染（Mermaid 等）不在单测范围内，由下面的 Playwright E2E 覆盖。
 

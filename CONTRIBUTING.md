@@ -26,6 +26,7 @@ Electron download が遅い場合は、install 前に `ELECTRON_MIRROR=https://n
 
 ```bash
 npm run format:check
+npm run architecture:check
 npm run quality:fast
 npm run dependencies:check
 ```
