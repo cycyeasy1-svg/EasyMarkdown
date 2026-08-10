@@ -73,7 +73,9 @@ Coverage は pure／deterministic logic の保護指標であり、Electron life
 
 Startup smoke は `.activity-bar`、`.topbar`、`.pane-left`、`.statusbar` の app chrome を axe で検査し、rule を無効化せず `serious`／`critical` violation を失敗させる。CSS transition が完了してから検査し、animation 中間色による false positive を避ける。
 
-Milkdown／user document 領域は第三者 editor semantics と document content の影響を分離して評価する必要があるため、現在の app-chrome gate には含めない。これは免除ではなく残存 scope であり、editor accessibility は専用改善 item と実 browser／assistive technology evidence で段階導入する。
+P3-3 の minimum-window smoke は built Electron app を 720×480 に restore し、repository 管理の日本語 Keep fixture、overflow tab strip、Settings、Help を light／dark theme で検査する。App 全体の axe `serious`／`critical` violation、root horizontal overflow、surface containment、tablist／tab／selected state、Arrow／Home／End keyboard activation を zero-waiver で失敗させる。Window の startup maximize と test bounds が競合しないよう、visible transition 後に bounds を適用し、Windows の 1 px rounding だけを許容する。
+
+この拡張 scope は product-owned shell／Keep UI／controlled content の regression gate であり、任意の user document や custom theme の WCAG 適合宣言ではない。Milkdown／user document 領域は第三者 editor semantics と document content の影響を分離して評価する必要があるため、startup app-chrome gate には含めない。これは免除ではなく残存 scope であり、editor accessibility は専用改善 item と実 browser／assistive technology evidence で段階導入する。
 
 ## 8. Dependency audit baseline
 

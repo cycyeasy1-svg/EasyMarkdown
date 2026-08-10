@@ -25,12 +25,81 @@ export function createElectronEnv() {
 
 export const fixture = (name) => join(__dirname, 'fixtures', name)
 
+export async function setWindowSize(app, page, width, height) {
+  // createWindow intentionally maximizes in its ready-to-show handler. Wait for
+  // that one-time startup transition before applying deterministic test bounds,
+  // otherwise the handler can race this helper and maximize the window again.
+  await expect
+    .poll(
+      () =>
+        app.evaluate(({ BrowserWindow }) => Boolean(BrowserWindow.getAllWindows()[0]?.isVisible())),
+      { timeout: 10_000 }
+    )
+    .toBe(true)
+  const applyBounds = () =>
+    app.evaluate(
+      async ({ BrowserWindow }, bounds) => {
+        const win = BrowserWindow.getAllWindows()[0]
+        if (!win) throw new Error('Main BrowserWindow not found')
+        if (win.isMaximized()) {
+          await new Promise((resolveUnmaximize) => {
+            let settled = false
+            const finish = () => {
+              if (settled) return
+              settled = true
+              win.removeListener('unmaximize', finish)
+              resolveUnmaximize()
+            }
+            win.once('unmaximize', finish)
+            win.unmaximize()
+            setTimeout(finish, 1_000)
+          })
+        }
+        win.setSize(bounds.width, bounds.height, false)
+      },
+      { width, height }
+    )
+
+  await applyBounds()
+
+  await expect
+    .poll(
+      async () => {
+        let state = await app.evaluate(({ BrowserWindow }) => {
+          const win = BrowserWindow.getAllWindows()[0]
+          return win ? { maximized: win.isMaximized(), size: win.getSize() } : null
+        })
+        if (
+          !state ||
+          state.maximized ||
+          Math.abs(state.size[0] - width) > 1 ||
+          Math.abs(state.size[1] - height) > 1
+        ) {
+          await applyBounds()
+          state = await app.evaluate(({ BrowserWindow }) => {
+            const win = BrowserWindow.getAllWindows()[0]
+            return win ? { maximized: win.isMaximized(), size: win.getSize() } : null
+          })
+        }
+        return Boolean(
+          state &&
+          !state.maximized &&
+          Math.abs(state.size[0] - width) <= 1 &&
+          Math.abs(state.size[1] - height) <= 1
+        )
+      },
+      { timeout: 10_000 }
+    )
+    .toBe(true)
+  await page.waitForTimeout(150)
+}
+
 export async function selectStatusViewMode(page, targetMode) {
   const button = page.locator('.hm-view-mode-control .hm-view-mode-btn')
   await button.waitFor({ state: 'visible' })
-  const keepMode = await page.locator('.hm-engine-mode').evaluate((element) =>
-    element.classList.contains('is-keep')
-  )
+  const keepMode = await page
+    .locator('.hm-engine-mode')
+    .evaluate((element) => element.classList.contains('is-keep'))
   const modes = keepMode ? ['rich', 'source', 'richSource'] : ['rich', 'source']
   if (!modes.includes(targetMode)) {
     throw new Error(`View mode "${targetMode}" is unavailable for the current editor engine`)
@@ -50,7 +119,9 @@ export async function selectStatusViewMode(page, targetMode) {
 // (bypassing the unsaved-changes close guard in main) and removes the temp dir.
 export async function launchApp(fixtureFiles = [], options = {}) {
   if (!existsSync(MAIN)) {
-    throw new Error(`Built main not found at ${MAIN} — run "npm run build" first (the test:e2e script does this).`)
+    throw new Error(
+      `Built main not found at ${MAIN} — run "npm run build" first (the test:e2e script does this).`
+    )
   }
   // A fresh user-data dir per launch isolates session/localStorage AND sidesteps
   // the single-instance lock (it's keyed by user-data dir) so we never get

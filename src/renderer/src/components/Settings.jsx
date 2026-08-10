@@ -21,12 +21,15 @@ function SwitchRow({ label, desc, scope, checked, onChange }) {
   return (
     <div className="hm-set-row">
       <div className="hm-set-text">
-        <div className="hm-set-label"><ScopeLabel label={label} scope={scope} /></div>
+        <div className="hm-set-label">
+          <ScopeLabel label={label} scope={scope} />
+        </div>
         {desc && <div className="hm-set-desc">{desc}</div>}
       </div>
       <button
         type="button"
         role="switch"
+        aria-label={label}
         aria-checked={checked}
         className={`hm-switch${checked ? ' on' : ''}`}
         onClick={() => onChange(!checked)}
@@ -55,7 +58,9 @@ function FontRow({
   return (
     <div className="hm-set-row hm-font-row">
       <label className="hm-set-text" htmlFor={`hm-font-${id}`}>
-        <span className="hm-set-label"><ScopeLabel label={label} scope={scope} /></span>
+        <span className="hm-set-label">
+          <ScopeLabel label={label} scope={scope} />
+        </span>
         {desc && <span className="hm-set-desc">{desc}</span>}
       </label>
       <div className="hm-font-control">
@@ -68,7 +73,9 @@ function FontRow({
           onChange={(e) => onChange(e.target.value === defaultValue ? '' : e.target.value)}
         >
           {options.map((font) => (
-            <option value={font} key={font} style={{ fontFamily: `'${font}'` }}>{font}</option>
+            <option value={font} key={font} style={{ fontFamily: `'${font}'` }}>
+              {font}
+            </option>
           ))}
         </select>
         <button
@@ -121,8 +128,9 @@ export default function Settings({
       await window.api.allowLocalFonts?.()
       const fonts = await window.queryLocalFonts()
       setFontFamilies(
-        [...new Set(fonts.map((font) => font.family).filter(Boolean))]
-          .sort((a, b) => a.localeCompare(b))
+        [...new Set(fonts.map((font) => font.family).filter(Boolean))].sort((a, b) =>
+          a.localeCompare(b)
+        )
       )
     } catch {
       fontsLoadedRef.current = false
@@ -156,7 +164,8 @@ export default function Settings({
   const onSetDefaultOpener = async () => {
     const res = await window.api.setDefaultOpener?.()
     if (res?.ok) fireToast(t('settings.defaultOpenerHint'), { duration: 7000 })
-    else if (!res?.manual) fireToast(t('settings.defaultOpenerFail'), { kind: 'error', duration: 7000 })
+    else if (!res?.manual)
+      fireToast(t('settings.defaultOpenerFail'), { kind: 'error', duration: 7000 })
   }
 
   const clearLocalHistory = async () => {
@@ -188,7 +197,10 @@ export default function Settings({
   if (!open) return null
 
   return (
-    <div className="hm-settings-overlay" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+    <div
+      className="hm-settings-overlay"
+      onMouseDown={(e) => e.target === e.currentTarget && onClose()}
+    >
       <div className="hm-settings" role="dialog" aria-label={t('settings.title')}>
         <div className="hm-settings-head">
           <span className="hm-settings-title">
@@ -295,9 +307,11 @@ export default function Settings({
               desc={t('settings.inlineMathFastDeleteDesc')}
               scope={t('settings.scope.milkdownOnly')}
               checked={settings.inlineMathDeleteMode === 'fast'}
-              onChange={(fast) => updateSettings({
-                inlineMathDeleteMode: fast ? 'fast' : 'protect'
-              })}
+              onChange={(fast) =>
+                updateSettings({
+                  inlineMathDeleteMode: fast ? 'fast' : 'protect'
+                })
+              }
             />
           </div>
 
@@ -390,7 +404,9 @@ export default function Settings({
                     onChange={(event) => updateSettings({ systemLightTheme: event.target.value })}
                   >
                     {THEMES.filter((item) => !item.dark).map((item) => (
-                      <option key={item.id} value={item.id}>{lang === 'zh' ? item.zh : item.en}</option>
+                      <option key={item.id} value={item.id}>
+                        {lang === 'zh' ? item.zh : item.en}
+                      </option>
                     ))}
                   </select>
                 </label>
@@ -401,12 +417,16 @@ export default function Settings({
                     onChange={(event) => updateSettings({ systemDarkTheme: event.target.value })}
                   >
                     {THEMES.filter((item) => item.dark).map((item) => (
-                      <option key={item.id} value={item.id}>{lang === 'zh' ? item.zh : item.en}</option>
+                      <option key={item.id} value={item.id}>
+                        {lang === 'zh' ? item.zh : item.en}
+                      </option>
                     ))}
                   </select>
                 </label>
                 <div className="hm-set-theme-note">
-                  {t('settings.systemThemeActive', { mode: t(systemIsDark ? 'settings.dark' : 'settings.light') })}
+                  {t('settings.systemThemeActive', {
+                    mode: t(systemIsDark ? 'settings.dark' : 'settings.light')
+                  })}
                 </div>
               </div>
             )}
@@ -457,7 +477,10 @@ export default function Settings({
                     </span>
                     <span className="hm-set-desc">{t('settings.sourceFontOffsetDesc')}</span>
                   </label>
-                  <output>{settings.sourceFontOffset > 0 ? '+' : ''}{settings.sourceFontOffset}px</output>
+                  <output>
+                    {settings.sourceFontOffset > 0 ? '+' : ''}
+                    {settings.sourceFontOffset}px
+                  </output>
                 </div>
                 <input
                   id="hm-source-font-offset"
@@ -466,7 +489,9 @@ export default function Settings({
                   max="8"
                   step="1"
                   value={settings.sourceFontOffset}
-                  onChange={(event) => updateSettings({ sourceFontOffset: Number(event.target.value) })}
+                  onChange={(event) =>
+                    updateSettings({ sourceFontOffset: Number(event.target.value) })
+                  }
                 />
               </div>
             )}

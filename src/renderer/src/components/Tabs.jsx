@@ -44,6 +44,10 @@ function Tabs({
   // clear ✕ (the unsaved state is shown in the bottom bar, not as a tab dot).
   const isMobile = window.api.platform === 'ios' || window.api.platform === 'android'
   const focusedId = focusedPane === 'right' && splitId != null ? splitId : activeId
+  // Home/help surfaces can temporarily leave no document tab selected. Keep one
+  // tab in the roving focus order so an overflowing strip remains keyboard
+  // reachable without claiming that the fallback tab is selected.
+  const keyboardId = tabs.some((tab) => tab.id === focusedId) ? focusedId : tabs[0]?.id
 
   // Firefox-style overflow affordances: the arrow buttons do not consume any
   // space while every tab fits. Compare the tab content width with the whole
@@ -66,11 +70,11 @@ function Tabs({
           atStart: scroll.scrollLeft <= 1,
           atEnd: scroll.scrollLeft >= maxScrollLeft - 1
         }
-        setScrollEdges((current) => (
+        setScrollEdges((current) =>
           current.atStart === nextEdges.atStart && current.atEnd === nextEdges.atEnd
             ? current
             : nextEdges
-        ))
+        )
       })
     }
     measure()
@@ -132,6 +136,23 @@ function Tabs({
     scroll.scrollLeft += rawDelta * unit
     if (scroll.scrollLeft !== before) event.preventDefault()
   }
+  const handleTabKeyDown = (event, index) => {
+    if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return
+    let nextIndex = index
+    if (event.key === 'ArrowRight') nextIndex = (index + 1) % tabs.length
+    else if (event.key === 'ArrowLeft') nextIndex = (index - 1 + tabs.length) % tabs.length
+    else if (event.key === 'Home') nextIndex = 0
+    else if (event.key === 'End') nextIndex = tabs.length - 1
+    else if (event.key !== 'Enter' && event.key !== ' ') return
+
+    event.preventDefault()
+    const nextTab = tabs[nextIndex]
+    if (!nextTab) return
+    onActivate(nextTab.id)
+    requestAnimationFrame(() => {
+      scrollRef.current?.querySelector(`[data-tab-index="${nextIndex}"]`)?.focus()
+    })
+  }
 
   return (
     <div className="tabs" ref={stripRef}>
@@ -146,15 +167,26 @@ function Tabs({
           <Icon name="chevron-right" size={15} style={{ transform: 'rotate(180deg)' }} />
         </button>
       )}
-      <div className="tabs-scroll" ref={scrollRef} onWheel={handleWheel}>
-        {tabs.map((tab) => {
+      <div
+        className="tabs-scroll"
+        ref={scrollRef}
+        role="tablist"
+        aria-label={t('tab.list')}
+        aria-orientation="horizontal"
+        onWheel={handleWheel}
+      >
+        {tabs.map((tab, index) => {
           const dirty = tab.dirty
           const isLeft = tab.id === activeId
           const isRight = splitId != null && tab.id === splitId
           // Both panes' tabs are highlighted in split view; the focused pane's tab
           // gets the stronger style (that's where a tab click lands).
           const isActive = isLeft || isRight
-          const focused = isRight ? focusedPane === 'right' : isLeft ? focusedPane !== 'right' : false
+          const focused = isRight
+            ? focusedPane === 'right'
+            : isLeft
+              ? focusedPane !== 'right'
+              : false
           return (
             <div
               key={tab.id}
@@ -208,7 +240,12 @@ function Tabs({
                   ? `${tab.path || tab.title}\n${t('tab.previewHint')}`
                   : tab.path || tab.title
               }
+              role="tab"
+              tabIndex={tab.id === keyboardId ? 0 : -1}
+              aria-selected={tab.id === focusedId}
               aria-label={tab.preview ? `${tab.title}, ${t('tab.preview')}` : tab.title}
+              data-tab-index={index}
+              onKeyDown={(event) => handleTabKeyDown(event, index)}
             >
               {tab.pinned && <Icon name="pin" size={11} className="tab-pin" />}
               <span className="tab-title">{tab.title}</span>
@@ -240,111 +277,153 @@ function Tabs({
         <Icon name="plus" size={16} />
       </button>
 
-      {menu && createPortal(
-        <>
-          <div
-            className="menu-backdrop"
-            onMouseDown={() => setMenu(null)}
-            onContextMenu={(e) => {
-              e.preventDefault()
-              setMenu(null)
-            }}
-          />
-          <div
-            className="tab-ctxmenu"
-            style={{
-              left: Math.min(menu.x, window.innerWidth - 220),
-              top: Math.min(menu.y, window.innerHeight - 400)
-            }}
-          >
-            {(() => {
-              const tab = menu.tab
-              const hasPath = !!tab.path
-              const noPathTip = !hasPath ? t('tab.noPath') : undefined
-              const menuIdx = tabs.findIndex((x) => x.id === tab.id)
-              const hasLeft = menuIdx > 0
-              const hasRight = menuIdx !== -1 && menuIdx < tabs.length - 1
-              const run = (fn) => () => { fn(); setMenu(null) }
-              return (
-                <>
-                  {tab.preview && onPromotePreview && (
-                    <>
-                      <button className="tab-menu-item" onClick={run(() => onPromotePreview(tab.id))}>
-                        {t('tab.keepOpen')}
+      {menu &&
+        createPortal(
+          <>
+            <div
+              className="menu-backdrop"
+              onMouseDown={() => setMenu(null)}
+              onContextMenu={(e) => {
+                e.preventDefault()
+                setMenu(null)
+              }}
+            />
+            <div
+              className="tab-ctxmenu"
+              style={{
+                left: Math.min(menu.x, window.innerWidth - 220),
+                top: Math.min(menu.y, window.innerHeight - 400)
+              }}
+            >
+              {(() => {
+                const tab = menu.tab
+                const hasPath = !!tab.path
+                const noPathTip = !hasPath ? t('tab.noPath') : undefined
+                const menuIdx = tabs.findIndex((x) => x.id === tab.id)
+                const hasLeft = menuIdx > 0
+                const hasRight = menuIdx !== -1 && menuIdx < tabs.length - 1
+                const run = (fn) => () => {
+                  fn()
+                  setMenu(null)
+                }
+                return (
+                  <>
+                    {tab.preview && onPromotePreview && (
+                      <>
+                        <button
+                          className="tab-menu-item"
+                          onClick={run(() => onPromotePreview(tab.id))}
+                        >
+                          {t('tab.keepOpen')}
+                        </button>
+                        <div className="tab-menu-sep" />
+                      </>
+                    )}
+                    {onTogglePin && (
+                      <>
+                        <button className="tab-menu-item" onClick={run(() => onTogglePin(tab.id))}>
+                          {t(tab.pinned ? 'tab.unpin' : 'tab.pin')}
+                        </button>
+                        <div className="tab-menu-sep" />
+                      </>
+                    )}
+                    {window.api.capabilities?.splitView !== false &&
+                      onOpenRight &&
+                      tabs.length > 1 && (
+                        <>
+                          <button
+                            className="tab-menu-item"
+                            onClick={run(() => onOpenRight(tab.id))}
+                          >
+                            {t('tab.openRight')}
+                          </button>
+                          <div className="tab-menu-sep" />
+                        </>
+                      )}
+                    <button
+                      className="tab-menu-item"
+                      disabled={!hasPath}
+                      title={noPathTip}
+                      onClick={run(() => copyPath(tab))}
+                    >
+                      {t('tab.copyPath')}
+                    </button>
+                    <button className="tab-menu-item" onClick={run(() => copyName(tab))}>
+                      {t('tab.copyName')}
+                    </button>
+                    {window.api.capabilities?.revealInFolder !== false && (
+                      <button
+                        className="tab-menu-item"
+                        disabled={!hasPath}
+                        title={noPathTip}
+                        onClick={run(() => reveal(tab))}
+                      >
+                        {t('tab.reveal')}
                       </button>
-                      <div className="tab-menu-sep" />
-                    </>
-                  )}
-                  {onTogglePin && (
-                    <>
-                      <button className="tab-menu-item" onClick={run(() => onTogglePin(tab.id))}>
-                        {t(tab.pinned ? 'tab.unpin' : 'tab.pin')}
+                    )}
+                    <div className="tab-menu-sep" />
+                    <button
+                      className="tab-menu-item"
+                      disabled={!hasPath}
+                      title={noPathTip}
+                      onClick={run(() => onRename?.(tab.id))}
+                    >
+                      {t('side.rename')}
+                    </button>
+                    <button
+                      className="tab-menu-item"
+                      disabled={!hasPath}
+                      title={noPathTip}
+                      onClick={run(() => onDuplicate?.(tab.id))}
+                    >
+                      {t('side.duplicate')}
+                    </button>
+                    {window.api.capabilities?.pdfExport !== false &&
+                      hasPath &&
+                      isMarkdownName(tab.title) && (
+                        <button
+                          className="tab-menu-item"
+                          onClick={run(() => onExportPdf?.(tab.path))}
+                        >
+                          {t('side.exportPdf')}
+                        </button>
+                      )}
+                    <div className="tab-menu-sep" />
+                    <button className="tab-menu-item" onClick={run(() => onClose(tab.id))}>
+                      {t('tab.close')}
+                    </button>
+                    {onCloseOthers && tabs.length > 1 && (
+                      <button className="tab-menu-item" onClick={run(() => onCloseOthers(tab.id))}>
+                        {t('tab.closeOthers')}
                       </button>
-                      <div className="tab-menu-sep" />
-                    </>
-                  )}
-                  {window.api.capabilities?.splitView !== false && onOpenRight && tabs.length > 1 && (
-                    <>
-                      <button className="tab-menu-item" onClick={run(() => onOpenRight(tab.id))}>
-                        {t('tab.openRight')}
+                    )}
+                    {onCloseLeft && hasLeft && (
+                      <button className="tab-menu-item" onClick={run(() => onCloseLeft(tab.id))}>
+                        {t('tab.closeLeft')}
                       </button>
-                      <div className="tab-menu-sep" />
-                    </>
-                  )}
-                  <button className="tab-menu-item" disabled={!hasPath} title={noPathTip} onClick={run(() => copyPath(tab))}>
-                    {t('tab.copyPath')}
-                  </button>
-                  <button className="tab-menu-item" onClick={run(() => copyName(tab))}>
-                    {t('tab.copyName')}
-                  </button>
-                  {window.api.capabilities?.revealInFolder !== false && (
-                    <button className="tab-menu-item" disabled={!hasPath} title={noPathTip} onClick={run(() => reveal(tab))}>
-                      {t('tab.reveal')}
-                    </button>
-                  )}
-                  <div className="tab-menu-sep" />
-                  <button className="tab-menu-item" disabled={!hasPath} title={noPathTip} onClick={run(() => onRename?.(tab.id))}>
-                    {t('side.rename')}
-                  </button>
-                  <button className="tab-menu-item" disabled={!hasPath} title={noPathTip} onClick={run(() => onDuplicate?.(tab.id))}>
-                    {t('side.duplicate')}
-                  </button>
-                  {window.api.capabilities?.pdfExport !== false && hasPath && isMarkdownName(tab.title) && (
-                    <button className="tab-menu-item" onClick={run(() => onExportPdf?.(tab.path))}>
-                      {t('side.exportPdf')}
-                    </button>
-                  )}
-                  <div className="tab-menu-sep" />
-                  <button className="tab-menu-item" onClick={run(() => onClose(tab.id))}>
-                    {t('tab.close')}
-                  </button>
-                  {onCloseOthers && tabs.length > 1 && (
-                    <button className="tab-menu-item" onClick={run(() => onCloseOthers(tab.id))}>
-                      {t('tab.closeOthers')}
-                    </button>
-                  )}
-                  {onCloseLeft && hasLeft && (
-                    <button className="tab-menu-item" onClick={run(() => onCloseLeft(tab.id))}>
-                      {t('tab.closeLeft')}
-                    </button>
-                  )}
-                  {onCloseRight && hasRight && (
-                    <button className="tab-menu-item" onClick={run(() => onCloseRight(tab.id))}>
-                      {t('tab.closeRight')}
-                    </button>
-                  )}
-                  {onDelete && (
-                    <button className="tab-menu-item danger" disabled={!hasPath} title={noPathTip} onClick={run(() => onDelete(tab.id))}>
-                      {t('side.delete')}
-                    </button>
-                  )}
-                </>
-              )
-            })()}
-          </div>
-        </>,
-        document.body
-      )}
+                    )}
+                    {onCloseRight && hasRight && (
+                      <button className="tab-menu-item" onClick={run(() => onCloseRight(tab.id))}>
+                        {t('tab.closeRight')}
+                      </button>
+                    )}
+                    {onDelete && (
+                      <button
+                        className="tab-menu-item danger"
+                        disabled={!hasPath}
+                        title={noPathTip}
+                        onClick={run(() => onDelete(tab.id))}
+                      >
+                        {t('side.delete')}
+                      </button>
+                    )}
+                  </>
+                )
+              })()}
+            </div>
+          </>,
+          document.body
+        )}
     </div>
   )
 }
