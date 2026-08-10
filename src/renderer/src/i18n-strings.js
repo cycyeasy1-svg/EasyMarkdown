@@ -148,6 +148,7 @@ export const STRINGS = {
 
     // tabs
     'tab.new': 'New tab (Ctrl+N)',
+    'tab.list': 'Open documents',
     'tab.scrollLeft': 'Scroll tabs left',
     'tab.scrollRight': 'Scroll tabs right',
     'tab.untitled': 'Untitled',
@@ -1029,6 +1030,7 @@ export const STRINGS = {
     'hint.save': '保存',
 
     'tab.new': '新建标签 (Ctrl+N)',
+    'tab.list': '打开的文档',
     'tab.scrollLeft': '向左滚动标签栏',
     'tab.scrollRight': '向右滚动标签栏',
     'tab.untitled': '未命名',
@@ -1895,6 +1897,7 @@ export const STRINGS = {
 
     // tabs
     'tab.new': '新規タブ (Ctrl+N)',
+    'tab.list': '開いている文書',
     'tab.scrollLeft': 'タブバーを左にスクロール',
     'tab.scrollRight': 'タブバーを右にスクロール',
     'tab.untitled': '無題',

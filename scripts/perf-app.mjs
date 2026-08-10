@@ -25,19 +25,22 @@ const runs = runsArg ? Number(runsArg.slice('--runs='.length)) : baseline.runs
 const budgetScale = Number(process.env.EASYMARKDOWN_PERF_SCALE || 1)
 
 if (process.argv.includes('--help')) {
-  process.stdout.write([
-    'EasyMarkdown APP performance benchmark',
-    '',
-    '  npm run perf:app                         build, measure, and enforce budgets',
-    '  npm run perf:app:measure -- --runs=1     measure without failing budgets',
-    '  EASYMARKDOWN_PERF_SCALE=1.5 npm run perf:app',
-    '',
-    'Timing budgets are CPU-normalized. Exact DOM-operation guards are not scaled.',
-    'Budgets and the recorded reference live in scripts/perf-app-baseline.json.'
-  ].join('\n') + '\n')
+  process.stdout.write(
+    [
+      'EasyMarkdown APP performance benchmark',
+      '',
+      '  npm run perf:app                         build, measure, and enforce budgets',
+      '  npm run perf:app:measure -- --runs=1     measure without failing budgets',
+      '  EASYMARKDOWN_PERF_SCALE=1.5 npm run perf:app',
+      '',
+      'Timing budgets are CPU-normalized. Exact DOM-operation guards are not scaled.',
+      'Budgets and the recorded reference live in scripts/perf-app-baseline.json.'
+    ].join('\n') + '\n'
+  )
   process.exit(0)
 }
-if (!Number.isInteger(runs) || runs < 1 || runs > 20) throw new Error(`Invalid --runs value: ${runs}`)
+if (!Number.isInteger(runs) || runs < 1 || runs > 20)
+  throw new Error(`Invalid --runs value: ${runs}`)
 if (!Number.isFinite(budgetScale) || budgetScale <= 0) {
   throw new Error(`Invalid EASYMARKDOWN_PERF_SCALE value: ${budgetScale}`)
 }
@@ -79,7 +82,8 @@ function createFixtures(root) {
   const separator = `| ${Array.from({ length: columns }, () => '---').join(' | ')} |`
   const body = Array.from(
     { length: rows },
-    (_, ri) => `| ${Array.from({ length: columns }, (_, ci) => `row-${ri}-column-${ci}`).join(' | ')} |`
+    (_, ri) =>
+      `| ${Array.from({ length: columns }, (_, ci) => `row-${ri}-column-${ci}`).join(' | ')} |`
   )
   writeFileSync(tablePath, `${header}\n${separator}\n${body.join('\n')}\n`, 'utf8')
   return { smallPath, tablePath }
@@ -141,7 +145,10 @@ async function collectTableInstrumentation(page) {
       progressiveRowBatches: state?.progressiveRowBatches || 0,
       largestProgressiveRowBatch: state?.largestProgressiveRowBatch || 0,
       maxLongTaskMs: Math.max(0, ...(state?.longTasks || [])),
-      totalBlockingTimeMs: (state?.longTasks || []).reduce((sum, duration) => sum + Math.max(0, duration - 50), 0)
+      totalBlockingTimeMs: (state?.longTasks || []).reduce(
+        (sum, duration) => sum + Math.max(0, duration - 50),
+        0
+      )
     }
     state?.restore()
     delete window.__hmPerfTable
@@ -181,7 +188,9 @@ async function measureAction(page, cdp, action) {
     layoutMs: metricDeltaMs(before, after, 'LayoutDuration'),
     styleMs: metricDeltaMs(before, after, 'RecalcStyleDuration'),
     maxLongTaskMs: round(Math.max(0, ...longTasks)),
-    totalBlockingTimeMs: round(longTasks.reduce((sum, duration) => sum + Math.max(0, duration - 50), 0))
+    totalBlockingTimeMs: round(
+      longTasks.reduce((sum, duration) => sum + Math.max(0, duration - 50), 0)
+    )
   }
 }
 
@@ -195,7 +204,11 @@ async function installMirrorInstrumentation(page) {
       }
     }
     Node.prototype.appendChild = function (node) {
-      if (this === document.body && node?.tagName === 'DIV' && node.style?.visibility === 'hidden') {
+      if (
+        this === document.body &&
+        node?.tagName === 'DIV' &&
+        node.style?.visibility === 'hidden'
+      ) {
         state.measurements++
       }
       return originalAppendChild.call(this, node)
@@ -206,17 +219,20 @@ async function installMirrorInstrumentation(page) {
 
 async function scrollSource(page, cdp) {
   const before = await metricMap(cdp)
-  const wallMs = await page.evaluate(async ({ steps, delayMs }) => {
-    const textarea = document.querySelector('textarea.source-editor')
-    const max = Math.max(0, textarea.scrollHeight - textarea.clientHeight)
-    const points = [0.08, 0.24, 0.4, 0.56, 0.72, 0.88, 0.32, 0.68].slice(0, steps)
-    const start = performance.now()
-    for (const point of points) {
-      textarea.scrollTop = max * point
-      await new Promise((resolve) => setTimeout(resolve, delayMs))
-    }
-    return performance.now() - start
-  }, { steps: baseline.fixture.scrollSteps, delayMs: baseline.fixture.scrollDelayMs })
+  const wallMs = await page.evaluate(
+    async ({ steps, delayMs }) => {
+      const textarea = document.querySelector('textarea.source-editor')
+      const max = Math.max(0, textarea.scrollHeight - textarea.clientHeight)
+      const points = [0.08, 0.24, 0.4, 0.56, 0.72, 0.88, 0.32, 0.68].slice(0, steps)
+      const start = performance.now()
+      for (const point of points) {
+        textarea.scrollTop = max * point
+        await new Promise((resolve) => setTimeout(resolve, delayMs))
+      }
+      return performance.now() - start
+    },
+    { steps: baseline.fixture.scrollSteps, delayMs: baseline.fixture.scrollDelayMs }
+  )
   const after = await metricMap(cdp)
   return {
     wallMs: round(wallMs),
@@ -241,7 +257,9 @@ async function runSample(sampleNumber, fixtures) {
     await page.waitForLoadState('domcontentloaded')
     await page.waitForSelector('#root .app', { timeout: 20_000 })
     await page.locator('.tab', { hasText: basename(fixtures.smallPath) }).click()
-    await page.locator('.km-doc', { hasText: 'Performance calibration' }).waitFor({ state: 'visible' })
+    await page
+      .locator('.km-doc', { hasText: 'Performance calibration' })
+      .waitFor({ state: 'visible' })
     await page.waitForTimeout(100)
     const cpuCalibrationBeforeMs = await measureCpuCalibration(page)
 
@@ -253,28 +271,39 @@ async function runSample(sampleNumber, fixtures) {
     await app.evaluate(({ BrowserWindow }, tablePath) => {
       BrowserWindow.getAllWindows()[0]?.webContents.send('open-paths', [tablePath])
     }, fixtures.tablePath)
-    await page.locator('.tab', { hasText: basename(fixtures.tablePath) }).waitFor({ state: 'visible' })
+    await page
+      .locator('.tab', { hasText: basename(fixtures.tablePath) })
+      .waitFor({ state: 'visible' })
     const tableBody = page.locator('.km-table tbody').first()
     await tableBody.locator('tr').first().waitFor({ state: 'attached', timeout: 30_000 })
     const tableFirstRowsMs = performance.now() - tableStart
     const initialRenderedRows = await tableBody.evaluate((tbody) =>
       Number(tbody.dataset.kmInitialRows || tbody.querySelectorAll('tr').length)
     )
-    await page.locator('.km-table tbody tr').nth(baseline.fixture.rows - 1).waitFor({ state: 'attached', timeout: 30_000 })
+    await page
+      .locator('.km-table tbody tr')
+      .nth(baseline.fixture.rows - 1)
+      .waitFor({ state: 'attached', timeout: 30_000 })
     await page.locator('.km-table-frame').waitFor({ state: 'attached' })
     await page.waitForTimeout(100)
     const tableOpenMs = performance.now() - tableStart
     const afterTable = await metricMap(cdp)
     const tableInstrumentation = await collectTableInstrumentation(page)
-    const tableCells = await page.locator('table.km-table[data-ti]').evaluate((table) => table.querySelectorAll('th, td').length)
+    const tableCells = await page
+      .locator('table.km-table[data-ti]')
+      .evaluate((table) => table.querySelectorAll('th, td').length)
     // Measure again after the expensive phase. Taking the slower value catches
     // host contention that starts after launch without polluting long-task data.
     const cpuCalibrationAfterMs = await measureCpuCalibration(page)
 
     const findLastRow = await measureAction(page, cdp, async () => {
       await page.keyboard.press(platform() === 'darwin' ? 'Meta+F' : 'Control+F')
-      await page.locator('.findbar input').fill(`row-${baseline.fixture.rows - 1}-column-${baseline.fixture.columns - 1}`)
-      await page.waitForFunction(() => document.querySelector('.findbar-count')?.textContent === '1/1')
+      await page
+        .locator('.findbar input')
+        .fill(`row-${baseline.fixture.rows - 1}-column-${baseline.fixture.columns - 1}`)
+      await page.waitForFunction(
+        () => document.querySelector('.findbar-count')?.textContent === '1/1'
+      )
     })
     await page.keyboard.press('Escape')
     await page.locator('.findbar').waitFor({ state: 'hidden' })
@@ -285,30 +314,46 @@ async function runSample(sampleNumber, fixtures) {
       await page.locator('.km-filter-pop').waitFor({ state: 'visible' })
     })
     const filterApply = await measureAction(page, cdp, async () => {
-      await page.locator('.km-filter-pop .km-fp-search').fill(`row-${baseline.fixture.rows - 1}-column-0`)
+      await page
+        .locator('.km-filter-pop .km-fp-search')
+        .fill(`row-${baseline.fixture.rows - 1}-column-0`)
       await page.locator('.km-filter-pop .ok').click()
       await page.waitForFunction(
-        (rows) => document.querySelectorAll('table.km-table tbody tr.km-filtered').length === rows - 1,
+        (rows) =>
+          document.querySelectorAll('table.km-table tbody tr.km-filtered').length === rows - 1,
         baseline.fixture.rows
       )
     })
     await filterButton.click()
     await page.locator('.km-filter-pop').waitFor({ state: 'visible' })
-    await page.locator('.km-filter-pop [data-all="1"]').click()
-    await page.locator('.km-filter-pop .ok').click()
-    await page.waitForFunction(() => document.querySelectorAll('table.km-table tbody tr.km-filtered').length === 0)
+    await page.locator('.km-filter-pop .clear-column').click()
+    await page.waitForFunction(
+      () => document.querySelectorAll('table.km-table tbody tr.km-filtered').length === 0
+    )
 
     const columnHide = await measureAction(page, cdp, async () => {
       await page.locator('table.km-table .km-col-hide-btn[data-ci="0"]').first().click()
-      await page.waitForFunction(() => document.querySelector('table.km-table td[data-ci="0"]')?.classList.contains('km-col-hidden'))
+      await page.waitForFunction(() =>
+        document
+          .querySelector('table.km-table td[data-ci="0"]')
+          ?.classList.contains('km-col-hidden')
+      )
     })
     const columnShow = await measureAction(page, cdp, async () => {
       await page.locator('.km-table-hidden-columns').first().click()
       await page.locator('.km-column-pop-item[data-ci="0"]').click()
-      await page.waitForFunction(() => !document.querySelector('table.km-table td[data-ci="0"]')?.classList.contains('km-col-hidden'))
+      await page.waitForFunction(
+        () =>
+          !document
+            .querySelector('table.km-table td[data-ci="0"]')
+            ?.classList.contains('km-col-hidden')
+      )
     })
     const resizeHandle = page.locator('table.km-table .km-col-resize[data-ci="0"]').first()
-    const widthBefore = await page.locator('table.km-table col').first().evaluate((col) => col.style.width)
+    const widthBefore = await page
+      .locator('table.km-table col')
+      .first()
+      .evaluate((col) => col.style.width)
     const columnResize = await measureAction(page, cdp, async () => {
       await resizeHandle.focus()
       await page.keyboard.press('ArrowRight')
@@ -318,7 +363,9 @@ async function runSample(sampleNumber, fixtures) {
       )
     })
 
-    await page.evaluate(() => { window.__hmPerfTableIdentity = document.querySelector('table.km-table') })
+    await page.evaluate(() => {
+      window.__hmPerfTableIdentity = document.querySelector('table.km-table')
+    })
     const cellEditOpen = await measureAction(page, cdp, async () => {
       await page.locator('table.km-table tbody td[data-ci="0"]').first().dblclick()
       await page.locator('.km-cell-pop .km-cp-input').waitFor({ state: 'visible' })
@@ -352,7 +399,9 @@ async function runSample(sampleNumber, fixtures) {
     await installMirrorInstrumentation(page)
     await page.keyboard.press(platform() === 'darwin' ? 'Meta+F' : 'Control+F')
     await page.locator('.findbar input').fill(query)
-    await page.waitForFunction(() => document.querySelector('.findbar-count')?.textContent === '1/1')
+    await page.waitForFunction(
+      () => document.querySelector('.findbar-count')?.textContent === '1/1'
+    )
     await page.waitForTimeout(250)
     const mirrorsBeforeScroll = await page.evaluate(() => window.__hmPerfMirror.measurements)
     const withFind = await scrollSource(page, cdp)
@@ -400,9 +449,15 @@ async function runSample(sampleNumber, fixtures) {
       }
     }
   } finally {
-    try { await app.evaluate(({ app }) => app.exit(0)) } catch {}
-    try { await app.close() } catch {}
-    try { rmSync(userDataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }) } catch {}
+    try {
+      await app.evaluate(({ app }) => app.exit(0))
+    } catch {}
+    try {
+      await app.close()
+    } catch {}
+    try {
+      rmSync(userDataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
+    } catch {}
   }
 }
 
@@ -427,11 +482,17 @@ function summarize(samples) {
       cells: value((sample) => sample.table.cells),
       maxLongTaskMs: round(value((sample) => sample.table.maxLongTaskMs)),
       totalBlockingTimeMs: round(value((sample) => sample.table.totalBlockingTimeMs)),
-      initialColumnClassToggles: Math.max(...samples.map((sample) => sample.table.initialColumnClassToggles)),
-      tableOnlyHostStyleReads: Math.max(...samples.map((sample) => sample.table.tableOnlyHostStyleReads)),
+      initialColumnClassToggles: Math.max(
+        ...samples.map((sample) => sample.table.initialColumnClassToggles)
+      ),
+      tableOnlyHostStyleReads: Math.max(
+        ...samples.map((sample) => sample.table.tableOnlyHostStyleReads)
+      ),
       initialRenderedRows: value((sample) => sample.table.initialRenderedRows),
       progressiveRowBatches: value((sample) => sample.table.progressiveRowBatches),
-      largestProgressiveRowBatch: Math.max(...samples.map((sample) => sample.table.largestProgressiveRowBatch))
+      largestProgressiveRowBatch: Math.max(
+        ...samples.map((sample) => sample.table.largestProgressiveRowBatch)
+      )
     },
     interactions: {
       findLastRow: action('findLastRow'),
@@ -442,14 +503,20 @@ function summarize(samples) {
       columnResize: action('columnResize'),
       cellEditOpen: action('cellEditOpen'),
       cellEditCancel: action('cellEditCancel'),
-      cellCancelPreservedTable: samples.every((sample) => sample.interactions.cellCancelPreservedTable)
+      cellCancelPreservedTable: samples.every(
+        (sample) => sample.interactions.cellCancelPreservedTable
+      )
     },
     sourceFind: {
       noFindWallMs: round(value((sample) => sample.sourceFind.noFind.wallMs)),
       withFindWallMs: round(value((sample) => sample.sourceFind.withFind.wallMs)),
       scrollOverheadMs: round(value((sample) => sample.sourceFind.scrollOverheadMs)),
-      taskOverheadMs: round(value((sample) => sample.sourceFind.withFind.taskMs - sample.sourceFind.noFind.taskMs)),
-      mirrorRemeasuresOnScroll: Math.max(...samples.map((sample) => sample.sourceFind.mirrorRemeasuresOnScroll))
+      taskOverheadMs: round(
+        value((sample) => sample.sourceFind.withFind.taskMs - sample.sourceFind.noFind.taskMs)
+      ),
+      mirrorRemeasuresOnScroll: Math.max(
+        ...samples.map((sample) => sample.sourceFind.mirrorRemeasuresOnScroll)
+      )
     }
   }
 }
@@ -457,9 +524,8 @@ function summarize(samples) {
 function checkLimits(summary) {
   const limits = baseline.limits
   const calibrationReference = baseline.reference.cpuCalibrationMs
-  const contentionScale = calibrationReference > 0
-    ? Math.max(1, summary.cpuCalibrationMs / calibrationReference)
-    : 1
+  const contentionScale =
+    calibrationReference > 0 ? Math.max(1, summary.cpuCalibrationMs / calibrationReference) : 1
   const timingScale = round(Math.min(contentionScale, 3) * budgetScale, 3)
   const checks = [
     ['table.firstRowsMs', summary.table.firstRowsMs, limits.tableFirstRowsMs, true],
@@ -468,42 +534,166 @@ function checkLimits(summary) {
     ['table.layoutMs', summary.table.layoutMs, limits.tableLayoutMs, true],
     ['table.styleMs', summary.table.styleMs, limits.tableStyleMs, true],
     ['table.maxLongTaskMs', summary.table.maxLongTaskMs, limits.tableMaxLongTaskMs, true],
-    ['table.totalBlockingTimeMs', summary.table.totalBlockingTimeMs, limits.tableTotalBlockingTimeMs, true],
-    ['sourceFind.scrollOverheadMs', summary.sourceFind.scrollOverheadMs, limits.sourceFindScrollOverheadMs, true],
-    ['sourceFind.taskOverheadMs', summary.sourceFind.taskOverheadMs, limits.sourceFindTaskOverheadMs, true],
-    ['interactions.findLastRow.taskMs', summary.interactions.findLastRow.taskMs, limits.findLastRowTaskMs, true],
-    ['interactions.filterOpen.taskMs', summary.interactions.filterOpen.taskMs, limits.filterOpenTaskMs, true],
-    ['interactions.filterApply.taskMs', summary.interactions.filterApply.taskMs, limits.filterApplyTaskMs, true],
-    ['interactions.columnHide.taskMs', summary.interactions.columnHide.taskMs, limits.columnHideTaskMs, true],
-    ['interactions.columnShow.taskMs', summary.interactions.columnShow.taskMs, limits.columnShowTaskMs, true],
-    ['interactions.columnResize.taskMs', summary.interactions.columnResize.taskMs, limits.columnResizeTaskMs, true],
-    ['interactions.cellEditOpen.taskMs', summary.interactions.cellEditOpen.taskMs, limits.cellEditOpenTaskMs, true],
-    ['interactions.cellEditCancel.taskMs', summary.interactions.cellEditCancel.taskMs, limits.cellEditCancelTaskMs, true],
-    ['interactions.findLastRow.maxLongTaskMs', summary.interactions.findLastRow.maxLongTaskMs, limits.interactionMaxLongTaskMs, true],
-    ['interactions.filterOpen.maxLongTaskMs', summary.interactions.filterOpen.maxLongTaskMs, limits.interactionMaxLongTaskMs, true],
-    ['interactions.filterApply.maxLongTaskMs', summary.interactions.filterApply.maxLongTaskMs, limits.interactionMaxLongTaskMs, true],
-    ['interactions.columnHide.maxLongTaskMs', summary.interactions.columnHide.maxLongTaskMs, limits.interactionMaxLongTaskMs, true],
-    ['interactions.columnShow.maxLongTaskMs', summary.interactions.columnShow.maxLongTaskMs, limits.interactionMaxLongTaskMs, true],
-    ['interactions.columnResize.maxLongTaskMs', summary.interactions.columnResize.maxLongTaskMs, limits.interactionMaxLongTaskMs, true],
-    ['table.initialColumnClassToggles', summary.table.initialColumnClassToggles, limits.initialColumnClassToggles, false],
-    ['table.tableOnlyHostStyleReads', summary.table.tableOnlyHostStyleReads, limits.tableOnlyHostStyleReads, false],
-    ['sourceFind.mirrorRemeasuresOnScroll', summary.sourceFind.mirrorRemeasuresOnScroll, limits.sourceMirrorRemeasuresOnScroll, false],
+    [
+      'table.totalBlockingTimeMs',
+      summary.table.totalBlockingTimeMs,
+      limits.tableTotalBlockingTimeMs,
+      true
+    ],
+    [
+      'sourceFind.scrollOverheadMs',
+      summary.sourceFind.scrollOverheadMs,
+      limits.sourceFindScrollOverheadMs,
+      true
+    ],
+    [
+      'sourceFind.taskOverheadMs',
+      summary.sourceFind.taskOverheadMs,
+      limits.sourceFindTaskOverheadMs,
+      true
+    ],
+    [
+      'interactions.findLastRow.taskMs',
+      summary.interactions.findLastRow.taskMs,
+      limits.findLastRowTaskMs,
+      true
+    ],
+    [
+      'interactions.filterOpen.taskMs',
+      summary.interactions.filterOpen.taskMs,
+      limits.filterOpenTaskMs,
+      true
+    ],
+    [
+      'interactions.filterApply.taskMs',
+      summary.interactions.filterApply.taskMs,
+      limits.filterApplyTaskMs,
+      true
+    ],
+    [
+      'interactions.columnHide.taskMs',
+      summary.interactions.columnHide.taskMs,
+      limits.columnHideTaskMs,
+      true
+    ],
+    [
+      'interactions.columnShow.taskMs',
+      summary.interactions.columnShow.taskMs,
+      limits.columnShowTaskMs,
+      true
+    ],
+    [
+      'interactions.columnResize.taskMs',
+      summary.interactions.columnResize.taskMs,
+      limits.columnResizeTaskMs,
+      true
+    ],
+    [
+      'interactions.cellEditOpen.taskMs',
+      summary.interactions.cellEditOpen.taskMs,
+      limits.cellEditOpenTaskMs,
+      true
+    ],
+    [
+      'interactions.cellEditCancel.taskMs',
+      summary.interactions.cellEditCancel.taskMs,
+      limits.cellEditCancelTaskMs,
+      true
+    ],
+    [
+      'interactions.findLastRow.maxLongTaskMs',
+      summary.interactions.findLastRow.maxLongTaskMs,
+      limits.interactionMaxLongTaskMs,
+      true
+    ],
+    [
+      'interactions.filterOpen.maxLongTaskMs',
+      summary.interactions.filterOpen.maxLongTaskMs,
+      limits.interactionMaxLongTaskMs,
+      true
+    ],
+    [
+      'interactions.filterApply.maxLongTaskMs',
+      summary.interactions.filterApply.maxLongTaskMs,
+      limits.interactionMaxLongTaskMs,
+      true
+    ],
+    [
+      'interactions.columnHide.maxLongTaskMs',
+      summary.interactions.columnHide.maxLongTaskMs,
+      limits.interactionMaxLongTaskMs,
+      true
+    ],
+    [
+      'interactions.columnShow.maxLongTaskMs',
+      summary.interactions.columnShow.maxLongTaskMs,
+      limits.interactionMaxLongTaskMs,
+      true
+    ],
+    [
+      'interactions.columnResize.maxLongTaskMs',
+      summary.interactions.columnResize.maxLongTaskMs,
+      limits.interactionMaxLongTaskMs,
+      true
+    ],
+    [
+      'table.initialColumnClassToggles',
+      summary.table.initialColumnClassToggles,
+      limits.initialColumnClassToggles,
+      false
+    ],
+    [
+      'table.tableOnlyHostStyleReads',
+      summary.table.tableOnlyHostStyleReads,
+      limits.tableOnlyHostStyleReads,
+      false
+    ],
+    [
+      'sourceFind.mirrorRemeasuresOnScroll',
+      summary.sourceFind.mirrorRemeasuresOnScroll,
+      limits.sourceMirrorRemeasuresOnScroll,
+      false
+    ],
     ['table.cells', summary.table.cells, limits.tableCells, false, 'equal'],
-    ['table.initialRenderedRows', summary.table.initialRenderedRows, limits.initialRenderedRows, false, 'equal'],
-    ['table.progressiveRowBatches', summary.table.progressiveRowBatches, limits.minimumProgressiveRowBatches, false, 'minimum'],
-    ['table.largestProgressiveRowBatch', summary.table.largestProgressiveRowBatch, limits.largestProgressiveRowBatch, false],
-    ['interactions.cellCancelPreservedTable', summary.interactions.cellCancelPreservedTable, limits.cellCancelPreservedTable, false, 'equal']
+    [
+      'table.initialRenderedRows',
+      summary.table.initialRenderedRows,
+      limits.initialRenderedRows,
+      false,
+      'equal'
+    ],
+    [
+      'table.progressiveRowBatches',
+      summary.table.progressiveRowBatches,
+      limits.minimumProgressiveRowBatches,
+      false,
+      'minimum'
+    ],
+    [
+      'table.largestProgressiveRowBatch',
+      summary.table.largestProgressiveRowBatch,
+      limits.largestProgressiveRowBatch,
+      false
+    ],
+    [
+      'interactions.cellCancelPreservedTable',
+      summary.interactions.cellCancelPreservedTable,
+      limits.cellCancelPreservedTable,
+      false,
+      'equal'
+    ]
   ]
   return {
     contentionScale: round(contentionScale, 3),
     timingScale,
     checks: checks.map(([name, actual, limit, scalable, comparison = 'maximum']) => {
       const effectiveLimit = scalable ? round(limit * timingScale) : limit
-      const pass = comparison === 'equal'
-        ? actual === effectiveLimit
-        : comparison === 'minimum'
-          ? actual >= effectiveLimit
-          : actual <= effectiveLimit
+      const pass =
+        comparison === 'equal'
+          ? actual === effectiveLimit
+          : comparison === 'minimum'
+            ? actual >= effectiveLimit
+            : actual <= effectiveLimit
       return { name, actual, limit: effectiveLimit, comparison, pass }
     })
   }
@@ -539,12 +729,17 @@ try {
   process.stdout.write(`summary: ${JSON.stringify(summary, null, 2)}\n`)
   if (!noCheck) {
     checks.forEach((check) => {
-      const operator = check.comparison === 'equal' ? '===' : check.comparison === 'minimum' ? '>=' : '<='
-      process.stdout.write(`${check.pass ? 'PASS' : 'FAIL'} ${check.name}: ${check.actual} ${operator} ${check.limit}\n`)
+      const operator =
+        check.comparison === 'equal' ? '===' : check.comparison === 'minimum' ? '>=' : '<='
+      process.stdout.write(
+        `${check.pass ? 'PASS' : 'FAIL'} ${check.name}: ${check.actual} ${operator} ${check.limit}\n`
+      )
     })
     if (checks.some((check) => !check.pass)) process.exitCode = 1
   }
   process.stdout.write(`report: ${JSON.stringify(report)}\n`)
 } finally {
-  try { rmSync(fixtureRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }) } catch {}
+  try {
+    rmSync(fixtureRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
+  } catch {}
 }

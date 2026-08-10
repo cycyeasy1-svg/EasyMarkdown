@@ -563,7 +563,9 @@ function KeepEditor({
       if (!el || !host.contains(el)) return false
       const block = el.closest('.km-block')
       if (!block) return false
-      let need = block.hasAttribute('data-hlevel') ? parseInt(block.getAttribute('data-hlevel')) : Infinity
+      let need = block.hasAttribute('data-hlevel')
+        ? parseInt(block.getAttribute('data-hlevel'))
+        : Infinity
       let node = block.previousElementSibling
       while (node && need > 1) {
         if (node.classList?.contains('km-block') && node.hasAttribute('data-hlevel')) {
@@ -616,9 +618,7 @@ function KeepEditor({
         // KaTeX styles ship with the Crepe theme, which only loads when the rich
         // editor mounts — a keep-only session needs the stylesheet pulled in here.
         import('katex/dist/katex.min.css').catch(() => {})
-        katexPromise = import('katex')
-          .then((m) => m.default || m)
-          .catch(() => null)
+        katexPromise = import('katex').then((m) => m.default || m).catch(() => null)
       }
       return katexPromise
     }
@@ -981,8 +981,16 @@ function KeepEditor({
           const lineAttr = td.getAttribute('data-line')
           const ciAttr = td.getAttribute('data-ci')
           const sel =
-            'td[data-line="' + lineAttr + '"][data-ci="' + ciAttr + '"],' +
-            'th[data-line="' + lineAttr + '"][data-ci="' + ciAttr + '"]'
+            'td[data-line="' +
+            lineAttr +
+            '"][data-ci="' +
+            ciAttr +
+            '"],' +
+            'th[data-line="' +
+            lineAttr +
+            '"][data-ci="' +
+            ciAttr +
+            '"]'
           td = host.querySelector(sel)
           if (!td) return
         }
@@ -1398,9 +1406,7 @@ function KeepEditor({
       if (!selection || !Number.isFinite(selection.ti) || !Number.isFinite(selection.ci)) {
         return null
       }
-      const rowSelector = selection.isHeader
-        ? 'thead tr'
-        : `tbody tr[data-ri="${selection.ri}"]`
+      const rowSelector = selection.isHeader ? 'thead tr' : `tbody tr[data-ri="${selection.ri}"]`
       return host.querySelector(
         `table.km-table[data-ti="${selection.ti}"] ${rowSelector} > ` +
           `${selection.isHeader ? 'th' : 'td'}[data-ci="${selection.ci}"]`
@@ -1440,13 +1446,7 @@ function KeepEditor({
       }
       if (!readOnlyRef.current) {
         items.push('sep')
-        buildTableItems(
-          items,
-          selection.ti,
-          selection.ri,
-          selection.ci,
-          selection.isHeader
-        )
+        buildTableItems(items, selection.ti, selection.ri, selection.ci, selection.isHeader)
       }
       return items
     }
@@ -1455,13 +1455,8 @@ function KeepEditor({
       const selection = selectionForCell(cell)
       if (!cell || !selection) return false
       const table = cell.closest('table.km-table')
-      const headerFilter = table.querySelector(
-        `.km-filter-btn[data-ci="${selection.ci}"]`
-      )
-      if (
-        readOnlyRef.current &&
-        !['filter', 'menu'].includes(command)
-      ) return false
+      const headerFilter = table.querySelector(`.km-filter-btn[data-ci="${selection.ci}"]`)
+      if (readOnlyRef.current && !['filter', 'menu'].includes(command)) return false
       if (command === 'edit') openCellPop(cell)
       else if (command === 'filter') {
         if (!headerFilter) return false
@@ -1495,10 +1490,7 @@ function KeepEditor({
       selectedCellRef.current = next
       const table = cell.closest('table.km-table')
       table.tabIndex = -1
-      table.setAttribute(
-        'aria-label',
-        tRef.current('keep.tableAria', { n: next.ti + 1 })
-      )
+      table.setAttribute('aria-label', tRef.current('keep.tableAria', { n: next.ti + 1 }))
       cell.classList.add('km-cell-selected')
       cell.setAttribute('aria-selected', 'true')
       cell.setAttribute(
@@ -1696,7 +1688,10 @@ function KeepEditor({
       wrap.appendChild(node)
       wrap.querySelectorAll('.km-src-edit, .km-filter-btn, button').forEach((el) => el.remove())
       inlineRichStyles(wrap)
-      return { html: `<div style="${COPY_WRAP}">${wrap.innerHTML}</div>`, text: wrap.textContent || '' }
+      return {
+        html: `<div style="${COPY_WRAP}">${wrap.innerHTML}</div>`,
+        text: wrap.textContent || ''
+      }
     }
     const writeRich = (node, plain) => {
       const r = richHtml(node)
@@ -1843,8 +1838,7 @@ function KeepEditor({
       const list = pop.querySelector('.km-fp-list')
       const sorted = [...values].sort((a, b) => a.localeCompare(b, 'ja'))
       const selected = new Set(sorted.filter((v) => !excluded.has(v)))
-      const matchesSearch = (v, filter) =>
-        !filter || v.replace(/<br>/g, ' ').includes(filter)
+      const matchesSearch = (v, filter) => !filter || v.replace(/<br>/g, ' ').includes(filter)
       const matchingValues = (filter) => sorted.filter((v) => matchesSearch(v, filter))
       const buildList = (filter) => {
         list.innerHTML = ''
@@ -2175,11 +2169,12 @@ function KeepEditor({
           }
           items.push({
             label: T('links.findReferences'),
-            fn: () => onFindReferencesRef.current?.({
-              type: 'link',
-              href,
-              line: lineForBlock(block) + 1
-            })
+            fn: () =>
+              onFindReferencesRef.current?.({
+                type: 'link',
+                href,
+                line: lineForBlock(block) + 1
+              })
           })
           items.push('sep')
         }
@@ -2205,20 +2200,22 @@ function KeepEditor({
             items.push('sep')
             items.push({
               label: T('links.findReferences'),
-              fn: () => onFindReferencesRef.current?.({
-                type: 'heading',
-                line: sourceBlock.start + 1,
-                text: sourceBlock.text
-              })
-            })
-            if (!readOnlyRef.current) {
-              items.push({
-                label: T('links.renameHeading'),
-                fn: () => onRenameHeadingRef.current?.({
+              fn: () =>
+                onFindReferencesRef.current?.({
                   type: 'heading',
                   line: sourceBlock.start + 1,
                   text: sourceBlock.text
                 })
+            })
+            if (!readOnlyRef.current) {
+              items.push({
+                label: T('links.renameHeading'),
+                fn: () =>
+                  onRenameHeadingRef.current?.({
+                    type: 'heading',
+                    line: sourceBlock.start + 1,
+                    text: sourceBlock.text
+                  })
               })
             }
           }
@@ -2263,7 +2260,8 @@ function KeepEditor({
     }
     const onEsc = (e) => {
       if (e.key !== 'Escape') return
-      if (activeConfirmRef.current) closeConfirm() // Esc on the modal = cancel
+      if (activeConfirmRef.current)
+        closeConfirm() // Esc on the modal = cancel
       else if (activeMenuRef.current) closeMenu()
       else if (activePopRef.current) closePop()
       else if (selectedCellRef.current) clearTableSelection({ focusTable: true })
@@ -2399,7 +2397,8 @@ function KeepEditor({
       if (ensureAll) flushRemaining()
       const scrollerTop = scroller.getBoundingClientRect().top + 8
       const blocks = [...host.querySelectorAll('.km-block[data-bi]')]
-      const visible = blocks.find((block) => block.getBoundingClientRect().bottom >= scrollerTop) || blocks.at(-1)
+      const visible =
+        blocks.find((block) => block.getBoundingClientRect().bottom >= scrollerTop) || blocks.at(-1)
       const bi = Number(visible?.getAttribute('data-bi'))
       const sourceBlock = Number.isFinite(bi) ? blocksRef.current[bi] : null
       if (sourceBlock?.type === 'table' && visible) {
@@ -2411,18 +2410,19 @@ function KeepEditor({
         // floating header instead of always returning the table header line.
         if (theadRect && theadRect.bottom < scrollerTop) {
           const probeTop = scrollerTop + theadRect.height
-          const rows = [...visible.querySelectorAll('tbody tr')]
-            .filter((row) => row.getBoundingClientRect().height > 0)
-          const row = rows.find((candidate) => candidate.getBoundingClientRect().bottom >= probeTop) || rows.at(-1)
+          const rows = [...visible.querySelectorAll('tbody tr')].filter(
+            (row) => row.getBoundingClientRect().height > 0
+          )
+          const row =
+            rows.find((candidate) => candidate.getBoundingClientRect().bottom >= probeTop) ||
+            rows.at(-1)
           const rowLine = Number(row?.querySelector('[data-line]')?.getAttribute('data-line'))
           if (Number.isFinite(rowLine)) {
             return lineStartOffset(rawLinesRef.current.join('\n'), rowLine)
           }
         }
       }
-      return sourceBlock
-        ? lineStartOffset(rawLinesRef.current.join('\n'), sourceBlock.start)
-        : 0
+      return sourceBlock ? lineStartOffset(rawLinesRef.current.join('\n'), sourceBlock.start) : 0
     }
     const restoreMarkdownOffset = (rawOffset, follow = false) => {
       flushRemaining()
@@ -2437,11 +2437,16 @@ function KeepEditor({
       let target = block
       let topInset = 0
       if (sourceBlock?.type === 'table') {
-        const rows = [...block.querySelectorAll('tbody tr')]
-          .filter((row) => row.getBoundingClientRect().height > 0)
-        target = rows.find((row) => Number(row.querySelector('[data-line]')?.getAttribute('data-line')) >= sourceLine)
-          || rows.at(-1)
-          || block
+        const rows = [...block.querySelectorAll('tbody tr')].filter(
+          (row) => row.getBoundingClientRect().height > 0
+        )
+        target =
+          rows.find(
+            (row) =>
+              Number(row.querySelector('[data-line]')?.getAttribute('data-line')) >= sourceLine
+          ) ||
+          rows.at(-1) ||
+          block
         topInset = block.querySelector('thead')?.getBoundingClientRect().height || 0
       }
       const blockRect = target.getBoundingClientRect()
@@ -2454,15 +2459,12 @@ function KeepEditor({
     const captureNavigationContext = () => {
       const collapsed = [...collapsedRef.current].slice(0, 50)
       const selection = selectedCellRef.current ? { ...selectedCellRef.current } : null
-      let table = selection
-        ? host.querySelector(`table.km-table[data-ti="${selection.ti}"]`)
-        : null
+      let table = selection ? host.querySelector(`table.km-table[data-ti="${selection.ti}"]`) : null
       if (!table) {
         const rawOffset = markdownOffsetFromViewportTop(false)
         const bi = Number.isFinite(rawOffset) ? blockIndexForOffset(rawOffset) : -1
-        table = bi >= 0
-          ? host.querySelector(`.km-block[data-bi="${bi}"] table.km-table[data-ti]`)
-          : null
+        table =
+          bi >= 0 ? host.querySelector(`.km-block[data-bi="${bi}"] table.km-table[data-ti]`) : null
       }
       if (!table) return { collapsed }
 
@@ -2514,12 +2516,10 @@ function KeepEditor({
         else delete filterStateRef.current[ti]
         applyFilter(ti)
         const syncButtons = (root) => {
-          root
-            .querySelectorAll?.(`.km-filter-btn[data-ti="${ti}"]`)
-            .forEach((button) => {
-              const column = Number(button.getAttribute('data-ci'))
-              button.classList.toggle('active', !!nextFilters[column]?.size)
-            })
+          root.querySelectorAll?.(`.km-filter-btn[data-ti="${ti}"]`).forEach((button) => {
+            const column = Number(button.getAttribute('data-ci'))
+            button.classList.toggle('active', !!nextFilters[column]?.size)
+          })
         }
         syncButtons(host)
         document.querySelectorAll('.km-float-header').forEach(syncButtons)
@@ -2560,7 +2560,8 @@ function KeepEditor({
         readOnlyRef.current ||
         activeCellPopRef.current ||
         activeBlockEditRef.current
-      ) return false
+      )
+        return false
       const nextLines = String(markdown ?? '').split('\n')
       const changed = applyRawPatch(0, rawLinesRef.current.length, nextLines, { meta })
       if (!changed) return false
@@ -2590,7 +2591,9 @@ function KeepEditor({
       return true
     }
     const highlightMarkdownOffset = (rawOffset) => {
-      host.querySelectorAll('.km-source-position').forEach((el) => el.classList.remove('km-source-position'))
+      host
+        .querySelectorAll('.km-source-position')
+        .forEach((el) => el.classList.remove('km-source-position'))
       if (!Number.isFinite(rawOffset)) return false
       const bi = blockIndexForOffset(rawOffset)
       const block = bi >= 0 ? host.querySelector(`.km-block[data-bi="${bi}"]`) : null
@@ -2601,11 +2604,12 @@ function KeepEditor({
     }
     const getReferenceContext = () => {
       const fallbackOffset = markdownOffsetFromViewportTop(false)
-      const bi = lastInteractedBi >= 0
-        ? lastInteractedBi
-        : Number.isFinite(fallbackOffset)
-          ? blockIndexForOffset(fallbackOffset)
-          : -1
+      const bi =
+        lastInteractedBi >= 0
+          ? lastInteractedBi
+          : Number.isFinite(fallbackOffset)
+            ? blockIndexForOffset(fallbackOffset)
+            : -1
       const sourceBlock = bi >= 0 ? blocksRef.current[bi] : null
       const block = bi >= 0 ? host.querySelector(`.km-block[data-bi="${bi}"]`) : null
       const href = block?.querySelector('a[href]')?.getAttribute('href')
@@ -2661,7 +2665,8 @@ function KeepEditor({
         readOnlyRef.current ||
         activeCellPopRef.current ||
         activeBlockEditRef.current
-      ) return false
+      )
+        return false
       const from = direction === 'undo' ? 'undo' : 'redo'
       const to = direction === 'undo' ? 'redo' : 'undo'
       const entry = historyRef.current[from].pop()
@@ -2919,11 +2924,7 @@ function KeepEditor({
 
   return (
     <>
-      <div
-        className={`km-doc${readOnly ? ' km-read-only' : ''}`}
-        aria-readonly={readOnly}
-        ref={hostRef}
-      />
+      <div className={`km-doc${readOnly ? ' km-read-only' : ''}`} ref={hostRef} />
       <ZoomLightbox item={lightbox} onClose={() => setLightbox(null)} t={t} />
     </>
   )

@@ -276,7 +276,7 @@ EasyMarkdown は、既にデスクトップ／モバイル／VS Code 拡張、�
 - `npm run test:e2e:smoke:built`: axe app-chrome check を含む 6／6 成功。
 - GitHub Actions CI Run #60（PR #6）: Fast quality gate／Dependency baseline scan／Electron smoke E2E 成功。PR 方針どおり full E2E は skip。
 
-#### P3-2 Architecture import boundary — `IN PROGRESS`（local 検証完了、初回 CI 待ち）
+#### P3-2 Architecture import boundary — `DONE`
 
 - Main／preload／renderer／shared／platform adapter の import boundary を自動検査する。
 - Existing cross-layer pure logic を shared source of truth へ移し、violation baseline／ignore は導入しない。
@@ -290,7 +290,7 @@ EasyMarkdown は、既にデスクトップ／モバイル／VS Code 拡張、�
 - [x] Existing renderer → main helper edge を shared module へ移し、compatibility test を維持する。
 - [x] `architecture:check` が `quality:fast` と contributor／architecture document に統合される。
 - [x] Local `quality:fast`、dependency no-regression、Electron smoke が成功する。
-- [ ] P3-2 の初回 GitHub Actions が成功する。
+- [x] P3-2 の初回 GitHub Actions が成功する。
 
 **2026-08-09 検証 evidence**
 
@@ -301,10 +301,32 @@ EasyMarkdown は、既にデスクトップ／モバイル／VS Code 拡張、�
 - `npm run quality:fast`: 81 files／579 unit tests、coverage statements 73.59%／branches 76.52%／functions 74.57%／lines 73.57%、Desktop／Mobile／VS Code build 成功。
 - `npm run dependencies:check`: root／VS Code とも baseline 比 no-regression。`npm run test:e2e:smoke:built`: axe app-chrome check を含む 6／6 成功。
 - `npm run docs:check`: 45 documents／62 link sources／248 local links 成功。`npm run feature:check`: 6 dossier／34 AC／39 tests 成功。
+- GitHub Actions CI Run #63（PR #7）: Fast quality gate／Dependency baseline scan／Electron smoke E2E 成功。PR 方針どおり full E2E は skip。
 
-#### P3-3 UI residual risk audit
+  #### P3-3 UI residual risk audit — `DONE`
 
 - UI の残課題は `/harden` → `/optimize` → `/adapt` → `/polish` の順で再監査する。
+- Visual redesign ではなく、reproducible な accessibility、minimum-window、keyboard、performance evidence の residual risk を対象とする。
+
+**受入条件**
+
+  - [x] 720×480 の built Electron app で document、Settings、Help の horizontal containment と操作到達性を検証する。
+  - [x] Controlled Keep fixture の app 全体で axe `serious`／`critical` violation が 0 件になる。
+  - [x] Overflow tab strip が `tablist`／`tab` semantics と Arrow／Home／End keyboard activation を持つ。
+  - [x] `perf-app`／`perf-resume` が selector timeout なく report を生成し、既存 budget を維持する。
+  - [x] Desktop／Mobile／VS Code の fast quality gate と Electron smoke／focused E2E が成功する。
+  - [x] Windows automation で代替できない macOS／mobile／assistive technology／custom content の residual risk を記録する。
+  - [x] P3-3 の初回 GitHub Actions が成功する。
+
+  **2026-08-09 local 検証 evidence**
+
+  - `npm run test:e2e:smoke:built`: 720×480、Keep／Settings／Help、light／dark axe check、tab keyboard operation を含む 7／7 成功。
+  - `npm run test:e2e:built`: 全 103／103 成功。
+  - `node scripts/perf-app.mjs --runs=1`: 31／31 budget 成功。`node scripts/perf-resume.mjs --runs=1`: 5／5 budget 成功。いずれも既存 threshold は変更していない。
+  - `npm run quality:fast`: 81 files／579 unit tests、coverage statements 73.59%／branches 76.52%／functions 74.57%／lines 73.57%、Desktop／Mobile／VS Code build 成功。
+  - `npm run dependencies:check`: root／VS Code とも 2026-08-09 baseline 比 no-regression。
+  - 自動化外の macOS／mobile 実機、assistive technology、OS text scaling、任意 Markdown／custom theme は [Feature Dossier](./feature-dossiers/ui-residual-risk/feature.md) の residual risk として維持する。Product Support Matrix と release eligibility は変更しない。
+  - GitHub Actions CI Run #65（PR #8）: Fast quality gate／Dependency baseline scan／Electron smoke E2E 成功。Draft PR 方針どおり full E2E は skip、local full E2E は 103／103 成功。
 
 ## 4. 推奨スケジュール
 
