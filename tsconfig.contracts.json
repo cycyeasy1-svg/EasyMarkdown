@@ -1,0 +1,22 @@
+{
+  "compilerOptions": {
+    "allowJs": true,
+    "checkJs": true,
+    "noEmit": true,
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "strict": true,
+    "noImplicitAny": false,
+    "skipLibCheck": true,
+    "moduleDetection": "force"
+  },
+  "include": [
+    "src/shared/api-contract.js",
+    "src/shared/fonts.js",
+    "src/shared/i18n-contract.js",
+    "src/renderer/src/session.js",
+    "src/renderer/src/settings.js"
+  ]
+}

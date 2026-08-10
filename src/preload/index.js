@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
+import { assertApiContract, DESKTOP_CAPABILITIES } from '../shared/api-contract.js'
 
 // Install this before the renderer bundle mounts. If a user drops a file while
 // the cold-start splash is still up, Electron's default behavior is to navigate
@@ -183,24 +184,7 @@ const api = {
   // not added later in the renderer: contextBridge freezes this object, so
   // assigning `window.api.capabilities` from the renderer throws ("object is not
   // extensible") and white-screens the app. Desktop supports everything.
-  capabilities: {
-    folderWorkspace: true,
-    workspaceSearch: true,
-    watch: true,
-    windowControls: true,
-    pdfExport: true,
-    htmlExport: true,
-    print: true,
-    spellcheck: true,
-    nativeMenus: true,
-    externalShell: true,
-    revealInFolder: true,
-    splitView: true,
-    defaultOpener: true,
-    fileAttachments: true,
-    localHistory: true,
-    diagnostics: true
-  }
+  capabilities: DESKTOP_CAPABILITIES
 }
 
-contextBridge.exposeInMainWorld('api', api)
+contextBridge.exposeInMainWorld('api', assertApiContract(api, 'desktop preload'))

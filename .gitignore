@@ -29,6 +29,7 @@ test-articles/
 test-results/
 playwright-report/
 .playwright/
+coverage/
 
 # scratch/preview images and design references
 build/_*.png

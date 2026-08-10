@@ -87,12 +87,12 @@ import {
 } from './find.js'
 import {
   isNewerVersion, isAbsolutePath, sanitizeWorkspaces, baseName, dirName, joinPath,
-  isPlainTextDoc, isHeavyDoc, genId, LS, loadSession, buildSessionTabs,
-  sessionSnapshotEqual, MD_DOC_RE,
+  isPlainTextDoc, isHeavyDoc, genId, MD_DOC_RE,
   rememberRecent, removeRecentPath, clearUnpinnedRecents, toggleRecentPinned,
   reorderTabsList, openPreviewTabInList, promotePreviewTabInList,
   toggleTabPinnedInList, pathInWorkspace, workspaceRootForPath, docLinkPathCandidates
 } from './paths.js'
+import { LS, loadSession, buildSessionTabs, sessionSnapshotEqual } from './session.js'
 import {
   countSourceLines,
   buildLineNumberText,
@@ -4948,7 +4948,7 @@ export default function App({ safeMode = false, onExitSafeMode = null }) {
       closedTabs,
       // openPaths (saved tabs, reopened from disk) + untitled (dirty, non-blank
       // scratch tabs, so the untouched welcome doc / empty new tabs don't keep
-      // coming back). Pure + unit-tested — see buildSessionTabs in paths.js.
+      // coming back). Pure + unit-tested — see buildSessionTabs in session.js.
       ...buildSessionTabs(tabs),
       activePath
     }

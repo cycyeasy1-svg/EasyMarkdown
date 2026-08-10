@@ -2266,7 +2266,7 @@ body.dark .milkdown .ProseMirror mark.hm-hl-blue { background: #2f4a6b; }
 .tree-empty,
 .outline-empty,
 .sidebar-empty p {
-  color: var(--faint);
+  color: var(--muted);
   font-size: 13px;
   padding: 16px 14px;
 }
@@ -3745,7 +3745,7 @@ body.hm-full-width .source-editor-wrap {
   flex-shrink: 0;
 }
 .status-dot.mod { color: var(--accent); }
-.status-dot.ok { color: var(--faint); }
+.status-dot.ok { color: var(--text); }
 .status-history {
   display: inline-flex;
   align-items: center;
@@ -3885,6 +3885,14 @@ body.hm-full-width .source-editor-wrap {
   font-weight: 600;
   font-size: 12px;
   cursor: pointer;
+}
+body.light .mode-hint-ok {
+  background: var(--accent-strong);
+  color: #fff;
+}
+body.dark .mode-hint-ok {
+  background: var(--accent-strong);
+  color: #1d1914;
 }
 .mode-hint-ok:hover {
   filter: brightness(1.06);
@@ -4321,6 +4329,16 @@ body.hm-full-width .source-editor-wrap {
   background: var(--accent);
   color: #fff;
   box-shadow: 0 4px 12px var(--accent-glow);
+}
+body.light .btn-primary,
+body.light .welcome-actions .btn-primary {
+  background: var(--accent-strong);
+  color: #fff;
+}
+body.dark .btn-primary,
+body.dark .welcome-actions .btn-primary {
+  background: var(--accent-strong);
+  color: #1d1914;
 }
 .btn-primary:hover {
   background: var(--accent-strong);

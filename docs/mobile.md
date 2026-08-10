@@ -70,16 +70,14 @@ capacitor.config.ts    // Capacitor 配置(appId / webDir / 插件设置)
 
 ```js
 capabilities = {
-  folderWorkspace,  // iOS 受限;Android(SAF)可
-  watch,            // false(移动)
-  windowControls,   // false
-  pdfExport,        // false(MVP)
-  imageHostExec,    // false
-  nativeMenus,      // false
-  externalShell,    // true(用浏览器插件)
-  revealInFolder,   // false
+  folderWorkspace, workspaceSearch, watch, windowControls,
+  pdfExport, htmlExport, print, spellcheck, nativeMenus,
+  externalShell, revealInFolder, splitView, defaultOpener,
+  fileAttachments, localHistory, diagnostics, canShare,
 }
 ```
+
+完整 key、Desktop／Mobile profile、`true` capability 对应的必需方法，以 `src/shared/api-contract.js` 为唯一契约。所有平台必须显式提供全部 boolean key；移动端不支持的能力写 `false`，不再用“属性不存在”表示。
 
 沿用现有 `.app.is-win/.app.is-mac` 模式,新增根类 **`.app.is-ios` / `.app.is-android`**
 (还有一个 `.app.is-mobile` 便于统一写移动样式)。移动专属 CSS 只写在这些选择器下,
@@ -211,8 +209,9 @@ npx cap open ios|android   # 出包 / 真机调试
 - 桌面新功能 = 改渲染层 → 默认移动端也带上;顺手判断"手机要不要/能不能用",不合适就 `isMobile`/`.is-mobile` 藏掉。
 - 涉及**新原生能力**的,记得在 shim 里补一份或门控。
 - 改完**跑一次 `npm run build:mobile`**(必要时装到设备点一下)——桌面 CI 只构建桌面,渲染层改动可能悄悄影响移动端,跑一下确认不崩。
-- 门控用的能力开关定义在 `platform/index.js`(桌面)与 `platform/capacitor-api.js`(移动):
-  `pdfExport / revealInFolder / splitView / imageHostExec / windowControls / nativeMenus / watch / folderWorkspace / canShare`。
+- 门控用的能力开关统一定义在 `src/shared/api-contract.js`；Desktop preload 与
+  `platform/capacitor-api.js` 选择各自 profile。新增原生能力时必须同时更新 shared contract、
+  两端 profile 与 `npm run api:check` evidence。
 
 ## 12. CI / 发布(现状)
 
