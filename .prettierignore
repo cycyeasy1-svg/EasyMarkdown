@@ -1,0 +1,29 @@
+# Dependencies and generated artifacts
+**/node_modules/**
+**/out/**
+**/dist/**
+dist-mobile/**
+coverage/**
+playwright-report/**
+test-results/**
+.playwright/**
+
+# Native projects and packaging assets use their own toolchains
+android/**
+ios/**
+build/**
+
+# Generated manifests and source-fidelity fixtures
+**/package-lock.json
+test/e2e/fixtures/**
+**/*.min.js
+
+# Markdown prose is governed by EditorConfig + docs:check, not code formatting
+**/*.md
+**/*.mdx
+
+# Known giant legacy modules migrate only after responsibility splitting
+src/main/index.js
+src/renderer/src/App.jsx
+src/renderer/src/i18n-strings.js
+src/renderer/src/styles/app.css

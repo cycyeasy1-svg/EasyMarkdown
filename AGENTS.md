@@ -231,6 +231,11 @@ docs/                  architecture / features / implementation-notes / developm
 
 ## Testing
 
+- **Formatting is incremental** — run `npm run format` for the current branch's
+  new/changed supported files and `npm run format:check` to verify them. Do not
+  mass-format untouched legacy files. The selector compares the working tree and
+  branch base, respects `.prettierignore`, and is part of `quality:fast`. PR
+  readiness follows [`docs/definition-of-done.md`](./docs/definition-of-done.md).
 - **Boundary and regression gates** — `src/shared/api-contract.js` is the source
   of truth for desktop/mobile API capabilities. New renderer-visible native APIs
   update the shared contract, both platform profiles, and API tests together.

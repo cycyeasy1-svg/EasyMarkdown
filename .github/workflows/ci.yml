@@ -26,6 +26,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
 
       - name: Setup Node
         uses: actions/setup-node@v5
@@ -43,6 +45,8 @@ jobs:
         run: npm ci --prefix packages/vscode-extension
 
       - name: Version, lint, unit tests, and all product builds
+        env:
+          FORMAT_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
         run: npm run quality:fast
 
   dependency-scan:
