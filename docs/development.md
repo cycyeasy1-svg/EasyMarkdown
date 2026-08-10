@@ -19,6 +19,17 @@ npm run dev
 
 `npm run dev` 用 electron-vite 起开发模式：main/preload 用 esbuild 构建，renderer 用 Vite dev server（热重载）。
 
+### Incremental formatter
+
+Repository-local Prettier は exact version で固定し、新規／変更された supported source／config file だけを対象にする。既存 codebase の mass-format は行わない。
+
+```bash
+npm run format       # current branch／working tree の対象 file を修正
+npm run format:check # 同じ対象を変更せず検査
+```
+
+対象 path は working tree、staged change、`main` との merge base から決定し、CI では Pull Request base SHA を明示する。Generated artifact、package lock、native project、source-fidelity fixture、Markdown、既知の巨大 legacy module は `.prettierignore` の対象である。Ignore を増やす場合は owner、理由、復帰条件を PR に記載する。完了条件は [Definition of Done](./definition-of-done.md) を参照する。
+
 ## 构建与打包
 
 ```bash

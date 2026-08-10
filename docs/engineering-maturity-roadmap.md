@@ -220,7 +220,7 @@ EasyMarkdown は、既にデスクトップ／モバイル／VS Code 拡張、�
 - `npm run quality:fast`: version／dossier／docs／lint、74 files／541 unit tests、desktop／mobile／VS Code build 成功。
 - GitHub Actions CI Run #56（PR #4）: Fast quality gate／Electron smoke E2E 成功。PR 方針どおり full E2E は skip。
 
-#### P2-4 型・契約・回帰検査の段階導入 — `IN PROGRESS`（local gate 実装済み、初回 CI 待ち）
+#### P2-4 型・契約・回帰検査の段階導入 — `DONE`
 
 - 新規 IPC contract、session、settings、抽出 module から TypeScript または JSDoc `checkJs` を導入する。
 - desktop／mobile API conformance、i18n key parity、coverage baseline no-regression、axe smoke、dependency scanning を追加する。
@@ -235,7 +235,7 @@ EasyMarkdown は、既にデスクトップ／モバイル／VS Code 拡張、�
 - [x] Root／VS Code dependency audit の severity no-regression を CI／release の独立 gate にする。
 - [x] Gate scope、threshold、baseline、残存 risk、rollback が source-of-truth document と L level dossier に記載される。
 - [x] `npm run quality:fast`、dependency check、smoke E2E が local で成功する。
-- [ ] P2-4 の初回 GitHub Actions が成功する。
+- [x] P2-4 の初回 GitHub Actions が成功する。
 
 **2026-08-09 検証 evidence**
 
@@ -246,12 +246,41 @@ EasyMarkdown は、既にデスクトップ／モバイル／VS Code 拡張、�
 - Dependency baseline は root 20 件（moderate 2／high 17／critical 1）、VS Code 3 件（moderate 3）。既知 risk の waiver ではなく新規増加の block に限定する。
 - `npm run dependencies:check`: 両 project の no-regression 成功。CI／release workflow の YAML parse も成功した。
 - `npm run test:e2e:smoke:built`: axe app-chrome check を含む 6／6 成功。`npm run test:e2e:built`: 102／102 成功（213.9 秒）。
-- 初回 GitHub Actions の実測結果は merge 前に確認し、成功後に P2-4 を `DONE` とする。
+- GitHub Actions CI Run #59（PR #5）: Fast quality gate／Dependency baseline scan／Electron smoke E2E 成功。PR 方針どおり full E2E は skip。
 
 ### P3 — 開発体験と最終整備
 
-- `.editorconfig`、formatter、PR template、Definition of Done を統一する。
-- architecture import boundary を自動検査する。
+#### P3-1 Contributor workflow と Definition of Done — `IN PROGRESS`（local 検証完了、初回 CI 待ち）
+
+- `.editorconfig`、incremental formatter、PR template、risk-based Definition of Done を統一する。
+- Existing source の mass-format は行わず、新規／変更 file から formatter contract を適用する。
+
+**受入条件**
+
+- [x] EditorConfig、exact pinned formatter、repository config、ignore policy が存在する。
+- [x] 新規／変更 supported file のみを選択する format check／write command と unit test がある。
+- [x] `format:check` が `quality:fast` と Pull Request base diff に統合される。
+- [x] PR template が risk、platform、evidence、impact、rollback、DoD を案内する。
+- [x] Risk-based Definition of Done が source of truth として定義され、Contributor guide／AGENTS から参照される。
+- [x] Local `quality:fast` と Electron smoke が成功する。
+- [ ] P3-1 の初回 GitHub Actions が成功する。
+
+**2026-08-09 検証 evidence**
+
+- Prettier 3.9.6 と eslint-config-prettier 10.1.8 を exact pin し、EditorConfig／Git EOL／ignore contract を追加した。
+- `npm run format:check`: Pull Request base SHA を指定した 8 changed supported files の検査に成功。意図的な未整形状態では 7 files を検出し、`npm run format` 後に成功することも確認した。
+- Formatter／workflow contract unit test: 2 files／9 tests 成功。NUL path、Unicode／space、重複、ignore、deleted／unsupported／external path、base ref、PR／DoD contract を検証した。
+- `npm run quality:fast`: 80 files／570 unit tests、coverage statements 73.57%／branches 76.52%／functions 74.57%／lines 73.55%、Desktop／Mobile／VS Code build 成功。
+- `npm run dependencies:check`: root／VS Code とも baseline 比 no-regression。CI／release workflow の YAML parse 成功。
+- `npm run docs:check`: 42 documents／59 link sources／236 local links 成功。`npm run feature:check`: 5 dossier／27 AC／32 tests 成功。
+- `npm run test:e2e:smoke:built`: axe app-chrome check を含む 6／6 成功。
+
+#### P3-2 Architecture import boundary
+
+- Main／preload／renderer／shared／platform adapter の import boundary を自動検査する。
+
+#### P3-3 UI residual risk audit
+
 - UI の残課題は `/harden` → `/optimize` → `/adapt` → `/polish` の順で再監査する。
 
 ## 4. 推奨スケジュール
@@ -264,15 +293,7 @@ EasyMarkdown は、既にデスクトップ／モバイル／VS Code 拡張、�
 
 ## 5. Definition of Done（共通）
 
-変更は、次を満たしたときに完了とする。
-
-- 目的、non-goal、対象 platform、受入条件が確認できる。
-- 変更リスクに応じた unit／integration／E2E が追加または更新されている。
-- `quality:fast` が成功し、UI／Electron lifecycle の変更は smoke E2E も成功している。
-- Windows／macOS、desktop／mobile／VS Code の非対象範囲と影響が明記されている。
-- data／settings／file format の変更には migration と rollback がある。
-- security、privacy、accessibility、performance の影響が確認されている。
-- 関連文書と `Last verified` が更新されている。
+全変更の共通条件、S／M／L risk 別追加条件、Ready／merge、exception policy は [Definition of Done](./definition-of-done.md) を source of truth とする。Roadmap item を `DONE` にする場合は、その item の受入条件、検証 evidence、Definition of Done の三つを満たす。
 
 ## 6. 進捗更新ルール
 

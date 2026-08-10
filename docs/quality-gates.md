@@ -18,11 +18,16 @@ last_verified: 2026-08-09
 | API contract | `npm run api:check` | Desktop preload、Capacitor shim、17 capability | 必須 method／flag の欠落、`true` capability の実装欠落、runtime assertion 欠落 |
 | Boundary type | `npm run type:check` | API、session、settings、i18n contract 等の選定済み JavaScript | `checkJs` type error |
 | i18n parity | `npm run i18n:check` | `en` を基準とする全 locale | key の欠落／余剰、placeholder 不一致、非 string value |
+| Incremental format | `npm run format:check` | Branch／working tree の新規・変更 supported file | Repository config と異なる format、base commit の解決不能 |
 | Coverage | `npm run coverage:check` | unit-test 可能な main／shared／renderer pure logic | statements 73%、branches 76%、functions 74%、lines 73% のいずれかを下回る |
 | Accessibility smoke | Electron smoke E2E | startup app chrome | axe の `serious`／`critical` violation |
 | Dependency audit | `npm run dependencies:check` | root と VS Code extension の lockfile | severity 別件数が committed baseline より増加、audit 実行不能、baseline 不整合 |
 
-`npm run quality:fast` は network 非依存の API、type、i18n、coverage gate を既存 document／lint／build gate と直列実行する。Dependency audit は registry availability に依存するため GitHub Actions と release workflow の独立 job とし、後続 E2E／publish を fail-closed で block する。
+`npm run quality:fast` は network 非依存の API、type、i18n、incremental format、coverage gate を既存 document／lint／build gate と直列実行する。Dependency audit は registry availability に依存するため GitHub Actions と release workflow の独立 job とし、後続 E2E／publish を fail-closed で block する。
+
+### Incremental format policy
+
+Formatter は working tree、staged change、branch base との差分から supported source／config file を選ぶ。CI は Pull Request base SHA、release は tag commit の parent を明示する。Generated artifact、package lock、source-fidelity fixture、native project、Markdown、責務分割前の巨大 legacy module は `.prettierignore` で除外する。Ignore 追加は formatter error の回避手段ではなく、owner、理由、復帰条件を伴う管理対象とする。既存 source の repository-wide formatting は独立 change と review evidence なしに実行しない。
 
 ## 3. Boundary-first type policy
 

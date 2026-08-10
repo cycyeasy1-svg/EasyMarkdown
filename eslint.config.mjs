@@ -11,6 +11,7 @@ import js from '@eslint/js'
 import globals from 'globals'
 import react from 'eslint-plugin-react'
 import reactHooks from 'eslint-plugin-react-hooks'
+import eslintConfigPrettier from 'eslint-config-prettier/flat'
 
 // Vite injects this at build time (electron.vite.config.mjs `define`); vitest
 // mirrors it. Declare it so renderer/source modules don't trip no-undef.
@@ -119,5 +120,9 @@ export default [
       sourceType: 'script',
       globals: { ...globals.browser }
     }
-  }
+  },
+
+  // Keep ESLint focused on correctness while repository-local Prettier owns
+  // source layout for new and changed supported files.
+  eslintConfigPrettier
 ]
