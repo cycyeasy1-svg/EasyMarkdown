@@ -2,7 +2,44 @@
 // Playwright launches the built Electron app, opens committed fixtures as tabs,
 // and asserts real rendered DOM — the foundation the ported etv.mjs cases build on.
 import { test, expect } from '@playwright/test'
+import axe from 'axe-core'
 import { launchApp, fixture } from './helpers.js'
+
+test('startup app chrome has no serious or critical axe violations', async () => {
+  const { page, cleanup } = await launchApp()
+  try {
+    // The shell fades controls from transparent during its first 200 ms. Axe
+    // must inspect the settled UI, otherwise it measures the transition frame
+    // against the sidebar background and reports a false contrast failure.
+    await page.waitForFunction(() => {
+      const button = document.querySelector('.btn-primary')
+      return button && getComputedStyle(button).backgroundColor.startsWith('rgb(')
+    })
+    // @axe-core/playwright opens a helper page, which Electron's browser context
+    // does not support. Inject the same official axe-core runtime into the real
+    // Electron renderer and run it against the mounted application instead.
+    await page.evaluate(axe.source)
+    const result = await page.evaluate(() =>
+      window.axe.run({
+        include: [['.activity-bar'], ['.topbar'], ['.pane-left'], ['.statusbar']]
+      })
+    )
+    const blocking = result.violations.filter((violation) =>
+      violation.impact === 'serious' || violation.impact === 'critical'
+    )
+    const summary = blocking.map((violation) => ({
+      id: violation.id,
+      impact: violation.impact,
+      targets: violation.nodes.map((node) => node.target)
+    }))
+    expect(
+      summary,
+      blocking.map((violation) => `${violation.id}: ${violation.help}`).join('\n')
+    ).toEqual([])
+  } finally {
+    await cleanup()
+  }
+})
 
 test('app boots: shell, preload bridge and status bar are present', async () => {
   const { page, cleanup } = await launchApp()

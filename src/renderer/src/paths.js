@@ -2,6 +2,10 @@
 // All stateless — no React, no DOM mutation — so safe to import anywhere in the
 // renderer. (The main process has its own copies; it can't import this module.)
 
+// Compatibility re-export: session persistence has its own typed boundary, but
+// older pure-helper consumers may continue importing these names from paths.js.
+export { LS, loadSession, buildSessionTabs, sessionSnapshotEqual } from './session.js'
+
 // Compare dotted versions: is `a` newer than `b`? (e.g. '0.1.5' > '0.1.4')
 export function isNewerVersion(a, b) {
   const pa = String(a).split('.').map((n) => parseInt(n, 10) || 0)
@@ -220,35 +224,6 @@ export function toggleRecentPinned(prev, path) {
 let idCounter = 0
 export const genId = () => `t${++idCounter}_${Date.now()}`
 
-export const LS = 'easymarkdown.session.v1'
-export const loadSession = () => {
-  try {
-    return JSON.parse(localStorage.getItem(LS)) || {}
-  } catch {
-    return {}
-  }
-}
-
-// Build the persistable tab slices of a session snapshot from the live tabs.
-//   • openPaths   — every saved tab's path (reopened from disk on restart).
-//   • pinnedPaths — the pinned subset, so pins survive a restart (order comes
-//     from openPaths; this is just the membership set).
-//   • previewPaths — file-tree preview tabs, so the temporary slot remains a
-//     preview after restart instead of silently becoming a normal tab.
-//   • untitled    — unsaved scratch/new tabs (no path) kept ONLY when they're
-//     DIRTY and non-blank, carrying just {title, content}. So a restart restores
-//     real unsaved work but never resurrects the untouched welcome doc or an
-//     empty new tab (content === savedContent, or whitespace-only → dropped).
-// Pure so the data-loss contract is unit-testable; see App.jsx persistence effect.
-export const buildSessionTabs = (tabs) => ({
-  openPaths: (tabs || []).map((t) => t.path).filter(Boolean),
-  pinnedPaths: (tabs || []).filter((t) => t.pinned && t.path).map((t) => t.path),
-  previewPaths: (tabs || []).filter((t) => t.preview && !t.pinned && t.path).map((t) => t.path),
-  untitled: (tabs || [])
-    .filter((t) => !t.path && t.content !== t.savedContent && (t.content || '').trim())
-    .map((t) => ({ title: t.title, content: t.content }))
-})
-
 // Reorder the tab list by dragging: move `fromId` to `toId`'s position, then
 // stable-partition pinned-first so a drag can never mix the two regions (a
 // pinned tab dropped into the unpinned zone snaps back to the pinned group's
@@ -295,49 +270,4 @@ export function toggleTabPinnedInList(tabs, id) {
     t.id === id ? { ...t, pinned: !t.pinned, preview: false } : t
   )
   return [...list.filter((t) => t.pinned), ...list.filter((t) => !t.pinned)]
-}
-
-// Field-wise equality of two session snapshots. App's persistence effect uses
-// it to skip re-writing localStorage when nothing persistable changed — e.g.
-// typing in a SAVED file rebuilds the snapshot every keystroke but only its
-// array identities differ, not their contents. Arrays App passes through by
-// state identity (workspaces, recents) compare by reference — a conservative
-// "changed" answer just means one extra write. The rebuilt openPaths/untitled
-// arrays compare by value; untouched tabs keep their exact string references,
-// so those item compares are O(1) reference hits.
-export const sessionSnapshotEqual = (a, b) => {
-  if (!a || !b) return false
-  if (
-    a.workspaces !== b.workspaces ||
-    a.theme !== b.theme ||
-    a.customTheme !== b.customTheme ||
-    a.lang !== b.lang ||
-    a.recents !== b.recents ||
-    a.sidebarOpen !== b.sidebarOpen ||
-    a.sidebarMode !== b.sidebarMode ||
-    a.sidebarWidth !== b.sidebarWidth ||
-    a.closedTabs !== b.closedTabs ||
-    a.activePath !== b.activePath
-  ) {
-    return false
-  }
-  const ap = a.openPaths || []
-  const bp = b.openPaths || []
-  if (ap.length !== bp.length) return false
-  for (let i = 0; i < ap.length; i++) if (ap[i] !== bp[i]) return false
-  const app = a.pinnedPaths || []
-  const bpp = b.pinnedPaths || []
-  if (app.length !== bpp.length) return false
-  for (let i = 0; i < app.length; i++) if (app[i] !== bpp[i]) return false
-  const avp = a.previewPaths || []
-  const bvp = b.previewPaths || []
-  if (avp.length !== bvp.length) return false
-  for (let i = 0; i < avp.length; i++) if (avp[i] !== bvp[i]) return false
-  const au = a.untitled || []
-  const bu = b.untitled || []
-  if (au.length !== bu.length) return false
-  for (let i = 0; i < au.length; i++) {
-    if (au[i].title !== bu[i].title || au[i].content !== bu[i].content) return false
-  }
-  return true
 }

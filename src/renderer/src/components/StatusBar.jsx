@@ -244,7 +244,7 @@ function EditorEngineControl({
         {t(keepMode ? 'mode.keep' : 'mode.rich')}
       </button>
       {showModeHint && (
-        <div className="mode-hint" role="dialog">
+        <div className="mode-hint" role="dialog" aria-labelledby="hm-mode-hint-title">
           <button
             className="mode-hint-close"
             onClick={onDismissModeHint}
@@ -252,7 +252,7 @@ function EditorEngineControl({
           >
             ✕
           </button>
-          <div className="mode-hint-title">{t('hint.modeTitle')}</div>
+          <div className="mode-hint-title" id="hm-mode-hint-title">{t('hint.modeTitle')}</div>
           <p className="mode-hint-line">{boldMd(t('hint.modeKeep'))}</p>
           <p className="mode-hint-line">{boldMd(t('hint.modeRich'))}</p>
           <div className="mode-hint-actions">

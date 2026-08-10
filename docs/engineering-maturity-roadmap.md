@@ -220,11 +220,33 @@ EasyMarkdown は、既にデスクトップ／モバイル／VS Code 拡張、�
 - `npm run quality:fast`: version／dossier／docs／lint、74 files／541 unit tests、desktop／mobile／VS Code build 成功。
 - GitHub Actions CI Run #56（PR #4）: Fast quality gate／Electron smoke E2E 成功。PR 方針どおり full E2E は skip。
 
-#### P2-4 型・契約・回帰検査の段階導入
+#### P2-4 型・契約・回帰検査の段階導入 — `IN PROGRESS`（local gate 実装済み、初回 CI 待ち）
 
 - 新規 IPC contract、session、settings、抽出 module から TypeScript または JSDoc `checkJs` を導入する。
 - desktop／mobile API conformance、i18n key parity、coverage baseline no-regression、axe smoke、dependency scanning を追加する。
 - 全面 TypeScript 化は行わず、境界から型を付ける。
+
+**受入条件**
+
+- [x] API、session、settings、i18n contract 等の boundary が JSDoc `checkJs` の対象である。
+- [x] Desktop preload／Capacitor shim の API と全 capability を static／runtime／unit test で検査する。
+- [x] Locale key／placeholder parity と固定 coverage floor を `quality:fast` で fail-closed にする。
+- [x] Built Electron startup app chrome の axe serious／critical violation を smoke E2E で検査する。
+- [x] Root／VS Code dependency audit の severity no-regression を CI／release の独立 gate にする。
+- [x] Gate scope、threshold、baseline、残存 risk、rollback が source-of-truth document と L level dossier に記載される。
+- [x] `npm run quality:fast`、dependency check、smoke E2E が local で成功する。
+- [ ] P2-4 の初回 GitHub Actions が成功する。
+
+**2026-08-09 検証 evidence**
+
+- `docs/quality-gates.md`: boundary-first type、17 capability、i18n、coverage、axe、dependency baseline の運用 contract を定義した。
+- `type-contract-regression`: L level Feature Dossier、7 AC、9 TEST mapping、ADR-0004 を追加した。
+- `npm run api:check`: Desktop 82 keys／Mobile 46 keys／17 capability 成功。`npm run type:check` と 3 locale／825 key の i18n parity も成功した。
+- `npm run quality:fast`: 78 files／561 unit tests、coverage statements 73.46%／branches 76.52%／functions 74.57%／lines 73.44%、Desktop／Mobile／VS Code build 成功。
+- Dependency baseline は root 20 件（moderate 2／high 17／critical 1）、VS Code 3 件（moderate 3）。既知 risk の waiver ではなく新規増加の block に限定する。
+- `npm run dependencies:check`: 両 project の no-regression 成功。CI／release workflow の YAML parse も成功した。
+- `npm run test:e2e:smoke:built`: axe app-chrome check を含む 6／6 成功。`npm run test:e2e:built`: 102／102 成功（213.9 秒）。
+- 初回 GitHub Actions の実測結果は merge 前に確認し、成功後に P2-4 を `DONE` とする。
 
 ### P3 — 開発体験と最終整備
 

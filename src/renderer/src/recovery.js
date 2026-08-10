@@ -1,4 +1,4 @@
-import { LS } from './paths.js'
+import { LS } from './session.js'
 import { SETTINGS_KEY } from './settings.js'
 
 export const RENDERER_SAFE_MODE_KEY = 'easymarkdown.safe-mode.renderer.v1'

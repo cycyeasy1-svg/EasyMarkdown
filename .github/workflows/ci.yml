@@ -45,10 +45,26 @@ jobs:
       - name: Version, lint, unit tests, and all product builds
         run: npm run quality:fast
 
+  dependency-scan:
+    name: Dependency baseline scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: 20
+
+      - name: Reject vulnerability regression
+        run: npm run dependencies:check
+
   e2e-smoke:
     name: Electron smoke E2E
     if: github.event_name == 'pull_request'
-    needs: quality-fast
+    needs: [quality-fast, dependency-scan]
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -70,7 +86,7 @@ jobs:
   e2e-full:
     name: Electron full E2E
     if: github.event_name != 'pull_request'
-    needs: quality-fast
+    needs: [quality-fast, dependency-scan]
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:

@@ -17,6 +17,7 @@ import { Browser } from '@capacitor/browser'
 import { StatusBar, Style } from '@capacitor/status-bar'
 import { Share } from '@capacitor/share'
 import { FilePicker } from '@capawesome/capacitor-file-picker'
+import { assertApiContract, MOBILE_CAPABILITIES } from '../../../shared/api-contract.js'
 
 // Where the library lives. iOS Documents is user-visible (Files app) AND writable.
 // Android's public Documents is NOT writable on Android 11+ (scoped storage), so
@@ -285,23 +286,10 @@ const setupStatusBar = () => {
   })
 }
 
-const capabilities = {
-  folderWorkspace: false, // iOS sandbox; Android SAF comes later
-  watch: false,
-  windowControls: false,
-  pdfExport: false, // no print-to-PDF save dialog on mobile
-  nativeMenus: false,
-  externalShell: true,
-  revealInFolder: false, // no Finder/Explorer on mobile
-  splitView: false, // not enough width on a phone
-  localHistory: false, // desktop userData snapshots; mobile backup policy is separate
-  canShare: true // system share sheet (export a file out)
-}
-
 export function makeCapacitorApi() {
   ensureLib()
   setupStatusBar()
-  return {
+  const api = {
     // dialogs
     openFiles,
     openFolder,
@@ -375,6 +363,8 @@ export function makeCapacitorApi() {
     onAppCloseRequest: noopOff,
 
     platform,
-    capabilities
+    safeMode: false,
+    capabilities: MOBILE_CAPABILITIES
   }
+  return assertApiContract(api, 'Capacitor adapter')
 }

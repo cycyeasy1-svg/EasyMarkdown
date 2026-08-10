@@ -8,17 +8,7 @@
 // We also expose a `capabilities` object regardless of platform: desktop fills
 // in a full set so the renderer can gate features uniformly without sniffing
 // platform strings everywhere.
-const DESKTOP_CAPABILITIES = {
-  folderWorkspace: true,
-  watch: true,
-  windowControls: true,
-  pdfExport: true,
-  nativeMenus: true,
-  externalShell: true,
-  revealInFolder: true,
-  splitView: true,
-  diagnostics: true
-}
+import { DESKTOP_CAPABILITIES } from '../../../shared/api-contract.js'
 
 export async function installPlatformApi() {
   if (typeof window === 'undefined') return

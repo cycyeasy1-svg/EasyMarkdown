@@ -1,3 +1,5 @@
+// @ts-check
+
 // User preferences persisted to localStorage, separate from the session state
 // (open tabs, workspace…) in paths.js. Holds the editor page width, font size
 // and zoom. Kept small and self-contained so the Settings modal and App can
@@ -9,6 +11,38 @@ import {
   normalizeFontName,
   writingFontStacks
 } from '../../shared/fonts.js'
+
+/**
+ * @typedef {{
+ *   themeMode: 'manual' | 'system',
+ *   systemLightTheme: string,
+ *   systemDarkTheme: string,
+ *   pageWidth: number | 'full',
+ *   fontSize: number,
+ *   zoom: number,
+ *   lineHeight: number,
+ *   paragraphSpacing: number,
+ *   headingSpacing: number,
+ *   fontWriteEn: string,
+ *   fontWriteZh: string,
+ *   fontWriteJa: string,
+ *   fontMono: string,
+ *   sourceFontOffset: number,
+ *   spellcheck: boolean,
+ *   autosave: boolean,
+ *   defaultEditorMode: 'keep' | 'rich',
+ *   preserveSoftBreaks: boolean,
+ *   restoreSession: boolean,
+ *   blankLineSpacing: boolean,
+ *   tableAutoWrap: boolean,
+ *   selectionToolbar: boolean,
+ *   inlineMathDeleteMode: 'protect' | 'fast',
+ *   mobileReadOnly: boolean,
+ *   localHistory: boolean,
+ *   showHiddenFiles: boolean,
+ *   lastPdfDensityPreset: 'comfort' | 'standard' | 'compact'
+ * }} Settings
+ */
 
 export const SETTINGS_KEY = 'easymarkdown.settings.v1'
 
@@ -99,6 +133,7 @@ export const HEADING_SPACING_PRESETS = [
 // keep whatever they saved. DEFAULT_PAGE_WIDTH stays the numeric slider fallback.
 export const DEFAULT_PAGE_WIDTH_PREF = 'full'
 
+/** @type {Readonly<Settings>} */
 export const DEFAULT_SETTINGS = {
   themeMode: 'manual',
   systemLightTheme: 'light',
@@ -204,6 +239,7 @@ export function normalizeZoom(z) {
   return Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, snapped))
 }
 
+/** @returns {Settings} */
 export function loadSettings() {
   try {
     const raw = JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}')
@@ -256,6 +292,7 @@ export function loadSettings() {
   }
 }
 
+/** @param {Partial<Settings> | Record<string, unknown>} s */
 export function saveSettings(s) {
   try {
     localStorage.setItem(SETTINGS_KEY, JSON.stringify(s))

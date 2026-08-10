@@ -43,6 +43,7 @@ Feature Dossier の `status`、ADR の `Status`、release evidence の `Decision
 | Goal、non-goal、AC、test mapping | [Feature Dossier](./feature-dossiers/README.md) | 詳細な現行 contract は専門設計書へ link する |
 | 不可逆または trade-off を伴う判断 | [ADR](./adr/README.md) | 実装手順、進捗、test case を複製しない |
 | Automated test evidence | `test/`、`test/e2e/`、GitHub Actions | Document は TEST-ID と file／run を参照する |
+| Type／API／i18n／coverage／accessibility／dependency gate | [quality-gates.md](./quality-gates.md) | Threshold や baseline の数値だけを他 document に複製しない |
 | Release eligibility と compatibility | [Product Support Matrix](./product-support-matrix.md) | README／Website は matrix より強い availability を表示しない |
 | Release 単位の判定 | [release evidence](./release-evidence/README.md) | Secret／certificate／user document は記録しない |
 | Engineering 改善の現行進捗 | [engineering-maturity-roadmap.md](./engineering-maturity-roadmap.md) | 完了した個別計画は archive へ移動する |

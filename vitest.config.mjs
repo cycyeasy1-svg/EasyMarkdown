@@ -18,6 +18,30 @@ export default defineConfig({
   test: {
     environment: 'node',
     include: ['test/**/*.test.{js,mjs}'],
-    globals: false
+    globals: false,
+    coverage: {
+      provider: 'v8',
+      reporter: ['text', 'json-summary'],
+      reportsDirectory: 'coverage',
+      include: [
+        'src/main/*.js',
+        'src/shared/*.js',
+        'src/renderer/src/*.js',
+        'src/renderer/src/components/*.js'
+      ],
+      exclude: [
+        'src/main/index.js',
+        'src/renderer/src/i18n-strings.js',
+        'src/renderer/src/platform/**'
+      ],
+      // P2-4 baseline (2026-08-09). Raising these values is encouraged; lowering
+      // them requires an explicit dossier/roadmap decision and review evidence.
+      thresholds: {
+        statements: 73,
+        branches: 76,
+        functions: 74,
+        lines: 73
+      }
+    }
   }
 })

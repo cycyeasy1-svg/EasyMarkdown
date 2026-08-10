@@ -64,6 +64,17 @@ Windows 与 macOS 共用一份配置，在 macOS 上 `npm run dist` 即出 `.dmg
 
 ## 自动化测试：单元测试（vitest）
 
+### 型・契約・回帰 gate
+
+通常の変更では、個別 test に加えて次の一括 gate を使用する。
+
+```bash
+npm run quality:fast       # docs／API／type／i18n／lint／coverage／全 build
+npm run dependencies:check # root＋VS Code lockfile の audit no-regression
+```
+
+`quality:fast` は network 非依存とし、dependency audit は GitHub Actions／release の独立 job で後続処理を block する。Desktop／Mobile API の追加時は `npm run api:check`、locale 変更時は `npm run i18n:check`、UI／Electron 変更時は build 後に `npm run test:e2e:smoke:built` も実行する。Threshold、対象範囲、baseline 更新規則は [Quality Gate 運用規約](./quality-gates.md) を参照する。
+
 纯函数（不依赖 DOM / Electron 的逻辑）用 **vitest** 做单元测试。对没有设计书的存量代码，采用**特征测试（characterization test）**思路：把"当前正确运行的行为"本身当作规格锁定，目的是在频繁迭代中挡住回归。
 
 ```bash

@@ -56,13 +56,16 @@ src/
   main/local-logger.js     rotation 付き local NDJSON log／diagnostic bundle
   main/crash-loop.js       unclean launch 検出／automatic safe mode
   preload/index.js         contextBridge：window.api 桥接（CJS bundle、sandbox 対応）
+  shared/api-contract.js   Desktop／Mobile 共通 API method・capability contract
+  shared/i18n-contract.js  Locale key・placeholder parity の pure validator
   renderer/
     index.html             渲染入口（CSP、标题）
     src/
       main.jsx             React 挂载点
       App.jsx              应用外壳（最核心，详见下文）
       recovery.js          renderer safe mode／session・settings 限定 reset
-      paths.js             纯工具：路径/文件名/版本/重文档判定/genId/会话
+      paths.js             纯工具：路径/文件名/版本/重文档判定/genId
+      session.js           session key・load・snapshot contract（checkJs 対象）
       find.js              文档内查找的高亮/匹配纯函数
       ui.js                fireToast + copyToClipboard（toast 通道单一来源）
       settings.js          用户偏好（页面宽度 / 字号 / 缩放）持久化 + 应用
@@ -102,6 +105,8 @@ build/
 > 跨平台：渲染层根节点按 `window.api.platform` 挂 `.app.is-win` / `.app.is-mac` 类，平台相关样式（标题栏让位红绿灯等）只写在这两个选择器下；主进程用 `process.platform` 分支。改顶栏/平台代码时两个系统都要顾到。
 
 main window は `contextIsolation: true`、`nodeIntegration: false`、`sandbox: true` で起動する。sandboxed preload は単一 CJS bundle とし、全 privileged IPC は `trusted-ipc.js` を経由する。Renderer root は `AppErrorBoundary` で保護し、safe mode では既存 data を上書きせず session 復元と custom theme を無効化する。詳細は [診断・復旧設計](./diagnostics-and-recovery.md) を参照する。
+
+Renderer-visible API の method と capability は `src/shared/api-contract.js` を source of truth とする。Desktop preload と Capacitor shim は全 capability を boolean で明示し、static shape check と公開直前の runtime assertion を通す。型・locale・coverage・accessibility・dependency の gate と変更手順は [Quality Gate 運用規約](./quality-gates.md) に従う。
 
 ## App.jsx：外壳的核心职责
 
