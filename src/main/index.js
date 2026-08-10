@@ -4,7 +4,6 @@ import { dirname, join, basename, extname, resolve, relative, sep } from 'node:p
 import fs from 'node:fs/promises'
 import { existsSync, statSync, constants as fsConstants } from 'node:fs'
 import chokidar from 'chokidar'
-import { execFile, spawn } from 'node:child_process'
 import { createHash, randomUUID } from 'node:crypto'
 import {
   MD_EXTS,
@@ -13,12 +12,12 @@ import {
   isRestrictedRoot,
   imageNameParts,
   attachmentNameParts,
+  blockedAttachmentExtension,
   getAllowedExternalUrl,
   searchContentLines,
   extractMarkdownHeadings,
   shouldSkipWorkspaceEntry,
-  docLangAttr,
-  winDefaultOpenerRegOps
+  docLangAttr
 } from './helpers.js'
 import {
   appendLocalHistorySnapshot,
@@ -1579,6 +1578,16 @@ ipcMain.handle('attachment:save', async (_e, docPath, sourcePath) => {
   try {
     if (!docPath) return { ok: false, error: 'Save the document before attaching files.' }
     if (!sourcePath) return { ok: false, error: 'No attachment selected.' }
+    const sourceName = basename(sourcePath)
+    const blockedExtension = blockedAttachmentExtension(sourceName)
+    if (blockedExtension) {
+      return {
+        ok: false,
+        code: 'dangerous-attachment-type',
+        extension: blockedExtension,
+        name: sourceName
+      }
+    }
     const stat = await fs.stat(sourcePath)
     if (!stat.isFile()) return { ok: false, error: 'Only files can be attached.' }
     const assetsDir = join(dirname(docPath), 'assets')
@@ -1587,9 +1596,9 @@ ipcMain.handle('attachment:save', async (_e, docPath, sourcePath) => {
     if (dirname(sourceReal) === assetsReal) {
       return { ok: true, path: 'assets/' + basename(sourceReal), name: basename(sourceReal) }
     }
-    const file = uniqueAttachmentFile(assetsDir, basename(sourcePath))
+    const file = uniqueAttachmentFile(assetsDir, sourceName)
     await fs.copyFile(sourcePath, file, fsConstants.COPYFILE_EXCL)
-    return { ok: true, path: 'assets/' + basename(file), name: basename(sourcePath) }
+    return { ok: true, path: 'assets/' + basename(file), name: sourceName }
   } catch (error) {
     return { ok: false, error: error?.message || String(error) }
   }
@@ -2044,41 +2053,6 @@ ipcMain.handle('menu:setKeybindings', (_event, value) => {
   menuKeybindings = normalized
   buildMenu()
   return { ok: true }
-})
-
-// "Set as default Markdown app" (Settings → System). Windows 10+ blocks
-// programmatic UserChoice writes (hash-protected), so the legitimate flow is:
-// (1) make sure this exe is registered as a per-user handler — the NSIS
-// installer already registers per-machine, this also covers zip/portable
-// builds; (2) open the system "how do you want to open .md files?" picker on a
-// scratch file so the user confirms once with "always". Skipped when not
-// packaged (process.execPath is the bare electron.exe in dev — registering it
-// would associate .md with a broken command). macOS has no supported API at
-// all → return { manual: true } and the renderer shows Finder instructions.
-ipcMain.handle('app:setDefaultOpener', async () => {
-  if (process.platform !== 'win32') return { ok: false, manual: true }
-  try {
-    if (app.isPackaged) {
-      for (const args of winDefaultOpenerRegOps(process.execPath, ['md', 'markdown', 'mdx'])) {
-        await new Promise((resolve, reject) =>
-          execFile('reg.exe', args, (err) => (err ? reject(err) : resolve()))
-        )
-      }
-    }
-    const scratch = join(app.getPath('userData'), 'set-default-opener.md')
-    await fs.writeFile(scratch, '# EasyMarkdown\n')
-    // OpenAs_RunDLL treats the REST OF THE COMMAND LINE as the file name and
-    // does not strip quotes — verbatim args stop Node from quoting a path that
-    // contains spaces (e.g. a user name with a space).
-    spawn('rundll32.exe', ['shell32.dll,OpenAs_RunDLL', scratch], {
-      detached: true,
-      stdio: 'ignore',
-      windowsVerbatimArguments: true
-    }).unref()
-    return { ok: true }
-  } catch (e) {
-    return { ok: false, error: String(e?.message || e) }
-  }
 })
 
 // Toggle Chromium's built-in spellchecker (opt-in preference; default off).

@@ -55,9 +55,23 @@ describe('Electron security baseline', () => {
       readSource('electron.vite.config.mjs')
     ])
     expect(main).toContain("preload: join(__dirname, '../preload/index.cjs')")
-    expect(main).toMatch(/contextIsolation:\s*true[\s\S]*nodeIntegration:\s*false[\s\S]*sandbox:\s*true/)
+    expect(main).toMatch(
+      /contextIsolation:\s*true[\s\S]*nodeIntegration:\s*false[\s\S]*sandbox:\s*true/
+    )
     expect(main).not.toMatch(/webSecurity:\s*false/)
     expect(config).toMatch(/format:\s*'cjs'/)
     expect(config).toMatch(/entryFileNames:\s*'\[name\]\.cjs'/)
+  })
+
+  it('keeps default-app registration and its system process chain out of runtime code', async () => {
+    const [main, preload] = await Promise.all([
+      readSource('src/main/index.js'),
+      readSource('src/preload/index.js')
+    ])
+    for (const source of [main, preload]) {
+      expect(source).not.toContain('app:setDefaultOpener')
+      expect(source).not.toContain('setDefaultOpener')
+      expect(source).not.toMatch(/reg\.exe|rundll32\.exe/i)
+    }
   })
 })

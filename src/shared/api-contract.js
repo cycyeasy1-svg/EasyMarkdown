@@ -7,8 +7,8 @@
  *
  * @typedef {'folderWorkspace' | 'workspaceSearch' | 'watch' | 'windowControls' |
  *   'pdfExport' | 'htmlExport' | 'print' | 'spellcheck' | 'nativeMenus' |
- *   'externalShell' | 'revealInFolder' | 'splitView' | 'defaultOpener' |
- *   'fileAttachments' | 'localHistory' | 'diagnostics' | 'canShare'} CapabilityKey
+ *   'externalShell' | 'revealInFolder' | 'splitView' | 'fileAttachments' |
+ *   'localHistory' | 'diagnostics' | 'canShare'} CapabilityKey
  * @typedef {Readonly<Record<CapabilityKey, boolean>>} CapabilityMap
  * @typedef {{
  *   platform: string,
@@ -31,7 +31,6 @@ export const CAPABILITY_KEYS = Object.freeze([
   'externalShell',
   'revealInFolder',
   'splitView',
-  'defaultOpener',
   'fileAttachments',
   'localHistory',
   'diagnostics',
@@ -99,7 +98,6 @@ export const CAPABILITY_METHODS = Object.freeze({
   externalShell: Object.freeze(['openExternal']),
   revealInFolder: Object.freeze(['showInFolder']),
   splitView: Object.freeze([]),
-  defaultOpener: Object.freeze(['setDefaultOpener']),
   fileAttachments: Object.freeze(['openAttachments', 'saveAttachment']),
   localHistory: Object.freeze([
     'localHistoryAdd',
@@ -126,7 +124,6 @@ export const DESKTOP_CAPABILITIES = Object.freeze({
   externalShell: true,
   revealInFolder: true,
   splitView: true,
-  defaultOpener: true,
   fileAttachments: true,
   localHistory: true,
   diagnostics: true,
@@ -147,7 +144,6 @@ export const MOBILE_CAPABILITIES = Object.freeze({
   externalShell: true,
   revealInFolder: false,
   splitView: false,
-  defaultOpener: false,
   fileAttachments: false,
   localHistory: false,
   diagnostics: false,
