@@ -22,7 +22,7 @@ last_verified: 2026-08-09
 | [startup-resume-performance.md](./startup-resume-performance.md) | 起動・復帰 performance の計測、対応履歴、残課題 |
 | [engineering-maturity-roadmap.md](./engineering-maturity-roadmap.md) | 軽量な正式開発レベルへ移行するための P1〜P3 計画、受入条件、進捗 |
 | [documentation-governance.md](./documentation-governance.md) | Document metadata、source of truth、link gate、archive の運用規約 |
-| [quality-gates.md](./quality-gates.md) | Boundary type、platform API、i18n、coverage、axe、dependency gate の運用規約 |
+| [quality-gates.md](./quality-gates.md) | Architecture import、boundary type、platform API、i18n、coverage、axe、dependency gate の運用規約 |
 | [definition-of-done.md](./definition-of-done.md) | 全変更共通と S／M／L risk 別の完了条件、Ready／merge、exception policy |
 | [feature-dossiers/README.md](./feature-dossiers/README.md) | リスク別 Feature Dossier、AC-ID／TEST-ID、設計・テスト review の運用規約 |
 | [adr/README.md](./adr/README.md) | Architecture Decision Record の作成条件、status、index |

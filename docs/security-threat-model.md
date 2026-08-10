@@ -45,6 +45,7 @@ Main process / filesystem / shell / clipboard / print / update
 - sandboxed preload は ESM を使用できないため、単一の `out/preload/index.cjs` へ bundle する。
 - Renderer から main への全 channel は `createTrustedIpcMain` を経由する。
 - sender は main `webContents` と同一であるだけでなく、`senderFrame === webContents.mainFrame` かつ現在の app URL と一致しなければならない。
+- `npm run architecture:check` は renderer／shared から Electron／Node.js を import できないようにし、Capacitor dependency を platform adapter 内へ限定する。この static gate は sandbox／CSP／IPC runtime validation の代替ではなく補助防御とする。
 
 ## 3. 脅威と対策
 
@@ -106,6 +107,7 @@ Main process / filesystem / shell / clipboard / print / update
 次の変更では本書と security regression test を更新する。
 
 - preload API、IPC channel、file operation の追加・変更。
+- Main／preload／renderer／shared／platform adapter の import boundary 変更。
 - raw HTML、custom theme、external URL、attachment、print／export の変更。
 - Electron major version 更新。
 - updater、auto-download、code signing、notarization の導入。

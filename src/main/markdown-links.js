@@ -1,17 +1,14 @@
 import { extname, posix, win32 } from 'node:path'
-import {
-  extractMarkdownHeadings,
-  extractMarkdownLinks,
-  getAllowedExternalUrl,
-  isAbsolutePath,
-  slugifyMarkdownAnchor
-} from './helpers.js'
+import { extractMarkdownLinks, slugifyMarkdownAnchor } from '../shared/markdown.js'
+import { extractMarkdownHeadings, getAllowedExternalUrl, isAbsolutePath } from './helpers.js'
 
 const MARKDOWN_RE = /\.(md|markdown|mdx)$/i
 const WINDOWS_PATH_RE = /^(?:[a-zA-Z]:[\\/]|\\\\)/
 
 const pathApiFor = (...values) =>
-  values.some((value) => WINDOWS_PATH_RE.test(String(value || '')) || String(value || '').includes('\\'))
+  values.some(
+    (value) => WINDOWS_PATH_RE.test(String(value || '')) || String(value || '').includes('\\')
+  )
     ? win32
     : posix
 
@@ -60,8 +57,9 @@ export function markdownWorkspaceRootForPath(filePath, workspaceRoots = []) {
   return match
 }
 
-const resolvedTargetPaths = (resolved) =>
-  [...new Set([resolved?.path, resolved?.fallbackPath].filter(Boolean).map((path) => path))]
+const resolvedTargetPaths = (resolved) => [
+  ...new Set([resolved?.path, resolved?.fallbackPath].filter(Boolean).map((path) => path))
+]
 
 const resolvedTargetMatches = (resolved, targetPath) =>
   resolvedTargetPaths(resolved).some((path) => matchesMarkdownTargetPath(path, targetPath))
@@ -109,7 +107,9 @@ export function resolveMarkdownTarget(fromPath, target, options = {}) {
       }
     }
   }
-  const resolved = isAbsolutePath(decoded) ? api.normalize(decoded) : api.resolve(api.dirname(fromPath), decoded)
+  const resolved = isAbsolutePath(decoded)
+    ? api.normalize(decoded)
+    : api.resolve(api.dirname(fromPath), decoded)
   return { ...parts, kind: 'local', path: resolved, fallbackPath: null, rootRelative: false }
 }
 
@@ -138,7 +138,10 @@ export function collectMarkdownAnchors(content) {
 }
 
 const excerptForLink = (content, link) => {
-  const lineText = String(content ?? '').split('\n')[link.line - 1]?.replace(/\r$/, '') || ''
+  const lineText =
+    String(content ?? '')
+      .split('\n')
+      [link.line - 1]?.replace(/\r$/, '') || ''
   const col = Math.max(0, link.column - 1)
   const start = Math.max(0, col - 50)
   const prefix = start ? '…' : ''
@@ -170,7 +173,11 @@ export async function diagnoseMarkdownContent({
       path: resolved.path || null,
       anchor: resolved.anchor
     }
-    if (resolved.kind === 'empty' || resolved.kind === 'external' || resolved.kind === 'embedded-image') {
+    if (
+      resolved.kind === 'empty' ||
+      resolved.kind === 'external' ||
+      resolved.kind === 'embedded-image'
+    ) {
       continue
     }
     if (resolved.kind === 'invalid-url') {
@@ -276,9 +283,7 @@ const buildFileChange = (file, replacements) => {
   let updated = file.content
   for (const replacement of ordered) {
     updated =
-      updated.slice(0, replacement.start) +
-      replacement.value +
-      updated.slice(replacement.end)
+      updated.slice(0, replacement.start) + replacement.value + updated.slice(replacement.end)
   }
   if (updated === file.content) return null
   const beforeLines = file.content.split('\n')
@@ -312,7 +317,8 @@ export function createHeadingRenamePlan(files, targetPath, line, newHeading, opt
   const lineIndex = Math.max(0, Number(line) - 1)
   const parsed = parseHeadingLine(lines[lineIndex])
   const nextText = String(newHeading ?? '').trim()
-  if (!target || !parsed || !nextText) return { error: 'invalid-heading', files: [], totalChanges: 0 }
+  if (!target || !parsed || !nextText)
+    return { error: 'invalid-heading', files: [], totalChanges: 0 }
   const oldAnchor = parsed.explicit || slugifyMarkdownAnchor(parsed.text)
   const newAnchor = parsed.explicit || slugifyMarkdownAnchor(nextText)
   if (!newAnchor) return { error: 'invalid-heading', files: [], totalChanges: 0 }

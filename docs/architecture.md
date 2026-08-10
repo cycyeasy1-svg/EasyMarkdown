@@ -58,6 +58,7 @@ src/
   preload/index.js         contextBridge：window.api 桥接（CJS bundle、sandbox 対応）
   shared/api-contract.js   Desktop／Mobile 共通 API method・capability contract
   shared/i18n-contract.js  Locale key・placeholder parity の pure validator
+  shared/markdown.js       Main／renderer 共通 Markdown link・anchor pure logic
   renderer/
     index.html             渲染入口（CSP、标题）
     src/
@@ -107,6 +108,22 @@ build/
 main window は `contextIsolation: true`、`nodeIntegration: false`、`sandbox: true` で起動する。sandboxed preload は単一 CJS bundle とし、全 privileged IPC は `trusted-ipc.js` を経由する。Renderer root は `AppErrorBoundary` で保護し、safe mode では既存 data を上書きせず session 復元と custom theme を無効化する。詳細は [診断・復旧設計](./diagnostics-and-recovery.md) を参照する。
 
 Renderer-visible API の method と capability は `src/shared/api-contract.js` を source of truth とする。Desktop preload と Capacitor shim は全 capability を boolean で明示し、static shape check と公開直前の runtime assertion を通す。型・locale・coverage・accessibility・dependency の gate と変更手順は [Quality Gate 運用規約](./quality-gates.md) に従う。
+
+## Import boundary contract
+
+Source layer 間の dependency direction は次を source of truth とする。`npm run architecture:check` は `src/` 配下の JavaScript／JSX にある static import、re-export、literal `import()`、`require()` を解析し、違反を merge 前に停止する。
+
+| Importer | 許可する repository layer | External runtime contract |
+| --- | --- | --- |
+| `src/main/` | `main`、`shared` | Electron、Node.js、main 用 package |
+| `src/preload/` | `preload`、`shared` | `electron` のみ |
+| `src/renderer/` | `renderer`、`shared`、platform public entry | Browser package。Electron／Node.js／Capacitor は禁止 |
+| `src/shared/` | `shared` | External package／runtime module は禁止 |
+| `src/renderer/src/platform/` | `platform`、`shared` | 承認済み Capacitor package のみ |
+
+Renderer が platform adapter を初期化する場合は `src/renderer/src/platform/index.js` だけを import し、`capacitor-api.js` 等の実装へ直接依存しない。Relative import が管理対象 layer 外へ出ること、runtime owner 以外が Electron／Node.js／Capacitor を import すること、non-literal dynamic import で検査を迂回することを禁止する。新しい TypeScript source を `src/` に追加する場合は、同じ変更で checker の parser coverage を追加するまで gate を通さない。
+
+既存違反を baseline／ignore で許容しない。共通利用が必要な pure logic は `src/shared/` へ抽出し、runtime 固有 module は composition root または platform adapter から dependency injection する。詳細な判断理由は [ADR-0005](./adr/0005-enforced-import-boundaries.md) を参照する。
 
 ## App.jsx：外壳的核心职责
 

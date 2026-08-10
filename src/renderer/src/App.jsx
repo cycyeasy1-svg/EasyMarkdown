@@ -61,7 +61,7 @@ import {
   attachmentLinkMarkdown,
   extractMarkdownLinks,
   slugifyMarkdownAnchor
-} from '../../main/helpers.js'
+} from '../../shared/markdown.js'
 import { applyCustomTheme } from './customThemes.js'
 import { preparePdfSource } from './pdf-source.js'
 import { useKeybindings } from './hooks/useKeybindings.js'

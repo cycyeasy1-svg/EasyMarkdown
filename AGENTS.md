@@ -239,10 +239,14 @@ docs/                  architecture / features / implementation-notes / developm
 - **Boundary and regression gates** — `src/shared/api-contract.js` is the source
   of truth for desktop/mobile API capabilities. New renderer-visible native APIs
   update the shared contract, both platform profiles, and API tests together.
-  `npm run quality:fast` includes API shape, JSDoc `checkJs`, i18n parity, and
-  fixed coverage floors. `npm run dependencies:check` compares root and VS Code
-  lockfiles with the committed severity baseline; that baseline is not a security
-  waiver. Gate scope and change policy live in
+  `npm run architecture:check` enforces main/preload/renderer/shared/platform
+  import direction, keeps Electron/Node/Capacitor in their runtime owners, and
+  exposes platform adapters through `platform/index.js` only. Do not add boundary
+  ignores; move cross-runtime pure logic to `src/shared/`. `npm run quality:fast`
+  includes this check, API shape, JSDoc `checkJs`, i18n parity, and fixed coverage
+  floors. `npm run dependencies:check` compares root and VS Code lockfiles with
+  the committed severity baseline; that baseline is not a security waiver. Gate
+  scope and change policy live in
   [`docs/quality-gates.md`](./docs/quality-gates.md).
 - **Docs as Code check** — `npm run docs:check` は `docs/**/*.md` の
   `doc_version`／`doc_status`／`doc_owner`／`last_verified`、local file／directory／
