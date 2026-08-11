@@ -4,7 +4,14 @@
    ===================================================== */
 
 * { box-sizing: border-box; }
-html, body, #root { height: 100%; margin: 0; }
+/* The app shell owns the viewport. All real scrolling happens in explicit
+   surfaces such as .editor-scroll; allowing the document root to scroll creates
+   a second, inert-looking scrollbar at the window edge. */
+html, body, #root {
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+}
 /* App-like behavior on touch devices: kill double-tap-to-zoom (which otherwise
    magnifies a blank tap and overflows the layout) and iOS text auto-inflation.
    No effect on desktop (mouse input ignores touch-action). */
@@ -294,7 +301,7 @@ button:focus-visible,
   color: var(--text-strong);
 }
 
-/* Scrollbars — auto-hide, show on hover */
+/* Scrollbars — auto-hide, show on hover or while the surface is scrolling. */
 *::-webkit-scrollbar { width: 10px; height: 10px; }
 *::-webkit-scrollbar-track { background: transparent; }
 *::-webkit-scrollbar-thumb {
@@ -304,7 +311,8 @@ button:focus-visible,
   background-clip: padding-box;
   transition: background 0.3s var(--ease-out);
 }
-*:hover::-webkit-scrollbar-thumb {
+*:hover::-webkit-scrollbar-thumb,
+*.hm-scroll-active::-webkit-scrollbar-thumb {
   background: color-mix(in srgb, var(--muted) 30%, transparent);
   background-clip: padding-box;
 }

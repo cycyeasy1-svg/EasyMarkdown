@@ -2,7 +2,7 @@
 doc_version: 1
 doc_status: active
 doc_owner: maintainers
-last_verified: 2026-08-09
+last_verified: 2026-08-10
 ---
 
 # Product Support Matrix
@@ -42,6 +42,7 @@ Readiness は次の値を使用する。
 | Mobile iOS | iOS 15+ build configuration | Experimental | `NOT ELIGIBLE` | Capacitor web build、Xcode project。TestFlight／device evidence なし | maintainers |
 | VS Code extension | VS Code 1.84+ | Beta | `BLOCKED` | Independent v1.6.0、extension build、shared／extension characterization tests、changelog | maintainers |
 | Website | Browser baseline 未確定 | Experimental | `NOT ELIGIBLE` | Static source、GitHub Pages canonical URL、Vercel header config。Deploy／link／browser smoke gate なし | maintainers |
+| Web Lite（local static） | Microsoft Edge／Google Chrome 120+、File System Access API | Experimental | `NOT ELIGIBLE` | `file://` IIFE build、shared Keep core、unit test、local Edge smoke。Server／installer なし | maintainers |
 
 Electron 43 は current dependency である。Electron 44 以降は macOS 13+ を要求するため、Electron major update は L level change とし、本 matrix と manual smoke baseline を同時に更新する。参考: [Electron breaking changes](https://www.electronjs.org/docs/latest/breaking-changes/)。
 
@@ -116,6 +117,20 @@ Beta 昇格には次が必要である。
 
 Stable は availability owner、deployment evidence、broken-link／accessibility gate を定義した後に検討する。
 
+### 4.7 Web Lite（local static）— Experimental
+
+Web Lite は社内評価向けの serverless prototype とする。`dist-web-lite/` を local disk または read-only share へ配置し、Edge／Chrome で `index.html` を直接開く。Executable、installer、既定 application 登録、native update、background service は提供しない。
+
+Beta 昇格には次が必要である。
+
+- Managed Edge／Chrome の実際の enterprise policy で folder open、permission renewal、direct save、download fallback を smoke する。
+- `file://` 配置および社内 HTTP 配置の browser baseline、配布 owner、更新／撤回手順を確定する。
+- Static archive の checksum／source commit を追跡し、古い directory へ戻す rollback を rehearsal する。
+- Keep edit、table、Mermaid、KaTeX、relative image、internal link、BOM／EOL preservation を代表文書で確認する。
+- Content Security Policy と network-free asset contract を継続検証し、document content を外部送信しないことを security review する。
+
+Experimental の間は local build を official release と表示せず、browser policy による File System Access API 無効化を support failure とみなさない。
+
 ## 5. Release evidence と authorization
 
 Beta／Stable product を外部公開する前に、[release evidence template](./release-evidence/_template.md) を複製して `docs/release-evidence/<release-id>.md` を作成する。最低限、次を記録する。
@@ -147,3 +162,4 @@ Public issue は全 tier で受け付けるが、response SLA は設定しない
 3. VS Code の VSIX／Marketplace install・upgrade workflow を確立する。
 4. Android native build／signature／device matrix を CI または再現可能な controlled release 手順へ移す。
 5. iOS TestFlight evidence と Website deploy gate は、distribution owner を決めてから Beta 化する。
+6. Web Lite は社内 pilot で managed browser policy と static directory 更新手順を確認した後に Beta 化を判断する。

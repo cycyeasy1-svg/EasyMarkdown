@@ -65,6 +65,7 @@ import {
 import { applyCustomTheme } from './customThemes.js'
 import { preparePdfSource } from './pdf-source.js'
 import { useKeybindings } from './hooks/useKeybindings.js'
+import { useScrollActivity } from './hooks/useScrollActivity.js'
 import { useSystemColorScheme } from './hooks/useSystemColorScheme.js'
 import {
   keybindingMatchesEvent,
@@ -760,6 +761,7 @@ export default function App({ safeMode = false, onExitSafeMode = null }) {
   // Mobile (Capacitor) builds run the same renderer; a few affordances differ
   // (drawer sidebar, no split button). Desktop is unaffected.
   const isMobile = window.api.platform === 'ios' || window.api.platform === 'android'
+  useScrollActivity()
   const [tabs, setTabs] = useState([])
   const [activeId, setActiveId] = useState(null)
   const [closedTabs, setClosedTabs] = useState(() => sanitizeClosedTabs(session.closedTabs))

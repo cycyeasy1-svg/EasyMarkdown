@@ -24,7 +24,7 @@ import {
 } from '../keep-format.js'
 import { inlineRichStyles } from './editor-copy.js'
 import { dirOf } from './editor-images.js'
-import { getMermaidSvg, peekMermaidSvg } from './editor-mermaid.js'
+import { getMermaidSvg, peekMermaidSvg } from './editor-mermaid-core.js'
 import { enhanceKeepTables } from './editor-tablescroll.js'
 import { lineColumnAtOffset, lineStartOffset } from '../source-position.js'
 import {
