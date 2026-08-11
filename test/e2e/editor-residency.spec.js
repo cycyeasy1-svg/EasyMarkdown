@@ -53,10 +53,73 @@ test('clean inactive Keep editors hibernate and restore their reading position',
     await expect(page.locator(`.editor-scroll.km-scroll[data-tab-id="${firstId}"]`)).toHaveCount(0)
 
     await activate(page, files[0])
-    await expect.poll(async () => firstPane.evaluate((pane) =>
-      pane.scrollTop / Math.max(1, pane.scrollHeight - pane.clientHeight)
-    )).toBeGreaterThan(0.45)
+    await expect
+      .poll(async () =>
+        firstPane.evaluate(
+          (pane) => pane.scrollTop / Math.max(1, pane.scrollHeight - pane.clientHeight)
+        )
+      )
+      .toBeGreaterThan(0.45)
   } finally {
+    await cleanup()
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('a warm Keep editor resumes in place without remeasuring the whole document', async () => {
+  const { dir, files } = createWorkspace('em-editor-warm-resume-')
+  const { page, cleanup } = await launchApp(files.slice(0, 2))
+  try {
+    await settleInitialOpen(page, files.slice(0, 2))
+    await activate(page, files[0])
+    const firstPane = page.locator('.editor-scroll.km-scroll:visible')
+    const firstDoc = firstPane.locator('.km-doc')
+    await expect.poll(() => firstDoc.locator('.km-block').count()).toBeGreaterThan(250)
+    await firstPane.evaluate((pane) => {
+      pane.scrollTop = pane.scrollHeight * 0.62
+      pane.dispatchEvent(new Event('scroll', { bubbles: true }))
+      pane.querySelector('.km-doc').dataset.warmResumeProbe = 'true'
+
+      const descriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'offsetHeight')
+      window.__warmResumeMeasureReads = 0
+      window.__restoreWarmResumeProbe = () => {
+        if (descriptor) Object.defineProperty(HTMLElement.prototype, 'offsetHeight', descriptor)
+        delete window.__restoreWarmResumeProbe
+      }
+      if (descriptor?.get) {
+        Object.defineProperty(HTMLElement.prototype, 'offsetHeight', {
+          configurable: true,
+          get() {
+            if (this.closest?.('.km-doc[data-warm-resume-probe="true"]')) {
+              window.__warmResumeMeasureReads += 1
+            }
+            return descriptor.get.call(this)
+          }
+        })
+      }
+    })
+    const before = await firstPane.evaluate((pane) => pane.scrollTop)
+
+    await activate(page, files[1])
+    await activate(page, files[0])
+    await page.waitForTimeout(100)
+
+    await expect(firstDoc).toHaveAttribute('data-warm-resume-probe', 'true')
+    await expect
+      .poll(() => firstPane.evaluate((pane) => pane.scrollTop))
+      .toBeGreaterThan(before * 0.9)
+    expect(await page.evaluate(() => window.__warmResumeMeasureReads)).toBe(0)
+
+    await page
+      .locator('.tab', { hasText: basename(files[1]) })
+      .locator('.tab-close')
+      .click()
+    await expect(page.locator('.tab', { hasText: basename(files[1]) })).toHaveCount(0)
+    await expect
+      .poll(() => firstPane.evaluate((pane) => pane.scrollTop))
+      .toBeGreaterThan(before * 0.9)
+  } finally {
+    await page.evaluate(() => window.__restoreWarmResumeProbe?.()).catch(() => {})
     await cleanup()
     rmSync(dir, { recursive: true, force: true })
   }

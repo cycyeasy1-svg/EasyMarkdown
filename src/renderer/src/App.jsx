@@ -2552,6 +2552,10 @@ export default function App({ safeMode = false, onExitSafeMode = null }) {
         },
         onPreviewScroll: (e) => {
           if (e.target !== e.currentTarget) return
+          // Chromium may dispatch a zero-position scroll while a pane is being
+          // hidden with display:none. Keep the last user-visible snapshot instead
+          // of letting that lifecycle event erase the tab's reading position.
+          if (e.currentTarget.offsetParent === null) return
           const viewport = editorViewportStateRef.current[id] || {}
           viewport.scrollTop = e.currentTarget.scrollTop
           editorViewportStateRef.current[id] = viewport
@@ -2649,6 +2653,44 @@ export default function App({ safeMode = false, onExitSafeMode = null }) {
   // Drop cached handlers when their tab closes (keyed on the id list, so a
   // content edit never touches this).
   const tabIdsKey = tabs.map((x) => x.id).join('\n')
+  // Capture visible rich-pane scroll positions before React mutates tab visibility,
+  // then restore them in the same commit after the new pane is shown. Resident
+  // editors normally keep their DOM, but Chromium can still reset scrollTop when
+  // display:none or sibling removal changes layout. Hibernated editors are restored
+  // later by onReady, after their replacement editor has mounted.
+  useLayoutEffect(() => {
+    const apis = editorApis.current
+    const viewportStates = editorViewportStateRef.current
+    const visibleIds = home
+      ? []
+      : sourceSplit
+        ? [sourcePreviewId]
+        : [sourceMode ? null : activeId, split ? splitId : null]
+    const ids = [...new Set(visibleIds.filter((id) => id != null))]
+
+    for (const id of ids) {
+      const viewport = viewportStates[id]
+      const scroller = apis[id]?.getScroller?.()
+      if (
+        scroller &&
+        scroller.offsetParent !== null &&
+        Number.isFinite(viewport?.scrollTop) &&
+        Math.abs(scroller.scrollTop - viewport.scrollTop) > 0.5
+      ) {
+        scroller.scrollTop = Math.max(0, viewport.scrollTop)
+      }
+    }
+
+    return () => {
+      for (const id of ids) {
+        const scroller = apis[id]?.getScroller?.()
+        if (!scroller || scroller.offsetParent === null) continue
+        const viewport = viewportStates[id] || {}
+        viewport.scrollTop = scroller.scrollTop
+        viewportStates[id] = viewport
+      }
+    }
+  }, [activeId, home, sourceMode, sourcePreviewId, sourceSplit, split, splitId, tabIdsKey])
   useEffect(() => {
     const live = new Set(tabIdsKey.split('\n').filter(Boolean))
     mruTabIdsRef.current = touchTabMru(mruTabIdsRef.current, activeId, live)

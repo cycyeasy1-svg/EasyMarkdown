@@ -92,6 +92,8 @@ function KeepEditor({
   blankLineSpacingRef.current = blankLineSpacing
   const readOnlyRef = useRef(readOnly)
   readOnlyRef.current = readOnly
+  const inViewRef = useRef(inView)
+  inViewRef.current = inView
   const onOpenSourceRef = useRef(onOpenSource)
   onOpenSourceRef.current = onOpenSource
   const onOpenDocLinkRef = useRef(onOpenDocLink)
@@ -144,9 +146,9 @@ function KeepEditor({
   // so a floating edit bar never lingers over another tab's document.
   const suspendFloatingRef = useRef(null)
   const resumeFloatingRef = useRef(null)
-  // Re-measure multi-line flags for the whole doc. Set inside the mount effect;
-  // called when the pane RE-ENTERS view, since blocks streamed while it was hidden
-  // measured 0 height (display:none) and may have missed their km-multiline class.
+  // Re-measure only blocks that streamed while hidden (or the whole document when
+  // its viewport width changed). Avoid a full synchronous layout scan on every
+  // ordinary tab switch; that was the visible warm-resume stall on large docs.
   const remeasureRef = useRef(null)
   // Full repaint from rawLines. Set inside the mount effect; called when a render
   // OPTION (not the document) changes — only blankLineSpacing so far, which is
@@ -256,6 +258,13 @@ function KeepEditor({
     let pendingFrom = 0 // next not-yet-painted block index (Infinity ⇒ fully painted)
     let pendingTableRows = [] // large tables whose remaining <tr>s are still streaming
     let finalizedToken = -1 // table affordances are installed once per render token
+    let deferredMeasureFrom = Infinity
+    let deferredMeasureTo = 0
+    let lastMeasuredWidth = 0
+    const deferMultilineFlagsRange = (from, to) => {
+      deferredMeasureFrom = Math.min(deferredMeasureFrom, from)
+      deferredMeasureTo = Math.max(deferredMeasureTo, to)
+    }
     const idle = (fn) =>
       typeof requestIdleCallback === 'function'
         ? requestIdleCallback(fn, { timeout: 200 })
@@ -347,6 +356,8 @@ function KeepEditor({
       cancelAfterPaint()
       cancelChunks()
       pendingTableRows = []
+      deferredMeasureFrom = Infinity
+      deferredMeasureTo = 0
       const myToken = ++chunkToken
       const total = blocks.length
 
@@ -437,7 +448,12 @@ function KeepEditor({
     // rows. Whole-document affordances are installed by finishDocumentRender().
     const finishRenderRange = (from, to) => {
       if (destroyed) return
-      applyMultilineFlagsRange(from, to)
+      if (inViewRef.current) {
+        applyMultilineFlagsRange(from, to)
+        lastMeasuredWidth = host.clientWidth
+      } else {
+        deferMultilineFlagsRange(from, to)
+      }
       observeEmbedsRange(from, to)
       if (selectedCellRef.current) restoreSelectedCell()
       // On a fresh open both sets are empty (→ skipped); they matter when a large
@@ -2356,10 +2372,15 @@ function KeepEditor({
         repositionCellPop()
       }
     }
-    // Only worth re-measuring once the doc is fully streamed; mid-stream the next
-    // chunk's finishRenderRange will measure the rest anyway (the host is visible again).
     remeasureRef.current = () => {
-      if (!hasPendingWork()) applyMultilineFlagsRange(0, blocksRef.current.length)
+      const width = host.clientWidth
+      const widthChanged = lastMeasuredWidth > 0 && Math.abs(width - lastMeasuredWidth) > 1
+      const from = widthChanged ? 0 : deferredMeasureFrom
+      const to = widthChanged ? blocksRef.current.length : deferredMeasureTo
+      deferredMeasureFrom = Infinity
+      deferredMeasureTo = 0
+      if (from < to) applyMultilineFlagsRange(from, to)
+      if (width > 0) lastMeasuredWidth = width
     }
     rerenderRef.current = () => rerender()
 
@@ -2855,9 +2876,9 @@ function KeepEditor({
       suspendFloatingRef.current?.()
       setLightbox(null)
     } else if (wasHiddenRef.current) {
-      // Only after a hide → show: fix km-multiline on blocks that streamed in while
-      // the pane was display:none (they measured 0 height). Skips the no-op remeasure
-      // on the very first mount, where the pane was visible the whole time.
+      // Only after a hide → show: measure blocks that streamed while display:none.
+      // A same-width warm tab has no deferred range, so resuming it does no layout
+      // work and preserves the already-painted viewport.
       remeasureRef.current?.()
       resumeFloatingRef.current?.()
     }
