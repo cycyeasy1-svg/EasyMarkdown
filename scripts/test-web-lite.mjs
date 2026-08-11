@@ -113,6 +113,18 @@ try {
     () => (document.querySelector('.lite-editor-scroll')?.scrollTop || 0) > 0
   )
   const previewWheelScroll = await previewScroller.evaluate((element) => element.scrollTop)
+  await page.mouse.move(10, 10)
+  const scrollingScrollbar = await previewScroller.evaluate((element) => ({
+    active: element.classList.contains('hm-scroll-active'),
+    background: getComputedStyle(element, '::-webkit-scrollbar-thumb').backgroundColor
+  }))
+  await page.waitForFunction(
+    () => !document.querySelector('.lite-editor-scroll')?.classList.contains('hm-scroll-active'),
+    { timeout: 2_000 }
+  )
+  const idleScrollbarBackground = await previewScroller.evaluate(
+    (element) => getComputedStyle(element, '::-webkit-scrollbar-thumb').backgroundColor
+  )
   const source = page.locator('.lite-source-panel textarea')
   await source.waitFor()
   await previewScroller.evaluate((element) => {
@@ -196,6 +208,9 @@ try {
     result.statusPath !== 'web-lite-runtime.md' ||
     !result.statusModified ||
     previewWheelScroll <= 0 ||
+    !scrollingScrollbar.active ||
+    scrollingScrollbar.background === 'rgba(0, 0, 0, 0)' ||
+    idleScrollbarBackground !== 'rgba(0, 0, 0, 0)' ||
     previewSyncedScroll <= 0 ||
     !filterText?.includes('1/2') ||
     filteredRows !== 1 ||
@@ -205,7 +220,7 @@ try {
     result.storedTypography.fontWriteEn !== 'Georgia'
   ) {
     throw new Error(
-      `Unexpected runtime state: ${JSON.stringify({ ...result, filterText, filteredRows, previewWheelScroll, previewSyncedScroll })}`
+      `Unexpected runtime state: ${JSON.stringify({ ...result, filterText, filteredRows, previewWheelScroll, scrollingScrollbar, idleScrollbarBackground, previewSyncedScroll })}`
     )
   }
 

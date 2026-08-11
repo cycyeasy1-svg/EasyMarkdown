@@ -65,6 +65,7 @@ import {
 import { applyCustomTheme } from './customThemes.js'
 import { preparePdfSource } from './pdf-source.js'
 import { useKeybindings } from './hooks/useKeybindings.js'
+import { useScrollActivity } from './hooks/useScrollActivity.js'
 import { useSystemColorScheme } from './hooks/useSystemColorScheme.js'
 import {
   keybindingMatchesEvent,
@@ -760,6 +761,7 @@ export default function App({ safeMode = false, onExitSafeMode = null }) {
   // Mobile (Capacitor) builds run the same renderer; a few affordances differ
   // (drawer sidebar, no split button). Desktop is unaffected.
   const isMobile = window.api.platform === 'ios' || window.api.platform === 'android'
+  useScrollActivity()
   const [tabs, setTabs] = useState([])
   const [activeId, setActiveId] = useState(null)
   const [closedTabs, setClosedTabs] = useState(() => sanitizeClosedTabs(session.closedTabs))
@@ -1298,37 +1300,6 @@ export default function App({ safeMode = false, onExitSafeMode = null }) {
     if (sourceSplitPreviewRafRef.current) cancelAnimationFrame(sourceSplitPreviewRafRef.current)
     for (const raf of editorViewportRafsRef.current.values()) cancelAnimationFrame(raf)
     editorViewportRafsRef.current.clear()
-  }, [])
-
-  // The themed scrollbar thumb is transparent at rest. Chromium's native
-  // "show while scrolling" behavior cannot override that CSS, so briefly mark
-  // whichever surface emitted a scroll event. Capture phase also covers nested
-  // surfaces (source textareas, tables, sidebars) because scroll does not bubble.
-  useEffect(() => {
-    const hideTimers = new Map()
-    const revealScrollbar = (event) => {
-      const scroller = event.target instanceof Element
-        ? event.target
-        : document.scrollingElement
-      if (!scroller) return
-
-      scroller.classList.add('hm-scroll-active')
-      clearTimeout(hideTimers.get(scroller))
-      hideTimers.set(scroller, window.setTimeout(() => {
-        scroller.classList.remove('hm-scroll-active')
-        hideTimers.delete(scroller)
-      }, 900))
-    }
-
-    document.addEventListener('scroll', revealScrollbar, true)
-    return () => {
-      document.removeEventListener('scroll', revealScrollbar, true)
-      for (const [scroller, timer] of hideTimers) {
-        clearTimeout(timer)
-        scroller.classList.remove('hm-scroll-active')
-      }
-      hideTimers.clear()
-    }
   }, [])
 
   useEffect(() => {

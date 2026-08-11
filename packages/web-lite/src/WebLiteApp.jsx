@@ -2,6 +2,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import KeepEditor from '../../../src/renderer/src/components/KeepEditor.jsx'
 import Outline from '../../../src/renderer/src/components/Outline.jsx'
 import { Icon } from '../../../src/renderer/src/components/icons.jsx'
+import { useScrollActivity } from '../../../src/renderer/src/hooks/useScrollActivity.js'
 import { ZOOM_STEP } from '../../../src/renderer/src/settings.js'
 import logoUrl from '../../../src/renderer/src/assets/logo.png'
 import TypographyPanel from './TypographyPanel.jsx'
@@ -292,6 +293,7 @@ function SourcePanel({ panel, t, onChange, onApply, onClose, onScroll }) {
 }
 
 export default function WebLiteApp({ lang, setLang }) {
+  useScrollActivity()
   const t = useCallback((key, vars) => liteTranslate(lang, key, vars), [lang])
   const [theme, setTheme] = useState(
     () => localStorage.getItem('easymarkdown.web-lite.theme') || 'light'
