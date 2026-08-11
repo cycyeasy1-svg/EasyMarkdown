@@ -1300,6 +1300,37 @@ export default function App({ safeMode = false, onExitSafeMode = null }) {
     editorViewportRafsRef.current.clear()
   }, [])
 
+  // The themed scrollbar thumb is transparent at rest. Chromium's native
+  // "show while scrolling" behavior cannot override that CSS, so briefly mark
+  // whichever surface emitted a scroll event. Capture phase also covers nested
+  // surfaces (source textareas, tables, sidebars) because scroll does not bubble.
+  useEffect(() => {
+    const hideTimers = new Map()
+    const revealScrollbar = (event) => {
+      const scroller = event.target instanceof Element
+        ? event.target
+        : document.scrollingElement
+      if (!scroller) return
+
+      scroller.classList.add('hm-scroll-active')
+      clearTimeout(hideTimers.get(scroller))
+      hideTimers.set(scroller, window.setTimeout(() => {
+        scroller.classList.remove('hm-scroll-active')
+        hideTimers.delete(scroller)
+      }, 900))
+    }
+
+    document.addEventListener('scroll', revealScrollbar, true)
+    return () => {
+      document.removeEventListener('scroll', revealScrollbar, true)
+      for (const [scroller, timer] of hideTimers) {
+        clearTimeout(timer)
+        scroller.classList.remove('hm-scroll-active')
+      }
+      hideTimers.clear()
+    }
+  }, [])
+
   useEffect(() => {
     if (!startupRestored) return
     if (activeTab?.loading) return
