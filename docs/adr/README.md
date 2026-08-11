@@ -2,7 +2,7 @@
 doc_version: 1
 doc_status: active
 doc_owner: maintainers
-last_verified: 2026-08-09
+last_verified: 2026-08-10
 ---
 
 # Architecture Decision Record 運用規約
@@ -33,3 +33,4 @@ ADR は、L level 変更のうち、後から理由を復元しにくい archite
 | [0003](./0003-document-metadata-and-local-link-gate.md) | Accepted | Document 内 metadata と deterministic local link gate を採用する |
 | [0004](./0004-boundary-first-quality-gates.md) | Accepted | Boundary-first 型導入と no-regression quality gate を採用する |
 | [0005](./0005-enforced-import-boundaries.md) | Accepted | Runtime owner を明示する import boundary を自動強制する |
+| [0007](./0007-local-static-web-lite.md) | Accepted | Shared Keep core を serverless browser shell から利用する |

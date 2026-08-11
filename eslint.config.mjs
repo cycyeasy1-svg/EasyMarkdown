@@ -46,11 +46,12 @@ export default [
       '**/out/**',
       '**/dist/**',
       'dist-mobile/**',
+      'dist-web-lite/**',
       '**/node_modules/**',
       'android/**',
       'ios/**',
       'build/**',
-      'packages/**'
+      'packages/vscode-extension/**'
     ]
   },
 
@@ -60,7 +61,7 @@ export default [
 
   // ── Renderer: browser globals + React / JSX ──
   {
-    files: ['src/renderer/**/*.{js,jsx}'],
+    files: ['src/renderer/**/*.{js,jsx}', 'packages/web-lite/src/**/*.{js,jsx}'],
     plugins: { react, 'react-hooks': reactHooks },
     languageOptions: {
       ecmaVersion: 2023,
@@ -91,6 +92,7 @@ export default [
       'src/main/**/*.js',
       'src/preload/**/*.js',
       'scripts/**/*.{js,mjs}',
+      'packages/web-lite/build.mjs',
       '*.config.mjs',
       '*.mjs'
     ],
