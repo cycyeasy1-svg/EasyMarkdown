@@ -31,6 +31,7 @@ const FALLBACK_LABELS = {
 
 const MIN_COLUMN_PX = 72
 const MAX_COLUMN_PX = 1600
+const TABLE_VIEWPORT_CONTAINMENT_THRESHOLD = 80
 
 function fallbackT(key, vars) {
   let text = FALLBACK_LABELS[key] || key
@@ -73,8 +74,51 @@ export function enhanceKeepTables(
   const tr = (key, vars) => translate(key, vars)
   const cleanups = []
   const controllers = new Map()
+  const controllerByFrame = new Map()
   let activeColumnPop = null
   let activeResizeCleanup = null
+  let activeController = null
+  let updateRaf = 0
+
+  // One floating header is shared by the whole document. Large generated reports
+  // often contain hundreds of short tables; cloning every header and attaching a
+  // ResizeObserver to every table made ordinary scroll/tab/sidebar work scale with
+  // the total table count even though at most one table can be sticky at a time.
+  const floatEl = document.createElement('div')
+  floatEl.className = 'km-float-header'
+  floatEl.setAttribute('aria-hidden', 'true')
+  const hostLang = host.getAttribute('lang')
+  if (hostLang) floatEl.setAttribute('lang', hostLang)
+
+  const floatTop = document.createElement('div')
+  floatTop.className = 'km-float-scrolltop'
+  const floatTopInner = document.createElement('div')
+  floatTopInner.className = 'km-table-scrolltop-inner'
+  floatTop.appendChild(floatTopInner)
+
+  const floatScroll = document.createElement('div')
+  floatScroll.className = 'km-float-header-scroll'
+  const floatTable = document.createElement('table')
+  floatScroll.appendChild(floatTable)
+  floatEl.append(floatTop, floatScroll)
+  ;(host.closest('.pane-center') || document.body).appendChild(floatEl)
+  cleanups.push(() => floatEl.remove())
+
+  let cloneThead = null
+
+  const hideSharedFloat = () => floatEl.classList.remove('km-visible')
+
+  const activateFloat = (controller) => {
+    if (activeController === controller && cloneThead) return cloneThead
+    closeColumnPop()
+    hideSharedFloat()
+    activeController = controller
+    floatTable.className = controller.table.className
+    cloneThead = controller.thead.cloneNode(true)
+    floatTable.replaceChildren(cloneThead)
+    controller.onFloatActivated()
+    return cloneThead
+  }
 
   const closeColumnPop = () => {
     if (!activeColumnPop) return
@@ -152,7 +196,8 @@ export function enhanceKeepTables(
 
   const onOutsidePointer = (event) => {
     if (!activeColumnPop) return
-    if (activeColumnPop.pop.contains(event.target) || activeColumnPop.anchor.contains(event.target)) return
+    if (activeColumnPop.pop.contains(event.target) || activeColumnPop.anchor.contains(event.target))
+      return
     closeColumnPop()
   }
   const onGlobalScroll = (event) => {
@@ -165,6 +210,97 @@ export function enhanceKeepTables(
   cleanups.push(() => document.removeEventListener('pointerdown', onOutsidePointer, true))
   cleanups.push(() => window.removeEventListener('scroll', onGlobalScroll, true))
   cleanups.push(() => window.removeEventListener('resize', positionColumnPop))
+
+  const clonedHeader = (target) => target.closest?.('th[data-ci]') || null
+  const clonedColumn = (target) => {
+    const value = target?.closest?.('[data-ci]')?.getAttribute('data-ci')
+    const column = Number(value)
+    return Number.isFinite(column) ? column : null
+  }
+  const liveHeaderForClone = (target) => {
+    const column = clonedColumn(target)
+    return column == null ? null : activeController?.liveHeaders[column] || null
+  }
+  const isHeaderControl = (target) =>
+    target.closest?.('.km-filter-btn, .km-col-hide-btn, .km-col-resize')
+
+  // Event delegation keeps the shared clone interactive without installing a new
+  // listener set every time scrolling activates another table.
+  const onFloatClick = (event) => {
+    const filterButton = event.target.closest?.('.km-filter-btn')
+    if (filterButton) {
+      event.stopPropagation()
+      onFilterClick?.(filterButton)
+      return
+    }
+    const hideButton = event.target.closest?.('.km-col-hide-btn')
+    if (hideButton) {
+      event.preventDefault()
+      event.stopPropagation()
+      activeController?.hideColumn(clonedColumn(hideButton))
+      return
+    }
+    if (event.target.closest?.('.km-col-resize')) {
+      event.preventDefault()
+      event.stopPropagation()
+      return
+    }
+    const clonedTh = clonedHeader(event.target)
+    const liveTh = liveHeaderForClone(clonedTh)
+    if (!liveTh) return
+    onHeaderClick?.(liveTh, clonedTh, event)
+    activeController?.syncSelection()
+  }
+  const onFloatContextMenu = (event) => {
+    const clonedTh = clonedHeader(event.target)
+    const liveTh = liveHeaderForClone(clonedTh)
+    if (!liveTh) return
+    onHeaderContextMenu?.(liveTh, clonedTh, event)
+    activeController?.syncSelection()
+  }
+  const onFloatDoubleClick = (event) => {
+    const resize = event.target.closest?.('.km-col-resize')
+    if (resize) {
+      event.preventDefault()
+      event.stopPropagation()
+      activeController?.autoFitColumn(clonedColumn(resize))
+      return
+    }
+    if (isHeaderControl(event.target)) return
+    const clonedTh = clonedHeader(event.target)
+    const liveTh = liveHeaderForClone(clonedTh)
+    if (liveTh) onHeaderEdit?.(liveTh, clonedTh, event)
+  }
+  const onFloatPointerDown = (event) => {
+    const resize = event.target.closest?.('.km-col-resize')
+    if (resize) activeController?.startResize(clonedColumn(resize), event)
+  }
+  const onFloatKeyDown = (event) => {
+    const resize = event.target.closest?.('.km-col-resize')
+    if (!resize) return
+    const column = clonedColumn(resize)
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault()
+      activeController?.autoFitColumn(column)
+      return
+    }
+    if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
+    event.preventDefault()
+    activeController?.resizeColumnBy(
+      column,
+      (event.key === 'ArrowRight' ? 1 : -1) * (event.shiftKey ? 32 : 12)
+    )
+  }
+  floatEl.addEventListener('click', onFloatClick)
+  floatEl.addEventListener('contextmenu', onFloatContextMenu)
+  floatEl.addEventListener('dblclick', onFloatDoubleClick)
+  floatEl.addEventListener('pointerdown', onFloatPointerDown)
+  floatEl.addEventListener('keydown', onFloatKeyDown)
+  cleanups.push(() => floatEl.removeEventListener('click', onFloatClick))
+  cleanups.push(() => floatEl.removeEventListener('contextmenu', onFloatContextMenu))
+  cleanups.push(() => floatEl.removeEventListener('dblclick', onFloatDoubleClick))
+  cleanups.push(() => floatEl.removeEventListener('pointerdown', onFloatPointerDown))
+  cleanups.push(() => floatEl.removeEventListener('keydown', onFloatKeyDown))
 
   host.querySelectorAll('.km-table-wrap').forEach((wrap, tableOrder) => {
     const table = wrap.querySelector('table.km-table')
@@ -186,12 +322,12 @@ export function enhanceKeepTables(
     if (state.hidden.size >= liveCols.length) state.hidden.delete(0)
     const hasInitialColumnOverrides =
       state.hidden.size > 0 ||
-      Object.values(state.widths).some((width) => Number.isFinite(Number(width)) && Number(width) > 0)
+      Object.values(state.widths).some(
+        (width) => Number.isFinite(Number(width)) && Number(width) > 0
+      )
 
     const autoWidths = liveCols.map((col) => col.style.width || '')
     let headerNames = []
-    let cloneTable = null
-    let cloneThead = null
     let syncTopWidth = () => {}
     let syncWidths = () => {}
     let syncSelection = () => {}
@@ -228,6 +364,10 @@ export function enhanceKeepTables(
       hsyncing = true
       const x = src.scrollLeft
       for (const el of hGroup) if (el !== src) el.scrollLeft = x
+      if (activeController === controller) {
+        if (floatTop !== src) floatTop.scrollLeft = x
+        if (floatScroll !== src) floatScroll.scrollLeft = x
+      }
       hsyncing = false
     }
     const addH = (el, listen) => {
@@ -240,7 +380,7 @@ export function enhanceKeepTables(
     addH(wrap, true)
 
     const topBar = document.createElement('div')
-    topBar.className = 'km-table-scrolltop'
+    topBar.className = 'km-table-scrolltop km-hidden'
     const topInner = document.createElement('div')
     topInner.className = 'km-table-scrolltop-inner'
     topBar.appendChild(topInner)
@@ -266,7 +406,8 @@ export function enhanceKeepTables(
       hiddenButton.title = tr('keep.hiddenColumns', { count: hiddenCount })
       hiddenButton.setAttribute('aria-label', tr('keep.hiddenColumns', { count: hiddenCount }))
 
-      const roots = [thead, cloneThead].filter(Boolean)
+      const activeClone = activeController === controller ? cloneThead : null
+      const roots = [thead, activeClone].filter(Boolean)
       roots.forEach((root) => {
         root.querySelectorAll('.km-col-hide-btn').forEach((button) => {
           const ci = Number(button.dataset.ci)
@@ -297,11 +438,18 @@ export function enhanceKeepTables(
         col.style.width = widthTerm(ci)
       })
       table.querySelectorAll('th[data-ci], td[data-ci]').forEach((cell) => {
-        cell.classList.toggle('km-col-hidden', state.hidden.has(Number(cell.getAttribute('data-ci'))))
+        cell.classList.toggle(
+          'km-col-hidden',
+          state.hidden.has(Number(cell.getAttribute('data-ci')))
+        )
       })
-      if (cloneThead) {
-        cloneThead.querySelectorAll('th[data-ci]').forEach((cell) => {
-          cell.classList.toggle('km-col-hidden', state.hidden.has(Number(cell.getAttribute('data-ci'))))
+      const activeClone = activeController === controller ? cloneThead : null
+      if (activeClone) {
+        activeClone.querySelectorAll('th[data-ci]').forEach((cell) => {
+          cell.classList.toggle(
+            'km-col-hidden',
+            state.hidden.has(Number(cell.getAttribute('data-ci')))
+          )
         })
       }
       // The CSS min-width remains 100%, so narrow visible sets still fill the
@@ -398,6 +546,17 @@ export function enhanceKeepTables(
       activeResizeCleanup = stop
     }
 
+    const resizeColumnBy = (ci, delta) => {
+      ci = Number(ci)
+      if (!Number.isFinite(ci) || state.hidden.has(ci)) return
+      freezeVisibleWidths()
+      state.widths[ci] = Math.max(
+        MIN_COLUMN_PX,
+        Math.min(MAX_COLUMN_PX, Number(state.widths[ci] || MIN_COLUMN_PX) + Number(delta || 0))
+      )
+      applyColumnLayout()
+    }
+
     const wireHeaderControls = (root) => {
       const localCleanups = []
       root.querySelectorAll('.km-col-hide-btn').forEach((button) => {
@@ -431,14 +590,9 @@ export function enhanceKeepTables(
           }
           if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
           event.preventDefault()
-          freezeVisibleWidths()
           const step = event.shiftKey ? 32 : 12
           const direction = event.key === 'ArrowRight' ? 1 : -1
-          state.widths[ci] = Math.max(
-            MIN_COLUMN_PX,
-            Math.min(MAX_COLUMN_PX, Number(state.widths[ci] || MIN_COLUMN_PX) + direction * step)
-          )
-          applyColumnLayout()
+          resizeColumnBy(ci, direction * step)
         }
         button.addEventListener('pointerdown', onPointerDown)
         button.addEventListener('click', onClick)
@@ -492,6 +646,12 @@ export function enhanceKeepTables(
 
     controller = {
       stateKey,
+      table,
+      thead,
+      wrap,
+      frame,
+      topBar,
+      liveHeaders,
       columnName,
       hiddenColumns: () => [...state.hidden].sort((a, b) => a - b),
       canHideColumn,
@@ -500,7 +660,12 @@ export function enhanceKeepTables(
       hideColumn,
       showColumn,
       showAllColumns,
+      startResize,
+      resizeColumnBy,
       refreshLabels,
+      syncHorizontal: syncH,
+      prepare: () => {},
+      onFloatActivated: () => {},
       update: () => updateFloat(),
       hide: () => {},
       syncContent: () => {},
@@ -508,6 +673,7 @@ export function enhanceKeepTables(
       revealCell: () => false
     }
     controllers.set(stateKey, controller)
+    controllerByFrame.set(frame, controller)
 
     autoFitButton.addEventListener('click', autoFitTable)
     hiddenButton.addEventListener('click', () => openColumnPop(controller, hiddenButton))
@@ -520,92 +686,17 @@ export function enhanceKeepTables(
       topInner.style.width = tableWidth + 'px'
       topBar.classList.toggle('km-hidden', tableWidth <= wrap.clientWidth + 1)
     }
-    const ro =
-      typeof ResizeObserver === 'function'
-        ? new ResizeObserver(() => {
-            syncTopWidth()
-            syncWidths()
-            // Resizing the sidebar/split panes changes the table wrapper without
-            // firing `window.resize`. Reposition and resize the fixed overlay too,
-            // otherwise its outer viewport keeps the geometry from before the drag.
-            updateFloat()
-          })
-        : { observe() {}, disconnect() {} }
-    ro.observe(table)
-    ro.observe(wrap)
-    cleanups.push(() => ro.disconnect())
 
-    // Floating header: own top scrollbar + cloned thead. It is appended outside
-    // the document flow, so explicitly copy lang and editor text context in CSS.
-    const floatEl = document.createElement('div')
-    floatEl.className = 'km-float-header'
-    floatEl.setAttribute('aria-hidden', 'true')
-    const hostLang = host.getAttribute('lang')
-    if (hostLang) floatEl.setAttribute('lang', hostLang)
-
-    const fTop = document.createElement('div')
-    fTop.className = 'km-float-scrolltop'
-    const fTopInner = document.createElement('div')
-    fTopInner.className = 'km-table-scrolltop-inner'
-    fTop.appendChild(fTopInner)
-
-    const fscroll = document.createElement('div')
-    fscroll.className = 'km-float-header-scroll'
-    cloneTable = document.createElement('table')
-    cloneTable.className = table.className
-    cloneThead = thead.cloneNode(true)
-    cloneTable.appendChild(cloneThead)
-    fscroll.appendChild(cloneTable)
-    floatEl.append(fTop, fscroll)
-    ;(host.closest('.pane-center') || document.body).appendChild(floatEl)
-    addH(fTop, true)
-    addH(fscroll, false)
-    cleanups.push(() => floatEl.remove())
-
-    cloneThead.querySelectorAll('.km-filter-btn').forEach((button) => {
-      const onClick = (event) => {
-        event.stopPropagation()
-        onFilterClick?.(button)
-      }
-      button.addEventListener('click', onClick)
-      cleanups.push(() => button.removeEventListener('click', onClick))
-    })
-    const liveHeaderForClone = (clonedTh) => {
-      const ci = clonedTh?.getAttribute('data-ci')
-      if (ci == null) return null
-      return liveHeaders.find((th) => th.getAttribute('data-ci') === ci) || null
+    let preparedWidth = -1
+    const prepare = (force = false) => {
+      const width = wrap.clientWidth
+      if (!force && width === preparedWidth) return
+      preparedWidth = width
+      syncTopWidth()
     }
-    const isHeaderControl = (target) =>
-      target.closest?.('.km-filter-btn, .km-col-hide-btn, .km-col-resize')
-    const onCloneClick = (event) => {
-      if (isHeaderControl(event.target)) return
-      const clonedTh = event.target.closest('th')
-      const liveTh = liveHeaderForClone(clonedTh)
-      if (!liveTh) return
-      onHeaderClick?.(liveTh, clonedTh, event)
-      syncSelection()
-    }
-    const onCloneContextMenu = (event) => {
-      const clonedTh = event.target.closest('th')
-      const liveTh = liveHeaderForClone(clonedTh)
-      if (!liveTh) return
-      onHeaderContextMenu?.(liveTh, clonedTh, event)
-      syncSelection()
-    }
-    const onCloneDoubleClick = (event) => {
-      if (event.target.closest('.km-filter-btn, .km-col-hide-btn, .km-col-resize')) return
-      const clonedTh = event.target.closest('th')
-      const liveTh = liveHeaderForClone(clonedTh)
-      if (liveTh) onHeaderEdit?.(liveTh, clonedTh, event)
-    }
-    cloneThead.addEventListener('click', onCloneClick)
-    cloneThead.addEventListener('contextmenu', onCloneContextMenu)
-    cloneThead.addEventListener('dblclick', onCloneDoubleClick)
-    cleanups.push(() => cloneThead.removeEventListener('click', onCloneClick))
-    cleanups.push(() => cloneThead.removeEventListener('contextmenu', onCloneContextMenu))
-    cleanups.push(() => cloneThead.removeEventListener('dblclick', onCloneDoubleClick))
 
     const syncContent = () => {
+      if (activeController !== controller || !cloneThead) return
       const original = thead.querySelectorAll('th')
       const clone = cloneThead.querySelectorAll('th')
       original.forEach((th, i) => {
@@ -618,20 +709,27 @@ export function enhanceKeepTables(
       refreshLabels()
     }
 
-    syncWidths = () => {
-      cloneTable.style.width = table.offsetWidth + 'px'
-      fTopInner.style.width = table.scrollWidth + 'px'
-      const original = thead.querySelectorAll('th')
+    const readFloatWidths = () => ({
+      tableWidth: table.offsetWidth,
+      scrollWidth: table.scrollWidth,
+      headerWidths: liveHeaders.map((th) => th.offsetWidth)
+    })
+    const applyFloatWidths = ({ tableWidth, scrollWidth, headerWidths }) => {
+      if (activeController !== controller || !cloneThead) return
+      floatTable.style.width = tableWidth + 'px'
+      floatTopInner.style.width = scrollWidth + 'px'
       const clone = cloneThead.querySelectorAll('th')
-      original.forEach((th, i) => {
+      headerWidths.forEach((width, i) => {
         if (!clone[i]) return
-        const px = th.offsetWidth + 'px'
+        const px = width + 'px'
         clone[i].style.width = px
         clone[i].style.minWidth = px
         clone[i].style.maxWidth = px
       })
     }
+    syncWidths = () => applyFloatWidths(readFloatWidths())
     const syncActive = () => {
+      if (activeController !== controller || !cloneThead) return
       const original = thead.querySelectorAll('.km-filter-btn')
       const clone = cloneThead.querySelectorAll('.km-filter-btn')
       original.forEach((button, i) => {
@@ -639,6 +737,7 @@ export function enhanceKeepTables(
       })
     }
     syncSelection = () => {
+      if (activeController !== controller || !cloneThead) return
       const original = thead.querySelectorAll('th')
       const clone = cloneThead.querySelectorAll('th')
       original.forEach((th, i) => {
@@ -648,7 +747,9 @@ export function enhanceKeepTables(
       })
     }
 
-    const hideFloat = () => floatEl.classList.remove('km-visible')
+    const hideFloat = () => {
+      if (activeController === controller) hideSharedFloat()
+    }
     updateFloat = () => {
       const scrollerRect = scroller
         ? scroller.getBoundingClientRect()
@@ -662,23 +763,39 @@ export function enhanceKeepTables(
         tableRect.top < scrollerRect.bottom
       if (!show) {
         hideFloat()
-        return
+        return false
       }
-      syncWidths()
-      syncActive()
-      syncSelection()
+      // Batch every geometry read before replacing the shared clone. Reading live
+      // widths after that DOM write forced a full-document layout on each sticky
+      // table transition in reports containing hundreds of tables.
+      const widths = readFloatWidths()
       const zoom = parseFloat(getComputedStyle(host).getPropertyValue('--editor-zoom')) || 1
       const wrapRect = wrap.getBoundingClientRect()
+      const wrapWidth = wrap.clientWidth
+      const wrapLeft = wrap.clientLeft
+      const wrapScrollLeft = wrap.scrollLeft
+      preparedWidth = wrapWidth
+      topInner.style.width = widths.scrollWidth + 'px'
+      topBar.classList.toggle('km-hidden', widths.scrollWidth <= wrapWidth + 1)
+      activateFloat(controller)
+      applyFloatWidths(widths)
+      syncActive()
+      syncSelection()
       floatEl.style.top = topOffset / zoom + 'px'
-      floatEl.style.left = wrapRect.left / zoom + wrap.clientLeft + 'px'
-      floatEl.style.width = wrap.clientWidth + 'px'
-      fTop.classList.toggle('km-hidden', table.scrollWidth <= wrap.clientWidth + 1)
+      floatEl.style.left = wrapRect.left / zoom + wrapLeft + 'px'
+      floatEl.style.width = wrapWidth + 'px'
+      floatTop.classList.toggle('km-hidden', widths.scrollWidth <= wrapWidth + 1)
       const wasVisible = floatEl.classList.contains('km-visible')
       floatEl.classList.add('km-visible')
       if (!wasVisible) {
-        fscroll.scrollLeft = wrap.scrollLeft
-        fTop.scrollLeft = wrap.scrollLeft
+        floatScroll.scrollLeft = wrapScrollLeft
+        floatTop.scrollLeft = wrapScrollLeft
       }
+      return true
+    }
+
+    const onFloatActivated = () => {
+      refreshLabels()
     }
 
     // `scrollIntoView({ block: 'nearest' })` only knows about the editor's
@@ -705,12 +822,13 @@ export function enhanceKeepTables(
 
     controller.hide = hideFloat
     controller.update = updateFloat
+    controller.prepare = prepare
+    controller.onFloatActivated = onFloatActivated
     controller.syncContent = syncContent
     controller.syncSelection = syncSelection
     controller.revealCell = revealCell
 
     wireHeaderControls(thead)
-    wireHeaderControls(cloneThead)
     if (hasInitialColumnOverrides) {
       // Restored manual widths/hidden columns must be replayed onto the new DOM.
       applyColumnLayout()
@@ -719,20 +837,114 @@ export function enhanceKeepTables(
       // state used to toggle a class on every th/td before reading scrollWidth,
       // turning a no-op into a full-table style/layout pass on giant tables.
       refreshLabels()
-      syncTopWidth()
-      syncWidths()
-      updateFloat()
     }
   })
 
+  // Reports made of hundreds of short tables retain a large live DOM even after
+  // progressive rendering finishes. Let Chromium skip layout/paint for offscreen
+  // table interiors, but only after measuring every completed frame. Applying
+  // containment to the outer Markdown block changes margin collapsing and shifts
+  // the document; the table frame keeps those block-level metrics untouched.
+  if (controllers.size >= TABLE_VIEWPORT_CONTAINMENT_THRESHOLD) {
+    const frames = [...controllers.values()].map((controller) => controller.frame)
+    const heights = frames.map((frame) => frame.getBoundingClientRect().height)
+    frames.forEach((frame, index) => {
+      const height = heights[index]
+      if (!(height > 0)) return
+      frame.style.containIntrinsicBlockSize = `auto ${height}px`
+      frame.style.contentVisibility = 'auto'
+    })
+    host.dataset.kmTableViewportContainment = 'true'
+    cleanups.push(() => {
+      delete host.dataset.kmTableViewportContainment
+    })
+  }
+
+  const prepareEventTable = (event) => {
+    const frame = event.target.closest?.('.km-table-frame')
+    if (frame) controllerByFrame.get(frame)?.prepare()
+  }
+  host.addEventListener('mouseover', prepareEventTable)
+  host.addEventListener('focusin', prepareEventTable)
+  cleanups.push(() => host.removeEventListener('mouseover', prepareEventTable))
+  cleanups.push(() => host.removeEventListener('focusin', prepareEventTable))
+
+  const onFloatHorizontalScroll = (event) => {
+    activeController?.syncHorizontal(event.currentTarget)
+  }
+  floatTop.addEventListener('scroll', onFloatHorizontalScroll, { passive: true })
+  floatScroll.addEventListener('scroll', onFloatHorizontalScroll, { passive: true })
+  cleanups.push(() => floatTop.removeEventListener('scroll', onFloatHorizontalScroll))
+  cleanups.push(() => floatScroll.removeEventListener('scroll', onFloatHorizontalScroll))
+
+  const controllerAtViewportTop = () => {
+    if (typeof document.elementsFromPoint !== 'function') return null
+    const scrollerRect = scroller
+      ? scroller.getBoundingClientRect()
+      : { top: 0, right: window.innerWidth, bottom: window.innerHeight, left: 0 }
+    const hostRect = host.getBoundingClientRect()
+    const left = Math.max(scrollerRect.left + 1, hostRect.left + 1)
+    const right = Math.min(scrollerRect.right - 1, hostRect.right - 1)
+    const x =
+      Number.isFinite(left + right) && right >= left
+        ? (left + right) / 2
+        : (scrollerRect.left + scrollerRect.right) / 2
+    const y = Math.min(scrollerRect.bottom - 1, scrollerRect.top + 2)
+    const elements = document.elementsFromPoint(x, y)
+    for (const element of elements) {
+      const frame = element.closest?.('.km-table-frame')
+      const controller = frame && controllerByFrame.get(frame)
+      if (controller) return controller
+    }
+    return null
+  }
+
+  const updateNow = () => {
+    updateRaf = 0
+    if (typeof document.elementsFromPoint !== 'function') {
+      // DOM test environments do not implement hit testing. Keep the fallback
+      // deterministic there; Chromium always takes the O(1) path above.
+      for (const controller of controllers.values()) {
+        if (controller.update()) return
+      }
+      hideSharedFloat()
+      return
+    }
+    const controller = controllerAtViewportTop()
+    if (!controller) {
+      hideSharedFloat()
+      return
+    }
+    if (!controller.update()) hideSharedFloat()
+  }
+  const scheduleUpdate = () => {
+    if (updateRaf) return
+    updateRaf = requestAnimationFrame(updateNow)
+  }
+
+  // A single observer follows the writing surface. Sidebar/split transitions may
+  // emit many resize notifications, but each callback now touches only the active
+  // table instead of remeasuring every table in the document.
+  const resizeObserver =
+    typeof ResizeObserver === 'function'
+      ? new ResizeObserver(() => {
+          updateNow()
+        })
+      : null
+  resizeObserver?.observe(host)
+  if (scroller && scroller !== host) resizeObserver?.observe(scroller)
+  if (resizeObserver) cleanups.push(() => resizeObserver.disconnect())
+
+  updateNow()
+
   return {
-    update: () => controllers.forEach((controller) => controller.update()),
+    update: scheduleUpdate,
     hide: () => {
       closeColumnPop()
-      controllers.forEach((controller) => controller.hide())
+      hideSharedFloat()
     },
-    refreshContent: () => controllers.forEach((controller) => controller.syncContent()),
-    refreshSelection: () => controllers.forEach((controller) => controller.syncSelection()),
+    refreshContent: () => activeController?.syncContent(),
+    refreshSelection: () => activeController?.syncSelection(),
     refreshLabels: (nextT) => {
       if (typeof nextT === 'function') translate = nextT
       closeColumnPop()
@@ -751,8 +963,12 @@ export function enhanceKeepTables(
     destroy: () => {
       closeColumnPop()
       activeResizeCleanup?.()
+      if (updateRaf) cancelAnimationFrame(updateRaf)
       ;[...cleanups].reverse().forEach((fn) => fn())
       controllers.clear()
+      controllerByFrame.clear()
+      activeController = null
+      cloneThead = null
     }
   }
 }

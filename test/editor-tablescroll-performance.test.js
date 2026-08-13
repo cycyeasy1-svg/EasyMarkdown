@@ -2,14 +2,14 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { enhanceKeepTables } from '../src/renderer/src/components/editor-tablescroll.js'
 
-function makeTable({ rows = 8, columns = 4 } = {}) {
-  const host = document.createElement('div')
+function makeTable({ rows = 8, columns = 4, host: targetHost = null, tableIndex = 0 } = {}) {
+  const host = targetHost || document.createElement('div')
   host.className = 'km-doc'
   const wrap = document.createElement('div')
   wrap.className = 'km-table-wrap'
   const table = document.createElement('table')
   table.className = 'km-table'
-  table.dataset.ti = '0'
+  table.dataset.ti = String(tableIndex)
 
   const colgroup = document.createElement('colgroup')
   for (let ci = 0; ci < columns; ci++) {
@@ -43,8 +43,51 @@ function makeTable({ rows = 8, columns = 4 } = {}) {
   table.append(colgroup, thead, tbody)
   wrap.appendChild(table)
   host.appendChild(wrap)
-  document.body.appendChild(host)
+  if (!targetHost) document.body.appendChild(host)
   return { host, wrap, table, thead }
+}
+
+function mockStickyTable({ host, wrap, table, thead }, { left = 280, width = 520 } = {}) {
+  Object.defineProperties(wrap, {
+    clientWidth: { configurable: true, get: () => width },
+    clientLeft: { configurable: true, get: () => 1 }
+  })
+  Object.defineProperties(table, {
+    offsetWidth: { configurable: true, get: () => 720 },
+    scrollWidth: { configurable: true, get: () => 720 }
+  })
+  vi.spyOn(host, 'getBoundingClientRect').mockReturnValue({
+    top: 60,
+    bottom: 700,
+    left: 0,
+    right: 900,
+    width: 900,
+    height: 640
+  })
+  vi.spyOn(thead, 'getBoundingClientRect').mockReturnValue({
+    top: 20,
+    bottom: 52,
+    left,
+    right: left + width,
+    width,
+    height: 32
+  })
+  vi.spyOn(table, 'getBoundingClientRect').mockReturnValue({
+    top: 20,
+    bottom: 900,
+    left,
+    right: left + 720,
+    width: 720,
+    height: 880
+  })
+  vi.spyOn(wrap, 'getBoundingClientRect').mockReturnValue({
+    top: 20,
+    bottom: 900,
+    left,
+    right: left + width,
+    width,
+    height: 880
+  })
 }
 
 afterEach(() => {
@@ -61,7 +104,9 @@ describe('keep-table initialization performance guards', () => {
 
     const controls = enhanceKeepTables(host, host)
 
-    expect(toggles.flatMap((spy) => spy.mock.calls).filter(([name]) => name === 'km-col-hidden')).toHaveLength(0)
+    expect(
+      toggles.flatMap((spy) => spy.mock.calls).filter(([name]) => name === 'km-col-hidden')
+    ).toHaveLength(0)
     expect(getComputedStyle.mock.calls.some(([element]) => element === host)).toBe(false)
     controls.destroy()
   })
@@ -74,13 +119,23 @@ describe('keep-table initialization performance guards', () => {
       }
     })
 
-    expect([...table.querySelectorAll('th[data-ci="1"], td[data-ci="1"]')].every((cell) => cell.classList.contains('km-col-hidden'))).toBe(true)
-    expect([...table.querySelectorAll('th[data-ci="0"], td[data-ci="0"]')].some((cell) => cell.classList.contains('km-col-hidden'))).toBe(false)
+    expect(
+      [...table.querySelectorAll('th[data-ci="1"], td[data-ci="1"]')].every((cell) =>
+        cell.classList.contains('km-col-hidden')
+      )
+    ).toBe(true)
+    expect(
+      [...table.querySelectorAll('th[data-ci="0"], td[data-ci="0"]')].some((cell) =>
+        cell.classList.contains('km-col-hidden')
+      )
+    ).toBe(false)
     controls.destroy()
   })
 
   it('bridges floating-header clicks and context menus to the live header', () => {
-    const { host, table } = makeTable({ rows: 2, columns: 3 })
+    const fixture = makeTable({ rows: 2, columns: 3 })
+    const { host, table } = fixture
+    mockStickyTable(fixture)
     const onHeaderClick = vi.fn((liveTh) => liveTh.classList.add('km-cell-selected'))
     const onHeaderContextMenu = vi.fn((liveTh, _clonedTh, event) => {
       liveTh.classList.add('km-cell-selected')
@@ -114,6 +169,74 @@ describe('keep-table initialization performance guards', () => {
     expect(menuEvent.defaultPrevented).toBe(true)
     expect(clonedTh.classList.contains('km-cell-selected')).toBe(true)
     controls.destroy()
+  })
+
+  it('shares one floating layer and one resize observer across many offscreen tables', () => {
+    let resizeObservers = 0
+    class ResizeObserverMock {
+      constructor() {
+        resizeObservers++
+      }
+      observe() {}
+      disconnect() {}
+    }
+    vi.stubGlobal('ResizeObserver', ResizeObserverMock)
+
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+    let tableWidthReads = 0
+    for (let tableIndex = 0; tableIndex < 24; tableIndex++) {
+      const { table } = makeTable({
+        host,
+        tableIndex,
+        rows: 3,
+        columns: 4
+      })
+      Object.defineProperty(table, 'scrollWidth', {
+        configurable: true,
+        get: () => {
+          tableWidthReads++
+          return 720
+        }
+      })
+    }
+
+    const controls = enhanceKeepTables(host, host)
+
+    expect(document.querySelectorAll('.km-float-header')).toHaveLength(1)
+    expect(resizeObservers).toBe(1)
+    expect(tableWidthReads).toBe(0)
+    expect(host.dataset.kmTableViewportContainment).toBeUndefined()
+    controls.destroy()
+  })
+
+  it('contains completed table frames in table-heavy documents without touching block flow', () => {
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+    for (let tableIndex = 0; tableIndex < 80; tableIndex++) {
+      makeTable({ host, tableIndex, rows: 1, columns: 2 })
+    }
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({
+      top: 0,
+      bottom: 46.5,
+      left: 0,
+      right: 600,
+      width: 600,
+      height: 46.5
+    })
+
+    const controls = enhanceKeepTables(host, host)
+    const frames = [...host.querySelectorAll('.km-table-frame')]
+
+    expect(host.dataset.kmTableViewportContainment).toBe('true')
+    expect(frames).toHaveLength(80)
+    expect(frames.every((frame) => frame.style.contentVisibility === 'auto')).toBe(true)
+    expect(frames.every((frame) => frame.style.containIntrinsicBlockSize === 'auto 46.5px')).toBe(
+      true
+    )
+
+    controls.destroy()
+    expect(host.dataset.kmTableViewportContainment).toBeUndefined()
   })
 
   it('resizes and repositions a visible floating header when its wrapper changes', () => {

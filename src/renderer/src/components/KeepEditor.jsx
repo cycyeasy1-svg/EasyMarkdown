@@ -164,6 +164,20 @@ function KeepEditor({
     filterStateRef.current = {}
     columnStateRef.current = {}
     historyRef.current = { undo: [], redo: [] }
+    let lineStartOffsets = []
+    const rebuildLineStartOffsets = () => {
+      let offset = 0
+      lineStartOffsets = rawLinesRef.current.map((line) => {
+        const start = offset
+        offset += line.length + 1
+        return start
+      })
+    }
+    const offsetAtLine = (line) => {
+      const index = Math.max(0, Math.min(lineStartOffsets.length - 1, Number(line) || 0))
+      return lineStartOffsets[index] || 0
+    }
+    rebuildLineStartOffsets()
 
     const setDraftActive = (active) => {
       if (destroyed) return
@@ -195,6 +209,7 @@ function KeepEditor({
         reportHistory()
       }
       rawLinesRef.current = next
+      rebuildLineStartOffsets()
       viewLinesRef.current = toViewLines(next)
       if (emit) emitChange()
       if (record) onCommitRef.current?.(entry)
@@ -219,6 +234,7 @@ function KeepEditor({
       historyRef.current.redo = []
       reportHistory()
       rawLinesRef.current.splice(entry.start, entry.before.length, ...entry.after)
+      rebuildLineStartOffsets()
       viewLinesRef.current.splice(entry.start, entry.before.length, ...toViewLines(entry.after))
       if (emit) emitChange()
       onCommitRef.current?.(entry)
@@ -2417,12 +2433,42 @@ function KeepEditor({
       if (!scroller) return null
       if (ensureAll) flushRemaining()
       const scrollerTop = scroller.getBoundingClientRect().top + 8
-      const blocks = [...host.querySelectorAll('.km-block[data-bi]')]
-      const visible =
-        blocks.find((block) => block.getBoundingClientRect().bottom >= scrollerTop) || blocks.at(-1)
+      let visible = null
+      let hit = null
+      if (typeof document.elementsFromPoint === 'function') {
+        const scrollerRect = scroller.getBoundingClientRect()
+        const hostRect = host.getBoundingClientRect()
+        const left = Math.max(scrollerRect.left + 1, hostRect.left + 1)
+        const right = Math.min(scrollerRect.right - 1, hostRect.right - 1)
+        const x = right >= left ? (left + right) / 2 : (scrollerRect.left + scrollerRect.right) / 2
+        for (const inset of [8, 24, 48]) {
+          const y = Math.min(scrollerRect.bottom - 1, scrollerRect.top + inset)
+          const element = document.elementsFromPoint(x, y).find((candidate) => {
+            const block = candidate.closest?.('.km-block[data-bi]')
+            return block && host.contains(block)
+          })
+          const block = element?.closest?.('.km-block[data-bi]')
+          if (block) {
+            visible = block
+            hit = element
+            break
+          }
+        }
+      }
+      if (!visible) {
+        const blocks = [...host.querySelectorAll('.km-block[data-bi]')]
+        visible =
+          blocks.find((block) => block.getBoundingClientRect().bottom >= scrollerTop) ||
+          blocks.at(-1)
+      }
       const bi = Number(visible?.getAttribute('data-bi'))
       const sourceBlock = Number.isFinite(bi) ? blocksRef.current[bi] : null
       if (sourceBlock?.type === 'table' && visible) {
+        const hitLine = Number(
+          hit?.closest?.('[data-line]')?.getAttribute('data-line') ||
+            hit?.querySelector?.('[data-line]')?.getAttribute('data-line')
+        )
+        if (Number.isFinite(hitLine)) return offsetAtLine(hitLine)
         const thead = visible.querySelector('thead')
         const theadRect = thead?.getBoundingClientRect()
         // A Keep table is one block, but its cells already carry exact source
@@ -2439,11 +2485,11 @@ function KeepEditor({
             rows.at(-1)
           const rowLine = Number(row?.querySelector('[data-line]')?.getAttribute('data-line'))
           if (Number.isFinite(rowLine)) {
-            return lineStartOffset(rawLinesRef.current.join('\n'), rowLine)
+            return offsetAtLine(rowLine)
           }
         }
       }
-      return sourceBlock ? lineStartOffset(rawLinesRef.current.join('\n'), sourceBlock.start) : 0
+      return sourceBlock ? offsetAtLine(sourceBlock.start) : 0
     }
     const restoreMarkdownOffset = (rawOffset, follow = false) => {
       flushRemaining()
@@ -2695,6 +2741,7 @@ function KeepEditor({
       historyRef.current[to] = pushKeepHistory(historyRef.current[to], entry)
       reportHistory()
       rawLinesRef.current = applyKeepHistoryEntry(rawLinesRef.current, entry, direction)
+      rebuildLineStartOffsets()
       viewLinesRef.current = toViewLines(rawLinesRef.current)
       // Structural table changes can invalidate column/filter indices. Clearing
       // preview-only table state makes every history step deterministic.
@@ -2803,7 +2850,7 @@ function KeepEditor({
       selectionLineRange,
       markdownOffsetFromSelection: () => {
         const lines = selectionLineRange()
-        return lines ? lineStartOffset(rawLinesRef.current.join('\n'), lines.start) : null
+        return lines ? offsetAtLine(lines.start) : null
       },
       markdownOffsetFromViewportTop,
       navigationOffsetFromViewportTop: () => markdownOffsetFromViewportTop(false),
