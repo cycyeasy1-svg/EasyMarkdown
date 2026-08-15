@@ -35,6 +35,33 @@ export function materializeCopiedSoftBreaks(root) {
   })
 }
 
+export function materializeCopiedCodeLines(root) {
+  let changed = false
+  root.querySelectorAll('code.hm-code-lines').forEach((code) => {
+    const rows = [...code.querySelectorAll(':scope > .hm-code-line')]
+    if (!rows.length) return
+    const fragment = document.createDocumentFragment()
+    rows.forEach((row, index) => {
+      const text = row.querySelector('.hm-code-line-text')?.textContent ?? row.textContent ?? ''
+      fragment.appendChild(document.createTextNode(text))
+      if (index < rows.length - 1) fragment.appendChild(document.createTextNode('\n'))
+    })
+    code.replaceChildren(fragment)
+    changed = true
+  })
+
+  // A range cloned from the middle of a code block may contain rows without
+  // their parent <code>. Materialize those fragments too so rich paste keeps
+  // the same line boundaries while the generated CSS counters stay excluded.
+  const looseRows = [...root.querySelectorAll('.hm-code-line')]
+  looseRows.forEach((row, index) => {
+    const text = row.querySelector('.hm-code-line-text')?.textContent ?? row.textContent ?? ''
+    row.replaceWith(document.createTextNode(text + (index < looseRows.length - 1 ? '\n' : '')))
+    changed = true
+  })
+  return changed
+}
+
 export function copiedPlainText(root, fallback = '') {
   if (!root.querySelector('br')) return fallback
   const holder = document.createElement('div')

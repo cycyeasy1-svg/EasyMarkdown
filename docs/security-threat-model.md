@@ -1,8 +1,8 @@
 ---
-doc_version: 1
+doc_version: 2
 doc_status: active
 doc_owner: maintainers
-last_verified: 2026-08-09
+last_verified: 2026-08-15
 ---
 
 # EasyMarkdown セキュリティ脅威モデル
@@ -54,7 +54,7 @@ Main process / filesystem / shell / clipboard / print / update
 | T-01 | Markdown／raw HTML による script 実行 | renderer XSS、IPC 悪用 | raw HTML sanitize、renderer CSP、Node 無効、sandbox | sanitizer regression test を継続 |
 | T-02 | iframe／child frame から privileged IPC | 任意 file read／write／delete | main-frame identity、URL、webContents の三重確認 | custom protocol 移行を検討 |
 | T-03 | relative path／NUL／restricted root を IPC に送信 | CWD 誤解決、system tree watch、広範囲操作 | `validateIpcArgs`、absolute path、restricted root policy | workspace capability 単位の allowlist |
-| T-04 | malicious link／scheme | OS handler の誤起動 | URL allowlist、navigation deny、window-open deny | allowlist 変更時に test 必須 |
+| T-04 | malicious link／scheme／local attachment | OS handler による executable 起動、renderer からの任意 file open | URL allowlist、navigation deny、window-open deny、main-side local path resolution、regular file check、dangerous extension deny | allowlist／attachment policy 変更時に test 必須 |
 | T-05 | print HTML が hidden window で active content を実行 | hidden renderer abuse、remote load | sandbox、Node 無効、`webSecurity: true`、CSP、file image の data URL 化 | print regression の自動化範囲拡大 |
 | T-06 | custom theme CSS の traversal／remote resource | local file disclosure、UI spoofing、tracking | theme root containment、`..` reject、permission handshake | remote `url()` の block／warning を検討 |
 | T-07 | attachment／paste image の path／name abuse | overwrite、assets 外 write | absolute source path、generated non-clobbering name、`COPYFILE_EXCL` | file size／type policy は UX と合わせて定義 |
@@ -73,6 +73,7 @@ Main process / filesystem / shell / clipboard / print / update
 5. 複雑な payload は feature module で schema／size／enum を検証する。
 6. 不正 sender は処理せず、不正 payload は明示的に失敗させる。
 7. channel の正常系、不正 sender、不正 payload、cleanup を unit test する。
+8. Local link は renderer が解決した absolute target を信用せず、main が href と absolute base document path から再解決する。NUL、oversize、directory、存在しない target、executable／script／shortcut は `shell.openPath` 前に拒否する。
 
 ## 5. Content／window security contract
 

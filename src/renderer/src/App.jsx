@@ -119,6 +119,10 @@ import {
   stepNavigationHistory
 } from './navigation-history.js'
 import {
+  readDocumentPosition,
+  writeDocumentPosition
+} from './document-positions.js'
+import {
   buildMruTabOrder,
   createClosedTabEntry,
   insertRestoredTab,
@@ -514,6 +518,10 @@ const SourceEditorPane = memo(function SourceEditorPane({
       syncSourceGutters()
       el.dispatchEvent(new CustomEvent('hm:source-layout'))
       if (options.userNavigation) markInteraction('selection')
+      if (options.userNavigation) {
+        onViewportChange?.(safeOffset)
+        if (options.placeCaret) onSelectionChange?.(safeOffset)
+      }
       applied = true
       return true
     }
@@ -528,6 +536,8 @@ const SourceEditorPane = memo(function SourceEditorPane({
     displayOffsetFromFull,
     fullLinesNow,
     markInteraction,
+    onSelectionChange,
+    onViewportChange,
     sourceMetrics.lineHeight,
     sourceMetrics.padTop,
     syncSourceGutters
@@ -959,6 +969,9 @@ export default function App({ safeMode = false, onExitSafeMode = null }) {
   const [keepDraftIds, setKeepDraftIds] = useState(() => new Set())
   const keepDraftIdsRef = useRef(keepDraftIds)
   keepDraftIdsRef.current = keepDraftIds
+  const [richPendingIds, setRichPendingIds] = useState(() => new Set())
+  const richPendingIdsRef = useRef(richPendingIds)
+  richPendingIdsRef.current = richPendingIds
   const keepCommitRef = useRef(() => {})
   const jumpToTabLineRef = useRef(() => {})
 
@@ -997,10 +1010,21 @@ export default function App({ safeMode = false, onExitSafeMode = null }) {
   // compares against this (not the previous effect run) to skip no-op writes,
   // so a pending real change can never be cancelled by a later equal snapshot.
   const lastWrittenSessionRef = useRef(null)
+  const flushEditorsRef = useRef(() => {})
+  const flushTabMarkdownRef = useRef(() => null)
+  const captureDocumentPositionsRef = useRef(() => {})
   // Write the latest snapshot now (close / pagehide / debounce all funnel here,
   // so the persisted shape lives in exactly one place).
   const flushSession = useCallback(() => {
     if (safeMode || !sessionRef.current) return
+    flushEditorsRef.current()
+    captureDocumentPositionsRef.current()
+    const liveTabs = tabsRef.current
+    sessionRef.current = {
+      ...sessionRef.current,
+      ...buildSessionTabs(liveTabs),
+      activePath: liveTabs.find((tab) => tab.id === activeIdRef.current)?.path || null
+    }
     try {
       localStorage.setItem(LS, JSON.stringify(sessionRef.current))
       lastWrittenSessionRef.current = sessionRef.current
@@ -1017,6 +1041,8 @@ export default function App({ safeMode = false, onExitSafeMode = null }) {
   const hibernatedEditorStateRef = useRef({})
   const editorViewportStateRef = useRef({})
   const editorViewportRafsRef = useRef(new Map())
+  const documentPositionTimersRef = useRef(new Map())
+  const restoredDocumentPositionIdsRef = useRef(new Set())
   // Tab ids the user explicitly chose to render richly despite being "heavy"
   // (would otherwise open in the fast plain-text editor to avoid a long freeze).
   const [richForced, setRichForced] = useState(() => new Set())
@@ -1082,7 +1108,7 @@ export default function App({ safeMode = false, onExitSafeMode = null }) {
         x.id,
         x.title,
         x.path || '',
-        x.content !== x.savedContent || keepDraftIds.has(x.id),
+        x.content !== x.savedContent || keepDraftIds.has(x.id) || richPendingIds.has(x.id),
         !!x.pinned,
         !!x.preview
       ])
@@ -1094,7 +1120,10 @@ export default function App({ safeMode = false, onExitSafeMode = null }) {
         id: x.id,
         title: x.title,
         path: x.path,
-        dirty: x.content !== x.savedContent || keepDraftIds.has(x.id),
+        dirty:
+          x.content !== x.savedContent ||
+          keepDraftIds.has(x.id) ||
+          richPendingIds.has(x.id),
         pinned: !!x.pinned,
         preview: !!x.preview
       })),
@@ -1196,6 +1225,13 @@ export default function App({ safeMode = false, onExitSafeMode = null }) {
         editorViewportRafsRef.current.delete(id)
       }
     }
+    for (const [id, timer] of documentPositionTimersRef.current) {
+      if (!live.has(id)) {
+        clearTimeout(timer)
+        documentPositionTimersRef.current.delete(id)
+        restoredDocumentPositionIdsRef.current.delete(id)
+      }
+    }
     editorResidencyMruRef.current = editorResidencyMruRef.current.filter((id) => live.has(id))
     // Forget mount records for closed tabs (so the Set doesn't grow unbounded).
     setMountedIds((prev) => {
@@ -1239,6 +1275,7 @@ export default function App({ safeMode = false, onExitSafeMode = null }) {
     setSourceModeIds(retainLiveIds)
     setSourceMountedIds(retainLiveIds)
     setKeepDraftIds(retainLiveIds)
+    setRichPendingIds(retainLiveIds)
     setKeepHistoryState((prev) => {
       let changed = false
       const next = {}
@@ -1300,6 +1337,8 @@ export default function App({ safeMode = false, onExitSafeMode = null }) {
     if (sourceSplitPreviewRafRef.current) cancelAnimationFrame(sourceSplitPreviewRafRef.current)
     for (const raf of editorViewportRafsRef.current.values()) cancelAnimationFrame(raf)
     editorViewportRafsRef.current.clear()
+    for (const timer of documentPositionTimersRef.current.values()) clearTimeout(timer)
+    documentPositionTimersRef.current.clear()
   }, [])
 
   useEffect(() => {
@@ -1522,7 +1561,11 @@ export default function App({ safeMode = false, onExitSafeMode = null }) {
   const tRef = useRef(t)
   tRef.current = t
   const hasUnsavedTab = useCallback(
-    (tab) => !!tab && (tab.content !== tab.savedContent || keepDraftIdsRef.current.has(tab.id)),
+    (tab) => !!tab && (
+      tab.content !== tab.savedContent ||
+      keepDraftIdsRef.current.has(tab.id) ||
+      richPendingIdsRef.current.has(tab.id)
+    ),
     []
   )
   const promotePreviewTab = useCallback((id) => {
@@ -1798,6 +1841,106 @@ export default function App({ safeMode = false, onExitSafeMode = null }) {
   }, [diagnoseLinksForTab])
   stepProblemRef.current = stepMarkdownProblem
 
+  const captureDocumentPosition = useCallback((id) => {
+    const tab = tabsRef.current.find((item) => item.id === id)
+    if (!tab?.path || tab.loading) return false
+    // Never bind an offset from an unsaved document shape to the on-disk
+    // fingerprint. If those edits are discarded, that offset may point at
+    // unrelated text after restart; the last clean position remains safer.
+    if (
+      tab.content !== tab.savedContent ||
+      keepDraftIdsRef.current.has(id) ||
+      richPendingIdsRef.current.has(id)
+    )
+      return false
+
+    let caret = null
+    let viewport = null
+    if (sourceModeIdsRef.current.has(id)) {
+      const source = sourceRef.current
+      const sourceId = source?.closest?.('.source-editor-wrap')?.dataset?.tabId
+      if (sourceId === id) {
+        const sourceApi = source.__hmSourceApi
+        caret = sourceApi?.getFullSelection?.()?.end
+        viewport = sourceApi?.getViewportOffset?.()
+      }
+    } else {
+      const api = editorApis.current[id]
+      caret = api?.markdownOffsetFromSelection?.()
+      viewport =
+        editorViewportStateRef.current[id]?.rawOffset ??
+        api?.navigationOffsetFromViewportTop?.() ??
+        api?.markdownOffsetFromViewportTop?.()
+    }
+    if (!Number.isFinite(caret) && !Number.isFinite(viewport)) return false
+    return writeDocumentPosition(localStorage, {
+      path: tab.path,
+      // A path-backed tab may have a Milkdown-normalized live representation.
+      // Fingerprint the on-disk baseline so reopening the unchanged file can
+      // still restore a best-effort Markdown offset across editor engines.
+      content: tab.savedContent ?? tab.content,
+      caret: Number.isFinite(caret) ? caret : null,
+      viewport: Number.isFinite(viewport) ? viewport : null
+    })
+  }, [])
+
+  const scheduleDocumentPositionCapture = useCallback((id, delay = 350) => {
+    if (!id) return
+    const previous = documentPositionTimersRef.current.get(id)
+    if (previous) clearTimeout(previous)
+    const timer = setTimeout(() => {
+      documentPositionTimersRef.current.delete(id)
+      captureDocumentPosition(id)
+    }, delay)
+    documentPositionTimersRef.current.set(id, timer)
+  }, [captureDocumentPosition])
+
+  const restoreDocumentPosition = useCallback((id, api, { source = false } = {}) => {
+    if (!id || restoredDocumentPositionIdsRef.current.has(id)) return false
+    const tab = tabsRef.current.find((item) => item.id === id)
+    if (!tab?.path || tab.loading) return false
+    restoredDocumentPositionIdsRef.current.add(id)
+    const position = readDocumentPosition(
+      localStorage,
+      tab.path,
+      tab.savedContent ?? tab.content
+    )
+    if (!position) return false
+
+    const apply = () => {
+      if (source) {
+        if (Number.isFinite(position.viewport)) {
+          api?.scrollToOffset?.(position.viewport, {
+            align: 'top',
+            placeCaret: false,
+            focus: false
+          })
+        }
+        if (Number.isFinite(position.caret)) {
+          api?.restoreFullSelection?.(
+            { start: position.caret, end: position.caret },
+            { focus: false }
+          )
+        }
+        return
+      }
+      if (Number.isFinite(position.caret)) api?.restoreMarkdownOffset?.(position.caret, false)
+      if (Number.isFinite(position.viewport)) {
+        api?.scrollMarkdownOffsetToTop?.(position.viewport)
+      }
+    }
+    requestAnimationFrame(() => {
+      apply()
+      requestAnimationFrame(apply)
+    })
+    setTimeout(apply, 180)
+    return true
+  }, [])
+
+  captureDocumentPositionsRef.current = () => {
+    for (const tab of tabsRef.current) captureDocumentPosition(tab.id)
+  }
+
   useEffect(() => {
     const onKeyDown = (event) => {
       if (event.key === 'F8') {
@@ -1962,7 +2105,7 @@ export default function App({ safeMode = false, onExitSafeMode = null }) {
   // two differently-shaped DOM trees still land on the same source structure.
   const toggleSource = useCallback(() => {
     const id = activeIdRef.current
-    const tab = tabsRef.current.find((item) => item.id === id)
+    const tab = flushTabMarkdownRef.current(id) || tabsRef.current.find((item) => item.id === id)
     if (!id || !tab || isPlainTextDoc(tab)) return
     if (!guardKeepDraft(id)) return
 
@@ -2146,7 +2289,7 @@ export default function App({ safeMode = false, onExitSafeMode = null }) {
 
   const requestEditorMode = useCallback((toMilkdown) => {
     const id = activeIdRef.current
-    const tab = tabsRef.current.find((t) => t.id === id)
+    const tab = flushTabMarkdownRef.current(id) || tabsRef.current.find((t) => t.id === id)
     if (!tab || isPlainTextDoc(tab)) return false
     if (!guardKeepDraft(id)) return false
     if (milkdownForcedRef.current.has(id) === toMilkdown) return true
@@ -2229,6 +2372,22 @@ export default function App({ safeMode = false, onExitSafeMode = null }) {
       clearTimeout(t2)
     }
   }, [activeId, sourceMode, sourceSplit])
+
+  useEffect(() => {
+    if (!sourceMode || !activeId) return
+    const apply = () => {
+      const source = sourceRef.current
+      const sourceId = source?.closest?.('.source-editor-wrap')?.dataset?.tabId
+      if (sourceId !== activeId || !source.__hmSourceApi) return
+      restoreDocumentPosition(activeId, source.__hmSourceApi, { source: true })
+    }
+    const raf = requestAnimationFrame(apply)
+    const timer = setTimeout(apply, 120)
+    return () => {
+      cancelAnimationFrame(raf)
+      clearTimeout(timer)
+    }
+  }, [activeId, restoreDocumentPosition, sourceMode])
 
   // Restore the preview position after leaving source mode. The preview stays
   // mounted, but a short retry covers layout work after it becomes visible.
@@ -2484,6 +2643,18 @@ export default function App({ safeMode = false, onExitSafeMode = null }) {
     setHome(false)
   }, [t])
 
+  const updateRichPendingId = useCallback((id, pending) => {
+    const previous = richPendingIdsRef.current
+    if (!!pending === previous.has(id)) return
+    const next = new Set(previous)
+    if (pending) next.add(id)
+    else next.delete(id)
+    // Close requests can arrive before React renders the state update. Keep the
+    // synchronous ref authoritative for the data-loss guard in that narrow gap.
+    richPendingIdsRef.current = next
+    setRichPendingIds(next)
+  }, [])
+
   const updateContent = useCallback((id, md, isInitial) => {
     const preserveSavedBaseline = isInitial && keepToMilkdownInitRef.current.delete(id)
     if (!isInitial) promotePreviewTab(id)
@@ -2505,7 +2676,8 @@ export default function App({ safeMode = false, onExitSafeMode = null }) {
       })
     )
     if (!isInitial) refreshFindAfterEditRef.current(id)
-  }, [promotePreviewTab])
+    if (!isInitial) updateRichPendingId(id, false)
+  }, [promotePreviewTab, updateRichPendingId])
 
   // Per-tab stable handlers for the (memoized) editor panes. Inline lambdas in
   // the editor-area map would give every mounted editor fresh props each App
@@ -2516,6 +2688,10 @@ export default function App({ safeMode = false, onExitSafeMode = null }) {
     let h = tabHandlersRef.current.get(id)
     if (!h) {
       const focusPane = (view) => {
+        const previouslyFocused = focusedTabRef.current
+        if (previouslyFocused && previouslyFocused !== id) {
+          captureDocumentPosition(previouslyFocused)
+        }
         focusedTabRef.current = id
         if (sourceSplitRef.current) {
           const sourceSide = sourceOnLeftRef.current ? 'left' : 'right'
@@ -2526,6 +2702,8 @@ export default function App({ safeMode = false, onExitSafeMode = null }) {
       }
       h = {
         onChange: (md, isInitial) => updateContent(id, md, isInitial),
+        onEditPending: (pending) => updateRichPendingId(id, pending),
+        onNavigationChange: () => scheduleDocumentPositionCapture(id),
         onSourceChange: (e) => {
           const markdown = e.target.value
           if (
@@ -2544,11 +2722,15 @@ export default function App({ safeMode = false, onExitSafeMode = null }) {
             }, 140)
           }
         },
-        onSourceViewportChange: (rawOffset) => syncSourceSplitViewport('source', id, rawOffset),
+        onSourceViewportChange: (rawOffset) => {
+          syncSourceSplitViewport('source', id, rawOffset)
+          scheduleDocumentPositionCapture(id)
+        },
         onSourceSelectionChange: (rawOffset) => {
           if (sourceSplitRef.current && sourcePreviewIdRef.current === id) {
             editorApis.current[id]?.highlightMarkdownOffset?.(rawOffset)
           }
+          scheduleDocumentPositionCapture(id)
         },
         onPreviewScroll: (e) => {
           if (e.target !== e.currentTarget) return
@@ -2568,6 +2750,7 @@ export default function App({ safeMode = false, onExitSafeMode = null }) {
                 latest.rawOffset = rawOffset
                 editorViewportStateRef.current[id] = latest
               }
+              scheduleDocumentPositionCapture(id)
             })
             editorViewportRafsRef.current.set(id, raf)
           }
@@ -2603,6 +2786,8 @@ export default function App({ safeMode = false, onExitSafeMode = null }) {
               // Reapply once after layout so that batch cannot reset the reader.
               requestAnimationFrame(restoreScrollTop)
             })
+          } else if (!sourceModeIdsRef.current.has(id)) {
+            restoreDocumentPosition(id, api)
           }
           const waiters = editorReadyWaitersRef.current.get(id)
           if (waiters) {
@@ -2713,6 +2898,7 @@ export default function App({ safeMode = false, onExitSafeMode = null }) {
   const rightPaneStyle = useMemo(() => ({ order: 3, flex: undefined }), [])
 
   const rememberClosedTabs = useCallback((closingTabs, allTabs) => {
+    for (const tab of closingTabs || []) captureDocumentPosition(tab.id)
     const closedAt = Date.now()
     const entries = (closingTabs || [])
       .filter((tab) => !tab.preview)
@@ -2737,7 +2923,7 @@ export default function App({ safeMode = false, onExitSafeMode = null }) {
     if ((closingTabs || []).some(hasUnsavedTab)) {
       fireToast(tRef.current('tab.closedDirtyPolicy'), { duration: 5000 })
     }
-  }, [hasUnsavedTab, replaceClosedTabs])
+  }, [captureDocumentPosition, hasUnsavedTab, replaceClosedTabs])
 
   const closeTab = useCallback(
     (id) => {
@@ -3250,6 +3436,10 @@ export default function App({ safeMode = false, onExitSafeMode = null }) {
     setTabs(next)
     return updated
   }, [])
+  flushTabMarkdownRef.current = flushTabMarkdown
+  flushEditorsRef.current = () => {
+    for (const id of milkdownForcedRef.current) flushTabMarkdown(id)
+  }
 
   const writeTab = useCallback(async (tab, targetPath, { notify = true } = {}) => {
     try {
@@ -6622,6 +6812,8 @@ export default function App({ safeMode = false, onExitSafeMode = null }) {
                       initialContent={tab.content}
                       docPath={tab.path}
                       onChange={h.onChange}
+                      onEditPending={h.onEditPending}
+                      onNavigationChange={h.onNavigationChange}
                       onReady={h.onReady}
                       onOpenDocLink={openDocLink}
                       keybindings={keybindings.effective}

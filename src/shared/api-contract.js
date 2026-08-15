@@ -8,7 +8,7 @@
  * @typedef {'folderWorkspace' | 'workspaceSearch' | 'watch' | 'windowControls' |
  *   'pdfExport' | 'htmlExport' | 'print' | 'spellcheck' | 'nativeMenus' |
  *   'externalShell' | 'revealInFolder' | 'splitView' | 'fileAttachments' |
- *   'localHistory' | 'diagnostics' | 'canShare'} CapabilityKey
+ *   'localHistory' | 'diagnostics' | 'localFileOpen' | 'canShare'} CapabilityKey
  * @typedef {Readonly<Record<CapabilityKey, boolean>>} CapabilityMap
  * @typedef {{
  *   platform: string,
@@ -34,6 +34,7 @@ export const CAPABILITY_KEYS = Object.freeze([
   'fileAttachments',
   'localHistory',
   'diagnostics',
+  'localFileOpen',
   'canShare'
 ])
 
@@ -107,6 +108,7 @@ export const CAPABILITY_METHODS = Object.freeze({
     'localHistoryClear'
   ]),
   diagnostics: Object.freeze(['logDiagnostic', 'exportDiagnostics']),
+  localFileOpen: Object.freeze(['openLocalPath']),
   canShare: Object.freeze(['shareFile'])
 })
 
@@ -127,6 +129,7 @@ export const DESKTOP_CAPABILITIES = Object.freeze({
   fileAttachments: true,
   localHistory: true,
   diagnostics: true,
+  localFileOpen: true,
   canShare: false
 })
 
@@ -147,6 +150,7 @@ export const MOBILE_CAPABILITIES = Object.freeze({
   fileAttachments: false,
   localHistory: false,
   diagnostics: false,
+  localFileOpen: false,
   canShare: true
 })
 

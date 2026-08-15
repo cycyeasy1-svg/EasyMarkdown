@@ -28,6 +28,7 @@
 
 import MarkdownIt from 'markdown-it'
 
+import { renderNumberedCodeBlockHtml } from '../../shared/code-lines.js'
 import { isRelativePath, resolveToFileUrl } from './components/editor-images.js'
 import {
   findRenderableBlockHtmlEnd,
@@ -112,6 +113,18 @@ function safeImgSrc(rawSrc, baseDir) {
 const md = new MarkdownIt({ html: false, linkify: true, breaks: false, typographer: false })
 md.normalizeLink = (url) => url
 md.normalizeLinkText = (text) => text
+md.validateLink = (url) => {
+  const value = String(url || '').trim()
+  if (!value) return false
+  if (/^data:image\/(?:gif|png|jpeg|webp);/i.test(value)) return true
+  if (/^(javascript|data|vbscript):/i.test(value)) return false
+  return (
+    /^(https?:|mailto:|file:)/i.test(value) ||
+    /^[a-zA-Z]:[\\/]/.test(value) ||
+    /^\\\\/.test(value) ||
+    !/^[a-z][a-z\d+.-]*:/i.test(value)
+  )
+}
 md.linkify.set({ fuzzyLink: false, fuzzyEmail: false, fuzzyIP: false })
 
 function sanitizeDocumentHtml(html, baseDir) {
@@ -138,8 +151,7 @@ function isLegacyPathFormatAt(source, position) {
   if (MARK_HTML_STICKY_RE.test(source)) return true
 
   const html = matchRenderableInlineHtml(source, position)?.html || ''
-  const color =
-    html.match(/^<span\s+style="color:\s*(#[0-9a-f]{6})"\s*>/i)?.[1] || ''
+  const color = html.match(/^<span\s+style="color:\s*(#[0-9a-f]{6})"\s*>/i)?.[1] || ''
   return !!keepTextColorByValue(color)
 }
 
@@ -226,8 +238,7 @@ md.renderer.rules.hm_safe_inline_html = (tokens, idx, _options, env) => {
     !!(env && env.allowContainerHtml)
   )
   const rootStyle = safe.match(/^<span\b[^>]*\bstyle="([^"]*)"/i)?.[1] || ''
-  const colorValue =
-    rootStyle.match(/(?:^|;)\s*color\s*:\s*(#[0-9a-f]{6})(?:\s*;|$)/i)?.[1] || ''
+  const colorValue = rootStyle.match(/(?:^|;)\s*color\s*:\s*(#[0-9a-f]{6})(?:\s*;|$)/i)?.[1] || ''
   const color = keepTextColorByValue(colorValue)
   // The semantic render-only class gives the app and the VSCode webview a
   // stylesheet-level `!important` fallback. This keeps a document color visible
@@ -295,7 +306,11 @@ md.renderer.rules.image = (tokens, idx, options, env, self) => {
   const alt = self.renderInlineAsText(token.children || [], options, env)
   const title = token.attrGet('title')
   return (
-    '<img src="' + src + '" alt="' + escapeAttr(alt) + '"' +
+    '<img src="' +
+    src +
+    '" alt="' +
+    escapeAttr(alt) +
+    '"' +
     (title ? ' title="' + escapeAttr(title) + '"' : '') +
     '>'
   )
@@ -303,7 +318,9 @@ md.renderer.rules.image = (tokens, idx, options, env, self) => {
 md.renderer.rules.link_open = (tokens, idx) => {
   const title = tokens[idx].attrGet('title')
   return (
-    '<a href="' + safeHref(tokens[idx].attrGet('href') || '') + '"' +
+    '<a href="' +
+    safeHref(tokens[idx].attrGet('href') || '') +
+    '"' +
     (title ? ' title="' + escapeAttr(title) + '"' : '') +
     ' target="_blank" rel="noopener">'
   )
@@ -374,7 +391,10 @@ export function estimateTableColumnWidths(headers, dataRows = []) {
         maxSegment,
         total * (brCount ? 0.42 : 0.72) + Math.min(brCount, 6) * 1.2
       )
-      widths[ci] = Math.max(widths[ci], clamp(Math.ceil(contentWidth + 2), TABLE_COL_MIN_EM, TABLE_COL_MAX_EM))
+      widths[ci] = Math.max(
+        widths[ci],
+        clamp(Math.ceil(contentWidth + 2), TABLE_COL_MIN_EM, TABLE_COL_MAX_EM)
+      )
     }
   })
 
@@ -456,7 +476,11 @@ export function parseDoc(lines) {
     // a ```mermaid fence into a live diagram (and leave others as code).
     if (/^\s*```/.test(line)) {
       const start = i
-      const lang = line.replace(/^\s*```/, '').trim().split(/\s+/)[0].toLowerCase()
+      const lang = line
+        .replace(/^\s*```/, '')
+        .trim()
+        .split(/\s+/)[0]
+        .toLowerCase()
       i++
       while (i < lines.length && !/^\s*```/.test(lines[i])) i++
       if (i < lines.length) i++ // closing ```
@@ -552,7 +576,10 @@ export function parseDoc(lines) {
           while (j < lines.length && lines[j].trim() === '') j++
           const nxt = j < lines.length ? lines[j] : null
           const nind = nxt ? nxt.search(/\S/) : -1
-          if (nxt && (nind > baseIndent || (nind === baseIndent && /^\s*([-*+]|\d+[.)])\s+/.test(nxt)))) {
+          if (
+            nxt &&
+            (nind > baseIndent || (nind === baseIndent && /^\s*([-*+]|\d+[.)])\s+/.test(nxt)))
+          ) {
             i = j // loose list: skip the blank gap and keep going
             continue
           }
@@ -610,7 +637,11 @@ export function parseDoc(lines) {
           continue
         }
         // A new top-level numbered item begins its own block (番号 granularity).
-        if (p > segStart && lines[p].search(/\S/) === baseIndent && /^\s*\d+[.)]\s+/.test(lines[p])) {
+        if (
+          p > segStart &&
+          lines[p].search(/\S/) === baseIndent &&
+          /^\s*\d+[.)]\s+/.test(lines[p])
+        ) {
           pushListSeg(segStart, p - 1)
           segStart = p
         }
@@ -797,7 +828,10 @@ export function prepareBlockInsertion(rawLines, at, content) {
         .map((line) => (line.endsWith('\r') ? line.slice(0, -1) : line) + eol)
   if (!inserted.length || (inserted.length === 1 && inserted[0] === eol)) return []
 
-  const isBlank = (line) => String(line ?? '').replace(/\r$/, '').trim() === ''
+  const isBlank = (line) =>
+    String(line ?? '')
+      .replace(/\r$/, '')
+      .trim() === ''
   const blankFor = (...lines) =>
     lines.some((line) => typeof line === 'string' && line.endsWith('\r')) ? '\r' : ''
   const result = inserted.slice()
@@ -879,9 +913,7 @@ function renderList(b, viewLines, baseDir, opts = {}) {
         it.line +
         '"' +
         (it.checked ? ' checked' : '') +
-        (opts.taskToggleLabel
-          ? ' aria-label="' + escapeAttr(opts.taskToggleLabel) + '"'
-          : '') +
+        (opts.taskToggleLabel ? ' aria-label="' + escapeAttr(opts.taskToggleLabel) + '"' : '') +
         (opts.interactiveTasks ? '' : ' disabled') +
         '>'
       : ''
@@ -996,7 +1028,10 @@ function renderTable(
   html += '</colgroup><thead><tr role="row" aria-rowindex="1">'
   headers.forEach((h, ci) => {
     const active =
-      !forExport && filterState[tableIdx] && filterState[tableIdx][ci] && filterState[tableIdx][ci].size > 0
+      !forExport &&
+      filterState[tableIdx] &&
+      filterState[tableIdx][ci] &&
+      filterState[tableIdx][ci].size > 0
     const filterBtn = forExport
       ? ''
       : '<button class="km-filter-btn' +
@@ -1103,9 +1138,24 @@ export function renderBlockInner(b, bi, viewLines, opts = {}) {
         escapeAttr(collapseLabel) +
         '"><svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg></button>'
     inner =
-      '<h' + b.level + ' id="km-h-' + bi + '" class="km-heading">' + collapseBtn + inline(b.text, baseDir, opts.inlineEnv) + '</h' + b.level + '>'
+      '<h' +
+      b.level +
+      ' id="km-h-' +
+      bi +
+      '" class="km-heading">' +
+      collapseBtn +
+      inline(b.text, baseDir, opts.inlineEnv) +
+      '</h' +
+      b.level +
+      '>'
   } else if (b.type === 'paragraph') {
-    inner = '<p>' + viewLines.slice(b.start, b.end + 1).map((l) => inline(l, baseDir, opts.inlineEnv)).join('<br>') + '</p>'
+    inner =
+      '<p>' +
+      viewLines
+        .slice(b.start, b.end + 1)
+        .map((l) => inline(l, baseDir, opts.inlineEnv))
+        .join('<br>') +
+      '</p>'
   } else if (b.type === 'html') {
     const source = viewLines.slice(b.start, b.end + 1).join('\n')
     inner = '<div class="hm-html-block">' + renderMarkdownBlockHtml(source, opts) + '</div>'
@@ -1117,7 +1167,7 @@ export function renderBlockInner(b, bi, viewLines, opts = {}) {
     inner =
       b.lang === 'mermaid'
         ? '<div class="km-mermaid" data-code="' + escapeAttr(body) + '"></div>'
-        : '<pre><code>' + escapeHtml(body) + '</code></pre>'
+        : renderNumberedCodeBlockHtml(body)
   } else if (b.type === 'mathblock') {
     // Strip the $$ delimiters; KeepEditor renders the TeX with KaTeX after render.
     const tex = viewLines
@@ -1132,7 +1182,14 @@ export function renderBlockInner(b, bi, viewLines, opts = {}) {
   } else if (b.type === 'quote') {
     inner =
       '<blockquote>' +
-      inline(viewLines.slice(b.start, b.end + 1).map((l) => l.replace(/^\s*>\s?/, '')).join('<br>'), baseDir, opts.inlineEnv) +
+      inline(
+        viewLines
+          .slice(b.start, b.end + 1)
+          .map((l) => l.replace(/^\s*>\s?/, ''))
+          .join('<br>'),
+        baseDir,
+        opts.inlineEnv
+      ) +
       '</blockquote>'
   } else if (b.type === 'list') {
     inner = renderList(b, viewLines, baseDir, {

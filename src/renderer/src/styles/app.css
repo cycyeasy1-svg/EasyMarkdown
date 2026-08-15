@@ -4745,13 +4745,24 @@ body.hm-preserve-soft-breaks .milkdown .ProseMirror span[data-type='hardbreak'][
   margin: var(--editor-para-spacing, 0.8em) 0;
 }
 .milkdown .cm-editor .cm-scroller {
-  padding: 14px 16px;
+  padding: 0 16px 0 0;
   line-height: 1.6;
 }
+.milkdown .cm-editor .cm-content {
+  padding: 14px 0;
+}
 .milkdown .cm-editor .cm-gutters {
-  background: transparent;
-  border: none;
-  color: rgba(255, 255, 255, 0.35);
+  background: color-mix(in srgb, var(--code-block-bg) 82%, var(--bg) 18%);
+  border-right: 1px solid var(--code-block-border);
+  color: rgba(255, 255, 255, 0.46);
+  margin-right: 12px;
+  padding: 14px 6px 14px 4px;
+  user-select: none;
+}
+.milkdown .cm-editor .cm-lineNumbers .cm-gutterElement {
+  min-width: 2.75em;
+  padding: 0 6px 0 4px;
+  text-align: right;
 }
 /* The plain (non-CodeMirror) code block keeps its tinted look; only the
    editable highlighted blocks go dark. */
@@ -6079,6 +6090,44 @@ body.dark .km-doc mark.hm-hl-blue { background: #2f4a6b !important; }
   background: none;
   border: none;
   padding: 0;
+}
+.km-doc pre.hm-code-block {
+  padding: 0;
+  overflow: hidden;
+}
+.km-doc code.hm-code-lines {
+  display: block;
+  counter-reset: hm-code-line;
+  line-height: 1.6;
+}
+.km-doc .hm-code-line {
+  display: grid;
+  grid-template-columns: 3.75em minmax(0, 1fr);
+  min-height: 1.6em;
+  counter-increment: hm-code-line;
+}
+.km-doc .hm-code-line::before {
+  content: counter(hm-code-line);
+  padding: 0 0.75em 0 0.5em;
+  border-right: 1px solid var(--code-border);
+  background: color-mix(in srgb, var(--code-bg) 78%, var(--bg) 22%);
+  color: var(--faint);
+  text-align: right;
+  user-select: none;
+}
+.km-doc .hm-code-line-text {
+  min-width: 0;
+  padding: 0 1em;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.km-doc .hm-code-line:first-child::before,
+.km-doc .hm-code-line:first-child .hm-code-line-text {
+  padding-top: 14px;
+}
+.km-doc .hm-code-line:last-child::before,
+.km-doc .hm-code-line:last-child .hm-code-line-text {
+  padding-bottom: 14px;
 }
 /* Keep-mode embeds: ```mermaid → diagram, $$…$$ → KaTeX. Centered like the rich
    editor's mermaid preview; both edit through the block "edit source" button. */

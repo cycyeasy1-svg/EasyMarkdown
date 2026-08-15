@@ -22,7 +22,7 @@ import {
   keepBlockSupportsFormatting,
   refreshKeepFormatToolbar
 } from '../keep-format.js'
-import { inlineRichStyles } from './editor-copy.js'
+import { copiedPlainText, inlineRichStyles, materializeCopiedCodeLines } from './editor-copy.js'
 import { dirOf } from './editor-images.js'
 import { getMermaidSvg, peekMermaidSvg } from './editor-mermaid-core.js'
 import { enhanceKeepTables } from './editor-tablescroll.js'
@@ -35,8 +35,12 @@ import {
 } from '../keep-history.js'
 import ZoomLightbox from './ZoomLightbox.jsx'
 import { ensureEmbedZoomButtons, zoomItemFromButton } from './editor-zoom.js'
-import { internalLinkTarget, parseInternalDocLink } from '../link-navigation.js'
-import { copyRichToClipboard } from '../ui.js'
+import {
+  internalLinkTarget,
+  isMarkdownDocumentLink,
+  parseInternalDocLink
+} from '../link-navigation.js'
+import { copyRichToClipboard, fireToast } from '../ui.js'
 
 // Wrapper style for rich-text copy (mirrors the Crepe editor's onCopy payload) so
 // pasted output keeps a sensible default font in apps that ignore external CSS.
@@ -1719,10 +1723,14 @@ function KeepEditor({
       const wrap = document.createElement('div')
       wrap.appendChild(node)
       wrap.querySelectorAll('.km-src-edit, .km-filter-btn, button').forEach((el) => el.remove())
+      const hadCodeLines = materializeCopiedCodeLines(wrap)
+      const text = hadCodeLines
+        ? copiedPlainText(wrap, wrap.textContent || '')
+        : wrap.textContent || ''
       inlineRichStyles(wrap)
       return {
         html: `<div style="${COPY_WRAP}">${wrap.innerHTML}</div>`,
-        text: wrap.textContent || ''
+        text
       }
     }
     const writeRich = (node, plain) => {
@@ -1788,8 +1796,11 @@ function KeepEditor({
         const wrap = document.createElement('div')
         wrap.appendChild(sel.getRangeAt(0).cloneContents())
         wrap.querySelectorAll('.km-src-edit, .km-filter-btn, button').forEach((el) => el.remove())
+        const hadCodeLines = materializeCopiedCodeLines(wrap)
+        const plain = hadCodeLines
+          ? copiedPlainText(wrap, wrap.textContent || sel.toString())
+          : sel.toString()
         inlineRichStyles(wrap)
-        const plain = sel.toString()
         if (!wrap.innerHTML.trim() && !plain) return
         e.clipboardData.setData('text/html', `<div style="${COPY_WRAP}">${wrap.innerHTML}</div>`)
         e.clipboardData.setData('text/plain', plain)
@@ -2059,7 +2070,22 @@ function KeepEditor({
       }
       const target = parseInternalDocLink(href)
       if (!target) return
-      onOpenDocLinkRef.current?.(target.path, target.anchor, docPathRef.current, { openRight })
+      if (isMarkdownDocumentLink(href)) {
+        onOpenDocLinkRef.current?.(target.path, target.anchor, docPathRef.current, { openRight })
+        return
+      }
+      if (!target.path || !docPathRef.current || !window.api?.openLocalPath) return
+      void window.api.openLocalPath(href, docPathRef.current).then((result) => {
+        if (!result?.ok) {
+          fireToast(
+            tRef.current('links.localOpenFailed', { msg: result?.error || 'Unknown error' }),
+            {
+              kind: 'error',
+              sticky: true
+            }
+          )
+        }
+      })
     }
     const decorateInternalLink = (link) => {
       if (!link || !host.contains(link)) return
@@ -2202,7 +2228,7 @@ function KeepEditor({
         if (link && host.contains(link)) {
           const block = link.closest('.km-block')
           const href = link.getAttribute('href') || ''
-          if (parseInternalDocLink(href)) {
+          if (isMarkdownDocumentLink(href)) {
             items.push({
               label: T('links.openRight'),
               fn: () => activateLink(href, { openRight: true })
@@ -2864,6 +2890,7 @@ function KeepEditor({
       markdownOffsetFromViewportTop,
       navigationOffsetFromViewportTop: () => markdownOffsetFromViewportTop(false),
       restoreMarkdownOffset,
+      scrollMarkdownOffsetToTop: restoreMarkdownOffset,
       captureNavigationContext,
       restoreNavigationContext,
       isSelectionVisible: () => !!currentSelectionRange(),

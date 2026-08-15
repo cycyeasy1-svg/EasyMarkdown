@@ -102,6 +102,7 @@ const api = {
 
   // shell
   openExternal: (url) => ipcRenderer.invoke('shell:openExternal', url),
+  openLocalPath: (href, fromPath) => ipcRenderer.invoke('shell:openLocalPath', href, fromPath),
   showInFolder: (path) => ipcRenderer.invoke('shell:showInFolder', path),
   copyText: (text) => ipcRenderer.invoke('clipboard:writeText', text),
   copyRich: (html, text) => ipcRenderer.invoke('clipboard:writeRich', { html, text }),

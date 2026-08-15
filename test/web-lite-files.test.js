@@ -26,7 +26,9 @@ describe('web-lite browser file helpers', () => {
     expect(resolveWorkspacePath('docs/page.md', 'sub/a%20b.md?raw=1')).toBe('docs/sub/a b.md')
     expect(resolveWorkspacePath('page.md', '../outside.md')).toBeNull()
     expect(resolveWorkspacePath('page.md', 'https://example.com/a.md')).toBeNull()
+    expect(resolveWorkspacePath('page.md', 'file:///C:/secret.md')).toBeNull()
     expect(resolveWorkspacePath('page.md', 'C:\\secret.md')).toBeNull()
+    expect(resolveWorkspacePath('page.md', '\\\\server\\share\\secret.md')).toBeNull()
   })
 
   it('normalizes separators and rejects parent traversal above the root', () => {

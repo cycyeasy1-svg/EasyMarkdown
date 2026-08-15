@@ -77,6 +77,9 @@ describe('inline', () => {
     expect(inline('[ok](https://a.com)')).toBe(
       '<a href="https://a.com" target="_blank" rel="noopener">ok</a>'
     )
+    expect(inline('[local](file:///C:/Docs/guide.md)')).toBe(
+      '<a href="file:///C:/Docs/guide.md" target="_blank" rel="noopener">local</a>'
+    )
     // markdown-it's validateLink rejects the destination outright, so the whole
     // construct stays inert source text — strictly safer than the old empty href.
     expect(inline('[x](javascript:void)')).toBe('[x](javascript:void)')
@@ -85,12 +88,8 @@ describe('inline', () => {
     expect(inline('<a id="def-bhv-099"></a>[BHV-099](#def-bhv-099)')).toBe(
       '<a id="def-bhv-099"></a><a href="#def-bhv-099" target="_blank" rel="noopener">BHV-099</a>'
     )
-    expect(inline("<a name='legacy-anchor'></a>target")).toBe(
-      '<a name="legacy-anchor"></a>target'
-    )
-    expect(inline('<a id=plain-anchor></a>target')).toBe(
-      '<a id="plain-anchor"></a>target'
-    )
+    expect(inline("<a name='legacy-anchor'></a>target")).toBe('<a name="legacy-anchor"></a>target')
+    expect(inline('<a id=plain-anchor></a>target')).toBe('<a id="plain-anchor"></a>target')
     expect(inline('`<a id="code-anchor"></a>`')).toBe(
       '<code>&lt;a id=&quot;code-anchor&quot;&gt;&lt;/a&gt;</code>'
     )
@@ -108,7 +107,9 @@ describe('inline', () => {
     )
   })
   it('renders an image with an absolute URL src', () => {
-    expect(inline('![logo](https://x.com/a.png)')).toBe('<img src="https://x.com/a.png" alt="logo">')
+    expect(inline('![logo](https://x.com/a.png)')).toBe(
+      '<img src="https://x.com/a.png" alt="logo">'
+    )
   })
   it('resolves a relative image path against baseDir to a file:// URL', () => {
     expect(inline('![a](./assets/p.png)', '/home/u/notes')).toBe(
@@ -120,7 +121,9 @@ describe('inline', () => {
   })
   it('refuses a javascript: image src but allows data: URLs', () => {
     expect(inline('![x](javascript:alert)')).toBe('![x](javascript:alert)')
-    expect(inline('![x](data:image/png;base64,AAAA)')).toBe('<img src="data:image/png;base64,AAAA" alt="x">')
+    expect(inline('![x](data:image/png;base64,AAAA)')).toBe(
+      '<img src="data:image/png;base64,AAAA" alt="x">'
+    )
   })
   it('does not leave a stray ! before an image (regression)', () => {
     expect(inline('![a](b.png)')).not.toContain('!<')
@@ -159,9 +162,7 @@ describe('inline', () => {
     )
   })
   it('keeps balanced inline styles and line breaks inside the sanitized fragment', () => {
-    expect(
-      inline('<span style="color: #f00; padding: 2px; position: fixed">a<br>b</span>')
-    ).toBe(
+    expect(inline('<span style="color: #f00; padding: 2px; position: fixed">a<br>b</span>')).toBe(
       '<span class="hm-html-inline"><span style="color: #f00; padding: 2px">a<br>b</span></span>'
     )
   })
@@ -180,43 +181,33 @@ describe('inline', () => {
     )
   })
   it('renders toolbar color and highlight after a Windows-path separator', () => {
-    expect(
-      inline(
-        String.raw`E:\docs&#92;<span style="color: #d94b5b">医療</span>\file.md`
-      )
-    ).toBe(
+    expect(inline(String.raw`E:\docs&#92;<span style="color: #d94b5b">医療</span>\file.md`)).toBe(
       'E:\\docs\\' +
         '<span class="hm-html-inline hm-text-color hm-text-color-red">' +
         '<span style="color: #d94b5b">医療</span></span>' +
         '\\file.md'
     )
     expect(inline(String.raw`E:\docs&#92;==E2E仕様書==\file.md`)).toBe(
-      'E:\\docs\\' +
-        '<mark class="hm-highlight hm-hl-yellow">E2E仕様書</mark>' +
-        '\\file.md'
+      'E:\\docs\\' + '<mark class="hm-highlight hm-hl-yellow">E2E仕様書</mark>' + '\\file.md'
     )
   })
   it('renders already-saved toolbar wrappers escaped by a Windows-path separator', () => {
     expect(
-      inline(
-        String.raw`E:\AI\20260715\<span style="color: #d94b5b">医療・介護</span>\LifeEvent.md`
-      )
+      inline(String.raw`E:\AI\20260715\<span style="color: #d94b5b">医療・介護</span>\LifeEvent.md`)
     ).toBe(
       'E:\\AI\\20260715\\' +
         '<span class="hm-html-inline hm-text-color hm-text-color-red">' +
         '<span style="color: #d94b5b">医療・介護</span></span>' +
         '\\LifeEvent.md'
     )
-    expect(
-      inline(String.raw`E:\AI\20260715\医療・介護\LifeEvent\==E2Eテスト仕様書==\T04.md`)
-    ).toBe(
+    expect(inline(String.raw`E:\AI\20260715\医療・介護\LifeEvent\==E2Eテスト仕様書==\T04.md`)).toBe(
       'E:\\AI\\20260715\\医療・介護\\LifeEvent\\' +
         '<mark class="hm-highlight hm-hl-yellow">E2Eテスト仕様書</mark>' +
         '\\T04.md'
     )
-    expect(
-      inline(String.raw`E:\<span style="color: #d94b5b">医療・介護</span>\T04.md`)
-    ).toContain('<span style="color: #d94b5b">医療・介護</span>')
+    expect(inline(String.raw`E:\<span style="color: #d94b5b">医療・介護</span>\T04.md`)).toContain(
+      '<span style="color: #d94b5b">医療・介護</span>'
+    )
     expect(inline(String.raw`E:\==E2Eテスト仕様書==\T04.md`)).toContain(
       '<mark class="hm-highlight hm-hl-yellow">E2Eテスト仕様書</mark>'
     )
@@ -250,9 +241,7 @@ describe('inline', () => {
   })
   it('keeps an HTML highlight correctly nested with emphasis and a text color', () => {
     expect(
-      inline(
-        '**<mark class="hm-hl-yellow"><span style="color: #3378c5">text</span></mark>**'
-      )
+      inline('**<mark class="hm-hl-yellow"><span style="color: #3378c5">text</span></mark>**')
     ).toBe(
       '<strong><mark class="hm-highlight hm-hl-yellow">' +
         '<span class="hm-html-inline hm-text-color hm-text-color-blue">' +
@@ -281,6 +270,19 @@ describe('splitRow', () => {
 describe('toViewLines', () => {
   it('strips a trailing \\r but leaves \\r-free lines intact', () => {
     expect(toViewLines(['a\r', 'b', 'c\r'])).toEqual(['a', 'b', 'c'])
+  })
+})
+
+describe('fenced code rendering', () => {
+  it('renders source-clean semantic rows for shared CSS line counters', () => {
+    const lines = ['```js', 'const value = 1 < 2 && true', '', 'return value', '```']
+    const html = renderBlockInner(parseDoc(lines)[0], 0, lines, {})
+
+    expect(html).toContain('<pre class="hm-code-block"><code class="hm-code-lines">')
+    expect(html.match(/class="hm-code-line"/g)).toHaveLength(3)
+    expect(html).toContain('const value = 1 &lt; 2 &amp;&amp; true')
+    expect(html).toContain('<span class="hm-code-line-text"></span>')
+    expect(html).not.toContain('hm-code-line-num')
   })
 })
 
@@ -453,14 +455,7 @@ describe('table column width hints', () => {
   })
 
   it('renders only the initial rows of a large interactive table and exposes stable progress metadata', () => {
-    const lines = [
-      '| A | B |',
-      '|---|---|',
-      '| 0 | a |',
-      '| 1 | b |',
-      '| 2 | c |',
-      '| 3 | d |'
-    ]
+    const lines = ['| A | B |', '|---|---|', '| 0 | a |', '| 1 | b |', '| 2 | c |', '| 3 | d |']
     const table = parseDoc(lines)[0]
     const html = renderBlockInner(table, 0, lines, { tableInitialRows: 2 })
 
@@ -494,9 +489,7 @@ describe('raw HTML block rendering', () => {
     expect(html).toContain('<div class="hm-html-block"><table border="1">')
     expect(html).toContain('<th rowspan="2">NO</th>')
     expect(html).toContain('<th colspan="2">Common</th>')
-    expect(html).toContain(
-      '<span style="background-color: #FFFF00; color: #111">Ready</span>'
-    )
+    expect(html).toContain('<span style="background-color: #FFFF00; color: #111">Ready</span>')
     expect(html).toContain('<img src="file:///C:/docs/assets/a.png" alt="A">')
   })
 
@@ -586,9 +579,9 @@ describe('GFM task-list items', () => {
   })
   it('renders enabled checkboxes when interactiveTasks is set (not for export)', () => {
     const lines = ['- [ ] todo']
-    expect(renderBlockInner(parseDoc(lines)[0], 0, lines, { interactiveTasks: true })).not.toContain(
-      'disabled'
-    )
+    expect(
+      renderBlockInner(parseDoc(lines)[0], 0, lines, { interactiveTasks: true })
+    ).not.toContain('disabled')
     expect(
       renderBlockInner(parseDoc(lines)[0], 0, lines, { interactiveTasks: true, forExport: true })
     ).toContain('disabled')
@@ -653,10 +646,7 @@ describe('Keep task and block structural helpers', () => {
       'block\r',
       '\r'
     ])
-    expect(prepareBlockInsertion(['before\r', '\r', 'target\r'], 2, 'new')).toEqual([
-      'new\r',
-      '\r'
-    ])
+    expect(prepareBlockInsertion(['before\r', '\r', 'target\r'], 2, 'new')).toEqual(['new\r', '\r'])
   })
 
   it('duplicates a nested block byte-for-byte without normalizing surrounding gaps', () => {

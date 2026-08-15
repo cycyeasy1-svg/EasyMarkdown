@@ -18,7 +18,13 @@ const PATH_ARGUMENTS = new Map([
   ['fs:readFile', [{ index: 0 }]],
   ['fs:pathExists', [{ index: 0 }]],
   ['fs:writeFile', [{ index: 0 }]],
-  ['fs:rename', [{ index: 0, allowRestricted: false }, { index: 1, allowRestricted: false }]],
+  [
+    'fs:rename',
+    [
+      { index: 0, allowRestricted: false },
+      { index: 1, allowRestricted: false }
+    ]
+  ],
   ['fs:delete', [{ index: 0, allowRestricted: false }]],
   ['fs:createFile', [{ index: 0, allowRestricted: false }]],
   ['fs:createDir', [{ index: 0, allowRestricted: false }]],
@@ -56,6 +62,16 @@ export function validateIpcArgs(channel, args) {
   }
   if (channel === 'dialog:saveAs') {
     return args[0] == null || (typeof args[0] === 'string' && args[0].length <= 255)
+  }
+  if (channel === 'shell:openLocalPath') {
+    const [href, fromPath] = args
+    return (
+      typeof href === 'string' &&
+      href.length > 0 &&
+      href.length <= MAX_PATH_LENGTH &&
+      !href.includes('\0') &&
+      isSafeIpcPath(fromPath)
+    )
   }
   if (channel === 'spell:set') return typeof args[0] === 'boolean'
   if (channel === 'app:setLang') return ['en', 'zh', 'ja'].includes(args[0])

@@ -1,13 +1,5 @@
-import {
-  DEFAULT_PDF_OPTIONS,
-  PDF_DENSITY_VALUES,
-  normalizePdfOptions
-} from './pdf-options.js'
-import {
-  DEFAULT_FONT_WRITE_EN,
-  DEFAULT_FONT_WRITE_ZH,
-  DEFAULT_FONT_WRITE_JA
-} from './fonts.js'
+import { DEFAULT_PDF_OPTIONS, PDF_DENSITY_VALUES, normalizePdfOptions } from './pdf-options.js'
+import { DEFAULT_FONT_WRITE_EN, DEFAULT_FONT_WRITE_ZH, DEFAULT_FONT_WRITE_JA } from './fonts.js'
 
 const PAGE_DIMENSIONS_MM = Object.freeze({
   A4: [210, 297],
@@ -17,18 +9,20 @@ const PAGE_DIMENSIONS_MM = Object.freeze({
 
 export { DEFAULT_PDF_OPTIONS, normalizePdfOptions }
 
-const escapeHtml = (value) => String(value || '')
-  .replace(/&/g, '&amp;')
-  .replace(/</g, '&lt;')
-  .replace(/>/g, '&gt;')
-  .replace(/"/g, '&quot;')
-  .replace(/'/g, '&#39;')
+const escapeHtml = (value) =>
+  String(value || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
 
 export function resolvePdfPage(options = {}) {
   const normalized = normalizePdfOptions(options)
-  let [width, height] = normalized.pageSize === 'Custom'
-    ? [normalized.customWidth, normalized.customHeight]
-    : PAGE_DIMENSIONS_MM[normalized.pageSize]
+  let [width, height] =
+    normalized.pageSize === 'Custom'
+      ? [normalized.customWidth, normalized.customHeight]
+      : PAGE_DIMENSIONS_MM[normalized.pageSize]
   if (normalized.orientation === 'landscape') [width, height] = [height, width]
   return {
     ...normalized,
@@ -110,6 +104,28 @@ const basePdfCss = `
     background: none; padding: 0; color: #2a2620; font-size: 0.86em; line-height: 1.6;
     white-space: pre-wrap; word-break: break-word;
   }
+  .doc pre.hm-code-block {
+    padding: 0; overflow: hidden; break-inside: auto; page-break-inside: auto;
+  }
+  .doc code.hm-code-lines {
+    display: block; padding: 0; counter-reset: hm-code-line; line-height: 1.6;
+  }
+  .doc .hm-code-line {
+    display: grid; grid-template-columns: 3.75em minmax(0, 1fr); min-height: 1.6em;
+    counter-increment: hm-code-line; break-inside: avoid; page-break-inside: avoid;
+  }
+  .doc .hm-code-line::before {
+    content: counter(hm-code-line); padding: 0 0.75em 0 0.5em;
+    border-right: 1px solid #ddd7cc; background: #ebe6dc; color: #8a8175;
+    text-align: right; user-select: none;
+  }
+  .doc .hm-code-line-text {
+    min-width: 0; padding: 0 1em; overflow-wrap: anywhere; white-space: pre-wrap;
+  }
+  .doc .hm-code-line:first-child::before,
+  .doc .hm-code-line:first-child .hm-code-line-text { padding-top: 12px; }
+  .doc .hm-code-line:last-child::before,
+  .doc .hm-code-line:last-child .hm-code-line-text { padding-bottom: 12px; }
   .doc table {
     border-collapse: collapse; width: max-content; max-width: 100%; margin: 1em 0;
     font-size: 0.9em; table-layout: auto;
@@ -176,13 +192,14 @@ export function buildPdfCss(options = {}, typographyCss = '') {
   return `@page { size: ${page.width}mm ${page.height}mm; margin: ${top}mm ${right}mm ${bottom}mm ${left}mm; }\n:root { --hm-pdf-font-size: ${page.fontSizePt}pt; ${densityRootVars(page.densityPreset)} }\n${basePdfCss}\n${typographyCss}\n${paginationCss(page.pagination)}`
 }
 
-const normalizeHeadings = (headings, depth) => (Array.isArray(headings) ? headings : [])
-  .map((heading, index) => ({
-    id: String(heading?.id || `hm-pdf-heading-${index + 1}`),
-    level: Math.min(6, Math.max(1, Number(heading?.level) || 1)),
-    text: String(heading?.text || '').trim()
-  }))
-  .filter((heading) => heading.text && heading.level <= depth)
+const normalizeHeadings = (headings, depth) =>
+  (Array.isArray(headings) ? headings : [])
+    .map((heading, index) => ({
+      id: String(heading?.id || `hm-pdf-heading-${index + 1}`),
+      level: Math.min(6, Math.max(1, Number(heading?.level) || 1)),
+      text: String(heading?.text || '').trim()
+    }))
+    .filter((heading) => heading.text && heading.level <= depth)
 
 export function buildPdfToc(headings, options = {}) {
   const page = normalizePdfOptions(options)
@@ -197,29 +214,39 @@ export function buildPdfToc(headings, options = {}) {
     stack.at(-1).children.push(node)
     stack.push(node)
   }
-  const render = (nodes) => `<ol>${nodes.map((node) => (
-    `<li><a href="#${escapeHtml(node.id)}">${escapeHtml(node.text)}</a>${node.children.length ? render(node.children) : ''}</li>`
-  )).join('')}</ol>`
+  const render = (nodes) =>
+    `<ol>${nodes
+      .map(
+        (node) =>
+          `<li><a href="#${escapeHtml(node.id)}">${escapeHtml(node.text)}</a>${node.children.length ? render(node.children) : ''}</li>`
+      )
+      .join('')}</ol>`
   return `<nav class="pdf-toc${page.tocPageBreak ? ' break-after' : ''}"><h1>${escapeHtml(page.tocTitle)}</h1>${render(root.children)}</nav>`
 }
 
 export function buildPdfDocument(source, options = {}, extras = {}) {
-  const payload = typeof source === 'string' ? { html: source, headings: [], title: '' } : source || {}
+  const payload =
+    typeof source === 'string' ? { html: source, headings: [], title: '' } : source || {}
   const page = normalizePdfOptions(options)
   const title = page.documentTitle || payload.title || 'EasyMarkdown'
   const css = buildPdfCss(page, extras.typographyCss)
   const toc = buildPdfToc(payload.headings, page)
   const langAttr = /^(?: lang="(?:zh|ja)")$/.test(extras.langAttr || '') ? extras.langAttr : ''
-  const csp = "default-src 'none'; img-src data: file: https: http:; style-src 'unsafe-inline'; font-src data: file:;"
+  const csp =
+    "default-src 'none'; img-src data: file: https: http:; style-src 'unsafe-inline'; font-src data: file:;"
   return `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${csp}"><title>${escapeHtml(title)}</title><style>${css}</style></head><body>${toc}<main class="doc"${langAttr}>${payload.html || ''}</main></body></html>`
 }
 
-const templateStyle = 'font-size:8px;color:#777;width:100%;padding:0 12mm;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif;display:flex;justify-content:space-between;gap:12px;'
+const templateStyle =
+  'font-size:8px;color:#777;width:100%;padding:0 12mm;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif;display:flex;justify-content:space-between;gap:12px;'
 
 export function buildPdfHeaderFooter(options = {}) {
   const page = normalizePdfOptions(options)
   const title = escapeHtml(page.documentTitle)
-  const headerLeft = [page.includeTitle ? title : '', page.headerText ? escapeHtml(page.headerText) : '']
+  const headerLeft = [
+    page.includeTitle ? title : '',
+    page.headerText ? escapeHtml(page.headerText) : ''
+  ]
     .filter(Boolean)
     .join(' · ')
   const headerRight = page.includeDate ? '<span class="date"></span>' : ''

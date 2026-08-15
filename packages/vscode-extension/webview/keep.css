@@ -26,16 +26,18 @@
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.08);
   --shadow-lg: 0 8px 28px rgba(0, 0, 0, 0.18);
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
-  --font-write: var(--vscode-font-family, -apple-system, "Segoe UI", Roboto, sans-serif);
+  --font-write: var(--vscode-font-family, -apple-system, 'Segoe UI', Roboto, sans-serif);
   /* Japanese writing font — applied per document via lang="ja" (kana detected by
      keep-parser's detectDocLang). Explicit stack: --vscode-font-family is the
      UI font and gives no Japanese glyph-form guarantee. Quality order —
      Noto Sans JP → BIZ UDPGothic → Hiragino (macOS) → Yu Gothic Medium → Meiryo.
      Mirrors --font-write-ja in the app's app.css — keep the two in sync. */
-  --font-write-ja: 'Helvetica Neue', Helvetica, Arial, 'Noto Sans JP', 'BIZ UDPGothic',
-    'Hiragino Kaku Gothic ProN', 'Hiragino Sans', 'Yu Gothic Medium', 'Yu Gothic',
-    Meiryo, 'PingFang SC', 'Microsoft YaHei', sans-serif;
-  --font-mono: var(--vscode-editor-font-family, Consolas, Monaco), 'Noto Sans Mono CJK JP', monospace;
+  --font-write-ja:
+    'Helvetica Neue', Helvetica, Arial, 'Noto Sans JP', 'BIZ UDPGothic',
+    'Hiragino Kaku Gothic ProN', 'Hiragino Sans', 'Yu Gothic Medium', 'Yu Gothic', Meiryo,
+    'PingFang SC', 'Microsoft YaHei', sans-serif;
+  --font-mono:
+    var(--vscode-editor-font-family, Consolas, Monaco), 'Noto Sans Mono CJK JP', monospace;
   --editor-max-width: 800px;
   --editor-font-size: 16px;
   --editor-line-height: 1.85;
@@ -308,7 +310,9 @@ body.hm-full-width .km-doc {
   font-size: 17px;
   line-height: 1;
 }
-.km-format-glyph-bold { font-weight: 800; }
+.km-format-glyph-bold {
+  font-weight: 800;
+}
 .km-format-glyph-italic {
   font-family: Georgia, 'Times New Roman', serif;
   font-style: italic;
@@ -509,37 +513,56 @@ body.hm-full-width .km-doc {
   font-size: 1.75em;
   letter-spacing: -0.02em;
 }
-.km-doc h3 { font-size: 1.4em; font-weight: 600; }
-.km-doc h4 { font-size: 1.2em; font-weight: 600; }
+.km-doc h3 {
+  font-size: 1.4em;
+  font-weight: 600;
+}
+.km-doc h4 {
+  font-size: 1.2em;
+  font-weight: 600;
+}
 .km-doc h5,
 .km-doc h6 {
   font-size: 1em;
   font-weight: 600;
   letter-spacing: 0;
 }
-.km-doc p { margin: calc(0.8em * var(--editor-para-scale, 1)) 0; line-height: inherit; }
+.km-doc p {
+  margin: calc(0.8em * var(--editor-para-scale, 1)) 0;
+  line-height: inherit;
+}
 .km-doc ul,
-.km-doc ol { margin: calc(0.8em * var(--editor-para-scale, 1)) 0; padding-left: 1.6em; line-height: inherit; }
+.km-doc ol {
+  margin: calc(0.8em * var(--editor-para-scale, 1)) 0;
+  padding-left: 1.6em;
+  line-height: inherit;
+}
 .km-doc li > ul,
-.km-doc li > ol { margin: 0.2em 0; }
-.km-doc li { margin: 0.2em 0; }
+.km-doc li > ol {
+  margin: 0.2em 0;
+}
+.km-doc li {
+  margin: 0.2em 0;
+}
 /* Loose list (CommonMark): blank-line-separated items breathe. Outermost list only. */
 .km-doc ul.km-loose > li,
-.km-doc ol.km-loose > li { margin: calc(0.8em * var(--editor-para-scale, 1)) 0; }
+.km-doc ol.km-loose > li {
+  margin: calc(0.8em * var(--editor-para-scale, 1)) 0;
+}
 /* Exact blank-line display uses the shared keep-parser's data-list-gap marker.
    Only the item that follows source blank lines gets extra space; the rest of
    the list stays tight instead of inheriting a whole-list loose line spacing. */
 .km-doc li[data-list-gap] {
   margin-top: calc(
-    0.8em * var(--editor-para-scale, 1) +
-    var(--km-gap, 0) * var(--editor-line-height, 1.8) * 1em * var(--editor-para-scale, 1)
+    0.8em * var(--editor-para-scale, 1) + var(--km-gap, 0) * var(--editor-line-height, 1.8) * 1em *
+      var(--editor-para-scale, 1)
   );
 }
 .km-list-inline-gap {
   display: block;
   height: calc(
-    0.8em * var(--editor-para-scale, 1) +
-    var(--km-gap, 0) * var(--editor-line-height, 1.8) * 1em * var(--editor-para-scale, 1)
+    0.8em * var(--editor-para-scale, 1) + var(--km-gap, 0) * var(--editor-line-height, 1.8) * 1em *
+      var(--editor-para-scale, 1)
   );
 }
 /* `==highlight==` and the colored `<mark class="hm-hl-…">` form. Mirrors app.css. */
@@ -549,44 +572,90 @@ body.hm-full-width .km-doc {
   border-radius: 2px;
   background: #fff3a3 !important;
 }
-.km-doc mark.hm-hl-red { background: #ffc6c6 !important; }
-.km-doc mark.hm-hl-blue { background: #bcd9ff !important; }
+.km-doc mark.hm-hl-red {
+  background: #ffc6c6 !important;
+}
+.km-doc mark.hm-hl-blue {
+  background: #bcd9ff !important;
+}
 body:is(.dark, .vscode-dark, .vscode-high-contrast, .hm-theme-warm-dark) .km-doc mark {
   background: #7a6c12 !important;
 }
-body:is(.dark, .vscode-dark, .vscode-high-contrast, .hm-theme-warm-dark)
-  .km-doc mark.hm-hl-red {
+body:is(.dark, .vscode-dark, .vscode-high-contrast, .hm-theme-warm-dark) .km-doc mark.hm-hl-red {
   background: #7a3434 !important;
 }
-body:is(.dark, .vscode-dark, .vscode-high-contrast, .hm-theme-warm-dark)
-  .km-doc mark.hm-hl-blue {
+body:is(.dark, .vscode-dark, .vscode-high-contrast, .hm-theme-warm-dark) .km-doc mark.hm-hl-blue {
   background: #2f4a6b !important;
 }
 /* Palette colors get a render-only semantic class in keep-parser.js. The
    important fallback protects the user's explicit document color from VSCode
    themes that force a color on every nested span. */
-.hm-text-color-ink { --hm-text-color: #24211f; }
-.hm-text-color-slate { --hm-text-color: #475569; }
-.hm-text-color-gray { --hm-text-color: #6b7280; }
-.hm-text-color-silver { --hm-text-color: #9ca3af; }
-.hm-text-color-red-light { --hm-text-color: #ef7d87; }
-.hm-text-color-orange-light { --hm-text-color: #e99a5c; }
-.hm-text-color-gold-light { --hm-text-color: #d6aa2e; }
-.hm-text-color-green-light { --hm-text-color: #65a978; }
-.hm-text-color-blue-light { --hm-text-color: #6c9fd0; }
-.hm-text-color-purple-light { --hm-text-color: #aa83cb; }
-.hm-text-color-red { --hm-text-color: #d94b5b; }
-.hm-text-color-orange { --hm-text-color: #c96a2b; }
-.hm-text-color-gold { --hm-text-color: #a97800; }
-.hm-text-color-green { --hm-text-color: #25845f; }
-.hm-text-color-blue { --hm-text-color: #3378c5; }
-.hm-text-color-purple { --hm-text-color: #8559b5; }
-.hm-text-color-red-dark { --hm-text-color: #8f2635; }
-.hm-text-color-orange-dark { --hm-text-color: #8d451e; }
-.hm-text-color-gold-dark { --hm-text-color: #735300; }
-.hm-text-color-green-dark { --hm-text-color: #1f5f43; }
-.hm-text-color-blue-dark { --hm-text-color: #205493; }
-.hm-text-color-purple-dark { --hm-text-color: #5d3c80; }
+.hm-text-color-ink {
+  --hm-text-color: #24211f;
+}
+.hm-text-color-slate {
+  --hm-text-color: #475569;
+}
+.hm-text-color-gray {
+  --hm-text-color: #6b7280;
+}
+.hm-text-color-silver {
+  --hm-text-color: #9ca3af;
+}
+.hm-text-color-red-light {
+  --hm-text-color: #ef7d87;
+}
+.hm-text-color-orange-light {
+  --hm-text-color: #e99a5c;
+}
+.hm-text-color-gold-light {
+  --hm-text-color: #d6aa2e;
+}
+.hm-text-color-green-light {
+  --hm-text-color: #65a978;
+}
+.hm-text-color-blue-light {
+  --hm-text-color: #6c9fd0;
+}
+.hm-text-color-purple-light {
+  --hm-text-color: #aa83cb;
+}
+.hm-text-color-red {
+  --hm-text-color: #d94b5b;
+}
+.hm-text-color-orange {
+  --hm-text-color: #c96a2b;
+}
+.hm-text-color-gold {
+  --hm-text-color: #a97800;
+}
+.hm-text-color-green {
+  --hm-text-color: #25845f;
+}
+.hm-text-color-blue {
+  --hm-text-color: #3378c5;
+}
+.hm-text-color-purple {
+  --hm-text-color: #8559b5;
+}
+.hm-text-color-red-dark {
+  --hm-text-color: #8f2635;
+}
+.hm-text-color-orange-dark {
+  --hm-text-color: #8d451e;
+}
+.hm-text-color-gold-dark {
+  --hm-text-color: #735300;
+}
+.hm-text-color-green-dark {
+  --hm-text-color: #1f5f43;
+}
+.hm-text-color-blue-dark {
+  --hm-text-color: #205493;
+}
+.hm-text-color-purple-dark {
+  --hm-text-color: #5d3c80;
+}
 .km-doc .hm-text-color > span {
   color: var(--hm-text-color) !important;
 }
@@ -595,7 +664,9 @@ body:is(.dark, .vscode-dark, .vscode-high-contrast, .hm-theme-warm-dark)
   text-decoration: none;
   border-bottom: 1px solid var(--accent-soft);
 }
-.km-doc a:hover { border-color: var(--accent); }
+.km-doc a:hover {
+  border-color: var(--accent);
+}
 .km-doc blockquote {
   margin: calc(1.5em * var(--editor-para-scale, 1)) 0;
   padding: 0.5em 1.5em;
@@ -631,6 +702,44 @@ body:is(.dark, .vscode-dark, .vscode-high-contrast, .hm-theme-warm-dark)
   border: none;
   padding: 0;
 }
+.km-doc pre.hm-code-block {
+  padding: 0;
+  overflow: hidden;
+}
+.km-doc code.hm-code-lines {
+  display: block;
+  counter-reset: hm-code-line;
+  line-height: 1.6;
+}
+.km-doc .hm-code-line {
+  display: grid;
+  grid-template-columns: 3.75em minmax(0, 1fr);
+  min-height: 1.6em;
+  counter-increment: hm-code-line;
+}
+.km-doc .hm-code-line::before {
+  content: counter(hm-code-line);
+  padding: 0 0.75em 0 0.5em;
+  border-right: 1px solid var(--code-border);
+  background: color-mix(in srgb, var(--code-bg) 78%, var(--bg) 22%);
+  color: var(--faint);
+  text-align: right;
+  user-select: none;
+}
+.km-doc .hm-code-line-text {
+  min-width: 0;
+  padding: 0 1em;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.km-doc .hm-code-line:first-child::before,
+.km-doc .hm-code-line:first-child .hm-code-line-text {
+  padding-top: 14px;
+}
+.km-doc .hm-code-line:last-child::before,
+.km-doc .hm-code-line:last-child .hm-code-line-text {
+  padding-bottom: 14px;
+}
 .km-doc .km-mermaid {
   position: relative;
   margin: calc(1.2em * var(--editor-para-scale, 1)) 0;
@@ -659,7 +768,10 @@ body:is(.dark, .vscode-dark, .vscode-high-contrast, .hm-theme-warm-dark)
   color: var(--muted);
   cursor: zoom-in;
   opacity: 0;
-  transition: opacity 0.12s var(--ease-out, ease), color 0.12s, background 0.12s;
+  transition:
+    opacity 0.12s var(--ease-out, ease),
+    color 0.12s,
+    background 0.12s;
 }
 .km-mermaid:hover .km-mermaid-zoom,
 .km-math:hover .km-mermaid-zoom,
@@ -923,7 +1035,9 @@ body.hm-table-auto-wrap .km-table td {
   position: sticky;
   top: 0;
   z-index: 3;
-  box-shadow: inset 0 1px 0 var(--border), inset 0 -1px 0 var(--border);
+  box-shadow:
+    inset 0 1px 0 var(--border),
+    inset 0 -1px 0 var(--border);
   white-space: nowrap;
   font-weight: 600;
 }
@@ -969,7 +1083,10 @@ body.hm-table-auto-wrap .km-table td {
   line-height: 20px;
   cursor: pointer;
   opacity: 0;
-  transition: opacity 0.12s, color 0.12s, background 0.12s;
+  transition:
+    opacity 0.12s,
+    color 0.12s,
+    background 0.12s;
 }
 .km-table th:hover .km-col-hide-btn,
 .km-table th:focus-within .km-col-hide-btn,
@@ -1011,7 +1128,9 @@ body.hm-table-auto-wrap .km-table td {
   border-radius: 2px;
   opacity: 0;
   transform: scaleY(0.65);
-  transition: opacity 0.12s, transform 0.12s;
+  transition:
+    opacity 0.12s,
+    transform 0.12s;
 }
 .km-table th:hover > .km-col-resize::after,
 .km-col-resize:hover::after,
@@ -1336,7 +1455,9 @@ body.km-column-resizing * {
   background: var(--hover);
   color: var(--text);
   cursor: pointer;
-  transition: background 0.12s, color 0.12s;
+  transition:
+    background 0.12s,
+    color 0.12s;
 }
 .hm-rename-actions button:hover {
   background: var(--active);
@@ -1373,12 +1494,22 @@ body.km-column-resizing * {
 }
 
 @keyframes fadeIn {
-  from { opacity: 0; }
-  to { opacity: 1; }
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
 @keyframes menuFadeIn {
-  from { opacity: 0; transform: translateX(-50%) scale(0.98); }
-  to { opacity: 1; transform: translateX(-50%) scale(1); }
+  from {
+    opacity: 0;
+    transform: translateX(-50%) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%) scale(1);
+  }
 }
 
 /* ── heading section fold/expand (ported from app.css) ── */
@@ -1404,7 +1535,9 @@ body.km-column-resizing * {
   color: var(--muted);
   cursor: pointer;
   opacity: 0.65;
-  transition: opacity 0.15s var(--ease-out), background 0.12s var(--ease-out),
+  transition:
+    opacity 0.15s var(--ease-out),
+    background 0.12s var(--ease-out),
     color 0.12s var(--ease-out);
 }
 .km-collapse-toggle svg {
@@ -1515,7 +1648,9 @@ body.km-column-resizing * {
   box-shadow: 0 4px 18px rgba(0, 0, 0, 0.18);
   opacity: 0;
   pointer-events: none;
-  transition: opacity 0.18s var(--ease-out), transform 0.18s var(--ease-out);
+  transition:
+    opacity 0.18s var(--ease-out),
+    transform 0.18s var(--ease-out);
   z-index: 1500;
 }
 .km-toast.show {
@@ -1543,7 +1678,11 @@ body.km-column-resizing * {
   font: inherit;
   font-size: 12px;
   opacity: 0.7;
-  transition: opacity 0.15s, color 0.12s, background 0.12s, border-color 0.12s;
+  transition:
+    opacity 0.15s,
+    color 0.12s,
+    background 0.12s,
+    border-color 0.12s;
 }
 .km-source-btn:hover {
   opacity: 1;
@@ -1573,7 +1712,11 @@ body.km-column-resizing * {
   box-shadow: var(--shadow-sm);
   cursor: pointer;
   opacity: 0.7;
-  transition: opacity 0.15s, color 0.12s, background 0.12s, border-color 0.12s;
+  transition:
+    opacity 0.15s,
+    color 0.12s,
+    background 0.12s,
+    border-color 0.12s;
 }
 .km-layout-btn {
   right: 14px;
@@ -1626,8 +1769,12 @@ body.km-column-resizing * {
   min-width: 0;
   border-radius: var(--radius-sm);
 }
-.km-ol-row:hover { background: var(--hover); }
-.km-ol-row.dragging { opacity: 0.42; }
+.km-ol-row:hover {
+  background: var(--hover);
+}
+.km-ol-row.dragging {
+  opacity: 0.42;
+}
 .km-ol-row.drag-over-before::before,
 .km-ol-row.drag-over-after::after {
   position: absolute;
@@ -1639,8 +1786,12 @@ body.km-column-resizing * {
   background: var(--accent);
   content: '';
 }
-.km-ol-row.drag-over-before::before { top: -1px; }
-.km-ol-row.drag-over-after::after { bottom: -1px; }
+.km-ol-row.drag-over-before::before {
+  top: -1px;
+}
+.km-ol-row.drag-over-after::after {
+  bottom: -1px;
+}
 .km-ol-drag {
   display: inline-flex;
   align-items: center;
@@ -1652,8 +1803,12 @@ body.km-column-resizing * {
   cursor: grab;
   opacity: 0;
 }
-.km-ol-row:hover .km-ol-drag { opacity: 1; }
-.km-ol-drag:active { cursor: grabbing; }
+.km-ol-row:hover .km-ol-drag {
+  opacity: 1;
+}
+.km-ol-drag:active {
+  cursor: grabbing;
+}
 .km-ol-item {
   display: block;
   min-width: 0;
@@ -1874,7 +2029,8 @@ body.km-column-resizing * {
   animation: km-search-reveal 1.8s ease-out;
 }
 @keyframes km-search-reveal {
-  0%, 35% {
+  0%,
+  35% {
     background: color-mix(in srgb, var(--accent) 22%, transparent);
     box-shadow: inset 3px 0 0 var(--accent);
   }
@@ -1926,7 +2082,9 @@ body.km-column-resizing * {
   white-space: nowrap;
 }
 @media (hover: none), (pointer: coarse) {
-  .km-mermaid-zoom { opacity: 1; }
+  .km-mermaid-zoom {
+    opacity: 1;
+  }
 }
 .km-zoom-bar {
   position: fixed;

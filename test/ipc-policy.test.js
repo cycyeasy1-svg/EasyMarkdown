@@ -31,14 +31,25 @@ describe('IPC argument policy', () => {
     expect(validateIpcArgs('spell:set', ['true'])).toBe(false)
     expect(validateIpcArgs('app:setLang', ['ja'])).toBe(true)
     expect(validateIpcArgs('app:setLang', ['de'])).toBe(false)
+    expect(validateIpcArgs('shell:openLocalPath', ['assets/report.pdf', 'C:\\Docs\\note.md'])).toBe(
+      true
+    )
+    expect(validateIpcArgs('shell:openLocalPath', ['assets/report.pdf', 'note.md'])).toBe(false)
+    expect(validateIpcArgs('shell:openLocalPath', ['bad\0file.pdf', 'C:\\Docs\\note.md'])).toBe(
+      false
+    )
   })
 
   it('bounds renderer diagnostic events and payloads', () => {
     expect(validateIpcArgs('diagnostics:export', [])).toBe(true)
     expect(validateIpcArgs('diagnostics:export', ['unexpected'])).toBe(false)
-    expect(validateIpcArgs('diagnostics:log', ['error', 'render-failure', { message: 'boom' }])).toBe(true)
+    expect(
+      validateIpcArgs('diagnostics:log', ['error', 'render-failure', { message: 'boom' }])
+    ).toBe(true)
     expect(validateIpcArgs('diagnostics:log', ['fatal', 'render-failure', {}])).toBe(false)
     expect(validateIpcArgs('diagnostics:log', ['error', 'bad event', {}])).toBe(false)
-    expect(validateIpcArgs('diagnostics:log', ['error', 'too-large', { message: 'x'.repeat(20_000) }])).toBe(false)
+    expect(
+      validateIpcArgs('diagnostics:log', ['error', 'too-large', { message: 'x'.repeat(20_000) }])
+    ).toBe(false)
   })
 })

@@ -20,11 +20,14 @@ describe('PDF document assembly', () => {
   })
 
   it('builds an escaped nested table of contents within the requested depth', () => {
-    const html = buildPdfToc([
-      { id: 'one', level: 1, text: 'One & only' },
-      { id: 'child', level: 2, text: '<Child>' },
-      { id: 'deep', level: 4, text: 'Ignored' }
-    ], { includeToc: true, tocDepth: 2 })
+    const html = buildPdfToc(
+      [
+        { id: 'one', level: 1, text: 'One & only' },
+        { id: 'child', level: 2, text: '<Child>' },
+        { id: 'deep', level: 4, text: 'Ignored' }
+      ],
+      { includeToc: true, tocDepth: 2 }
+    )
     expect(html).toContain('href="#one"')
     expect(html).toContain('One &amp; only')
     expect(html).toContain('&lt;Child&gt;')
@@ -47,8 +50,9 @@ describe('PDF document assembly', () => {
   })
 
   it('uses Electron header/footer placeholders only when enabled', () => {
-    expect(buildPdfHeaderFooter({ headerEnabled: false, footerEnabled: false }))
-      .toMatchObject({ displayHeaderFooter: false })
+    expect(buildPdfHeaderFooter({ headerEnabled: false, footerEnabled: false })).toMatchObject({
+      displayHeaderFooter: false
+    })
     const templates = buildPdfHeaderFooter({
       documentTitle: '<Title>',
       headerEnabled: true,
@@ -69,5 +73,8 @@ describe('PDF document assembly', () => {
     expect(css).toContain('--hm-pdf-line-height:1.4')
     expect(css).toContain('table[data-hm-pdf-table-layout="measured"]')
     expect(css).toContain('table-layout: auto')
+    expect(css).toContain('.doc .hm-code-line::before')
+    expect(css).toContain('content: counter(hm-code-line)')
+    expect(css).toContain('page-break-inside: auto')
   })
 })

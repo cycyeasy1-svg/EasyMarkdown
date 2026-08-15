@@ -37,6 +37,7 @@ import { createLocalLogger } from './local-logger.js'
 import { createCrashLoopTracker } from './crash-loop.js'
 import { createPdfExportService } from './pdf-export.js'
 import { createHtmlExportService } from './html-export.js'
+import { resolveLocalLinkPath } from './local-links.js'
 import { shouldCreateMainWindow } from './window-lifecycle.js'
 import { registerWindowIpc } from './window-ipc.js'
 import { registerUpdateIpc } from './update-ipc.js'
@@ -56,6 +57,25 @@ async function openExternalUrl(url) {
   try {
     await shell.openExternal(allowedUrl)
     return { ok: true }
+  } catch (error) {
+    return { ok: false, error: error?.message || String(error) }
+  }
+}
+
+async function openLocalLink(href, fromPath) {
+  const resolved = resolveLocalLinkPath(fromPath, href)
+  if (!resolved.ok) return resolved
+  if (resolved.markdown) {
+    return { ok: false, error: 'Markdown links must open inside EasyMarkdown.' }
+  }
+  if (resolved.blockedExtension) {
+    return { ok: false, error: `Blocked unsafe file type: ${resolved.blockedExtension}` }
+  }
+  try {
+    const stat = await fs.stat(resolved.path)
+    if (!stat.isFile()) return { ok: false, error: 'Local link is not a regular file.' }
+    const error = await shell.openPath(resolved.path)
+    return error ? { ok: false, error } : { ok: true }
   } catch (error) {
     return { ok: false, error: error?.message || String(error) }
   }
@@ -144,6 +164,28 @@ const PDF_CSS = `
     background: none; padding: 0; color: #2a2620; font-size: 0.86em; line-height: 1.6;
     white-space: pre-wrap; word-break: break-word;
   }
+  .doc pre.hm-code-block {
+    padding: 0; overflow: hidden; page-break-inside: auto;
+  }
+  .doc code.hm-code-lines {
+    display: block; padding: 0; counter-reset: hm-code-line; line-height: 1.6;
+  }
+  .doc .hm-code-line {
+    display: grid; grid-template-columns: 3.75em minmax(0, 1fr); min-height: 1.6em;
+    counter-increment: hm-code-line; page-break-inside: avoid;
+  }
+  .doc .hm-code-line::before {
+    content: counter(hm-code-line); padding: 0 0.75em 0 0.5em;
+    border-right: 1px solid #ddd7cc; background: #ebe6dc; color: #8a8175;
+    text-align: right; user-select: none;
+  }
+  .doc .hm-code-line-text {
+    min-width: 0; padding: 0 1em; overflow-wrap: anywhere; white-space: pre-wrap;
+  }
+  .doc .hm-code-line:first-child::before,
+  .doc .hm-code-line:first-child .hm-code-line-text { padding-top: 12px; }
+  .doc .hm-code-line:last-child::before,
+  .doc .hm-code-line:last-child .hm-code-line-text { padding-bottom: 12px; }
   .doc table { border-collapse: collapse; width: 100%; margin: 1em 0; font-size: 0.95em; page-break-inside: avoid; }
   .doc th, .doc td { border: 1px solid #e6e1d8; padding: 8px 12px; text-align: left; vertical-align: top; }
   .doc th { background: #f4f1ea; font-weight: 700; color: #16130e; }
@@ -1464,6 +1506,10 @@ ipcMain.handle('shell:openExternal', async (event, url) => {
   }
   return openExternalUrl(url)
 })
+
+ipcMain.handle('shell:openLocalPath', async (_event, href, fromPath) =>
+  openLocalLink(href, fromPath)
+)
 
 ipcMain.handle('clipboard:writeText', (event, text) => {
   if (!mainWindow || event.sender.id !== mainWindow.webContents.id) return false

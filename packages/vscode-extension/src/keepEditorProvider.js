@@ -1,6 +1,7 @@
 const vscode = require('vscode')
 const { isSplitScrollPeer } = require('./scrollSync')
 const { parseWorkspaceRootLink } = require('./linkPath')
+const { parseLocalLinkReference } = require('../../../src/shared/local-link-reference.js')
 // Pure filename sanitizer shared with the desktop app's image:save IPC — same
 // naming convention for pasted images on both sides.
 const {
@@ -109,10 +110,7 @@ class KeepEditorProvider {
     const docDir = vscode.Uri.joinPath(document.uri, '..')
     webview.options = {
       enableScripts: true,
-      localResourceRoots: [
-        vscode.Uri.joinPath(this.context.extensionUri, 'dist'),
-        docDir
-      ]
+      localResourceRoots: [vscode.Uri.joinPath(this.context.extensionUri, 'dist'), docDir]
     }
 
     // `lastKnownText` is what the document held the last time we synced the
@@ -156,15 +154,14 @@ class KeepEditorProvider {
     // sends line 0 into the hidden Keep webview and destroys its saved viewport.
     const visibleSourcePeers = () => {
       if (!webviewPanel.visible || webviewPanel.viewColumn == null) return []
-      return vscode.window.visibleTextEditors.filter(
-        (editor) =>
-          isSplitScrollPeer({
-            documentKey: docKey,
-            editorDocumentKey: editor.document.uri.toString(),
-            keepVisible: webviewPanel.visible,
-            keepColumn: webviewPanel.viewColumn,
-            sourceColumn: editor.viewColumn
-          })
+      return vscode.window.visibleTextEditors.filter((editor) =>
+        isSplitScrollPeer({
+          documentKey: docKey,
+          editorDocumentKey: editor.document.uri.toString(),
+          keepVisible: webviewPanel.visible,
+          keepColumn: webviewPanel.viewColumn,
+          sourceColumn: editor.viewColumn
+        })
       )
     }
     const isVisibleSourcePeer = (editor) =>
@@ -372,19 +369,14 @@ class KeepEditorProvider {
    */
   async openRelative(document, webview, href, openToSide = false) {
     try {
-      const hashAt = String(href).indexOf('#')
-      const pathPart = hashAt >= 0 ? String(href).slice(0, hashAt) : String(href)
-      const fragment = hashAt >= 0 ? String(href).slice(hashAt + 1) : ''
-      let rel = ''
-      try {
-        rel = decodeURIComponent(pathPart)
-      } catch {
-        rel = pathPart
-      }
-      if (!rel) {
+      const reference = parseLocalLinkReference(href)
+      if (!reference) return
+      const fragment = reference.fragment || ''
+      if (reference.kind === 'anchor') {
         if (fragment) webview.postMessage({ type: 'scrollToAnchor', slug: fragment })
         return
       }
+      const rel = reference.path || reference.uri || ''
       const workspaceLink = parseWorkspaceRootLink(rel)
       if (workspaceLink && !workspaceLink.valid) {
         vscode.window.showWarningMessage(`EasyMarkdown: invalid workspace-root link - ${rel}`)
@@ -396,7 +388,11 @@ class KeepEditorProvider {
           candidates.push(uri)
         }
       }
-      if (workspaceLink) {
+      if (reference.kind === 'file-url') {
+        pushCandidate(vscode.Uri.parse(reference.uri))
+      } else if (reference.kind === 'absolute') {
+        pushCandidate(vscode.Uri.file(reference.path))
+      } else if (workspaceLink) {
         const folder = vscode.workspace.getWorkspaceFolder(document.uri)
         if (folder) pushCandidate(vscode.Uri.joinPath(folder.uri, ...workspaceLink.segments))
         if (document.uri.scheme === 'file') pushCandidate(vscode.Uri.file(rel))
@@ -479,13 +475,17 @@ class KeepEditorProvider {
   async attachFiles(uri) {
     const zh = (vscode.env.language || '').toLowerCase().startsWith('zh')
     const ja = (vscode.env.language || '').toLowerCase().startsWith('ja')
-    const fail = (detail) => vscode.window.showErrorMessage(
-      zh ? `EasyMarkdown：添加附件失败：${detail}` :
-        ja ? `EasyMarkdown：添付ファイルを追加できませんでした：${detail}` :
-          `EasyMarkdown: could not add attachment: ${detail}`
-    )
+    const fail = (detail) =>
+      vscode.window.showErrorMessage(
+        zh
+          ? `EasyMarkdown：添加附件失败：${detail}`
+          : ja
+            ? `EasyMarkdown：添付ファイルを追加できませんでした：${detail}`
+            : `EasyMarkdown: could not add attachment: ${detail}`
+      )
     try {
-      if (!(uri instanceof vscode.Uri) || uri.scheme !== 'file') return fail('Save the document first.')
+      if (!(uri instanceof vscode.Uri) || uri.scheme !== 'file')
+        return fail('Save the document first.')
       const picked = await vscode.window.showOpenDialog({
         canSelectFiles: true,
         canSelectFolders: false,
@@ -510,27 +510,38 @@ class KeepEditorProvider {
               break
             }
           }
-          await vscode.workspace.fs.copy(source, vscode.Uri.joinPath(assetsDir, fileName), { overwrite: false })
+          await vscode.workspace.fs.copy(source, vscode.Uri.joinPath(assetsDir, fileName), {
+            overwrite: false
+          })
         }
         links.push(attachmentLinkMarkdown(originalName, 'assets/' + fileName))
       }
       const markdown = links.join('\n')
       const activeInput = vscode.window.tabGroups.activeTabGroup?.activeTab?.input
-      const activeCustom = activeInput instanceof vscode.TabInputCustom && activeInput.uri?.toString() === uri.toString()
+      const activeCustom =
+        activeInput instanceof vscode.TabInputCustom &&
+        activeInput.uri?.toString() === uri.toString()
       const panel = this.panels.get(uri.toString())
       if (activeCustom && panel) {
         await panel.webview.postMessage({ type: 'insertAttachment', markdown })
       } else {
-        const editor = vscode.window.visibleTextEditors.find((item) => item.document.uri.toString() === uri.toString())
+        const editor = vscode.window.visibleTextEditors.find(
+          (item) => item.document.uri.toString() === uri.toString()
+        )
         if (!editor) return fail('No active editor.')
         const eol = editor.document.eol === vscode.EndOfLine.CRLF ? '\r\n' : '\n'
         const sourceMarkdown = markdown.replace(/\n/g, eol)
-        await editor.edit((edit) => edit.replace(editor.selection, sourceMarkdown), { undoStopBefore: true, undoStopAfter: true })
+        await editor.edit((edit) => edit.replace(editor.selection, sourceMarkdown), {
+          undoStopBefore: true,
+          undoStopAfter: true
+        })
       }
       vscode.window.showInformationMessage(
-        zh ? `EasyMarkdown：已添加 ${links.length} 个附件。` :
-          ja ? `EasyMarkdown：${links.length} 件の添付ファイルを追加しました。` :
-            `EasyMarkdown: added ${links.length} attachment(s).`
+        zh
+          ? `EasyMarkdown：已添加 ${links.length} 个附件。`
+          : ja
+            ? `EasyMarkdown：${links.length} 件の添付ファイルを追加しました。`
+            : `EasyMarkdown: added ${links.length} attachment(s).`
       )
     } catch (error) {
       fail(error?.message || String(error))

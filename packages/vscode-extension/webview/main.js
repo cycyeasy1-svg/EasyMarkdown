@@ -26,7 +26,11 @@ import {
   createKeepFormatToolbar,
   keepBlockSupportsFormatting
 } from '../../../src/renderer/src/keep-format.js'
-import { inlineRichStyles } from '../../../src/renderer/src/components/editor-copy.js'
+import {
+  copiedPlainText,
+  inlineRichStyles,
+  materializeCopiedCodeLines
+} from '../../../src/renderer/src/components/editor-copy.js'
 import { isRelativePath } from '../../../src/renderer/src/components/editor-images.js'
 import { enhanceKeepTables } from '../../../src/renderer/src/components/editor-tablescroll.js'
 import {
@@ -1824,8 +1828,10 @@ function richHtml(node) {
   const wrap = document.createElement('div')
   wrap.appendChild(node)
   wrap.querySelectorAll('.km-src-edit, .km-filter-btn, button').forEach((el) => el.remove())
+  const hadCodeLines = materializeCopiedCodeLines(wrap)
+  const text = hadCodeLines ? copiedPlainText(wrap, wrap.textContent || '') : wrap.textContent || ''
   inlineRichStyles(wrap)
-  return { html: `<div style="${COPY_WRAP}">${wrap.innerHTML}</div>`, text: wrap.textContent || '' }
+  return { html: `<div style="${COPY_WRAP}">${wrap.innerHTML}</div>`, text }
 }
 function writeRich(node, plain) {
   const r = richHtml(node)
@@ -1883,8 +1889,11 @@ function onCopy(e) {
     const wrap = document.createElement('div')
     wrap.appendChild(sel.getRangeAt(0).cloneContents())
     wrap.querySelectorAll('.km-src-edit, .km-filter-btn, button').forEach((el) => el.remove())
+    const hadCodeLines = materializeCopiedCodeLines(wrap)
+    const plain = hadCodeLines
+      ? copiedPlainText(wrap, wrap.textContent || sel.toString())
+      : sel.toString()
     inlineRichStyles(wrap)
-    const plain = sel.toString()
     if (!wrap.innerHTML.trim() && !plain) return
     e.clipboardData.setData('text/html', `<div style="${COPY_WRAP}">${wrap.innerHTML}</div>`)
     e.clipboardData.setData('text/plain', plain)
@@ -3028,7 +3037,7 @@ function activateLink(href, { openToSide = false } = {}) {
     vscode.postMessage({ type: 'openExternal', url: href })
     return
   }
-  if (/^[a-z][a-z\d+.-]*:/i.test(href)) {
+  if (!/^[a-zA-Z]:[\\/]/.test(href) && !/^file:/i.test(href) && /^[a-z][a-z\d+.-]*:/i.test(href)) {
     return
   }
   // Relative file link (optionally with #fragment) — the host resolves it
