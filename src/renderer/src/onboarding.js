@@ -44,6 +44,7 @@ Cycle the status-bar view button to **Source + Keep** to edit raw Markdown besid
 
 ## General features
 
+- **Recovery and diagnostics** — if the interface fails, reload it, open safe mode, export redacted diagnostics, or reset only the session or settings. Safe mode temporarily skips session restore and custom themes without deleting stored data or document files.
 - **Export studios** — PDF adds body-size and density controls, while HTML offers desktop/mobile preview, reading styles, width, type and contents settings. Both remember the most recent output folder; images, Mermaid and full code blocks are captured from the latest document state.
 - **Appearance, session and layout** — follow the operating system's light/dark appearance with separate themes, choose whether to restore the previous session, preserve ordinary source line breaks in Milkdown, and adjust heading spacing.
 - **Tabs and workspace-root links** — when tabs overflow, the edge arrows and mouse wheel scroll the strip without changing the active document. A path such as /docs/guide.md resolves from the workspace root for opening, diagnostics, references and rename updates.
@@ -131,6 +132,7 @@ const ZH = `# EasyMarkdown 使用说明 📝
 
 ## 通用功能
 
+- **恢复与诊断** —— 界面异常时，可重新加载、进入安全模式、导出已脱敏的诊断信息，或仅重置会话与设置。安全模式只会暂时跳过会话恢复和自定义主题，不会删除已存数据或磁盘文档。
 - **导出工作室** —— PDF 新增正文字号和文档密度，HTML 支持桌面端/移动端预览、阅读样式、宽度、字号与目录设置；两者记住最近的保存目录，并从最新文档状态完整获取图片、Mermaid 和代码块。
 - **外观、会话与排版** —— 可跟随系统日间/夜间外观并分别指定主题，选择是否恢复上次会话，在 Milkdown 中保留源码普通单换行，并调整标题间距。
 - **标签与工作区根链接** —— 标签放不下时可用两侧按钮或鼠标滚轮滚动，不会切换当前文档；/docs/guide.md 这类路径会从工作区根目录解析，并用于打开、诊断、引用查询与重命名更新。
@@ -218,6 +220,7 @@ const JA = `# EasyMarkdown 使い方ガイド 📝
 
 ## 共通機能
 
+- **復旧と診断** —— 画面で問題が発生した場合、再読み込み、safe mode、redaction 済み診断情報の export、session または設定だけの reset を選べます。safe mode は session 復元と custom theme を一時的に無効化するだけで、保存済み data や文書ファイルを削除しません。
 - **書き出しスタジオ** —— PDF に本文サイズと文書密度を追加し、HTML ではデスクトップ／モバイルのプレビュー、閲覧スタイル、幅、文字サイズ、目次を設定できます。両方で直前の保存先を共有し、最新の文書状態から画像、Mermaid、コードブロックを完全に取得します。
 - **外観・セッション・組版** —— OS のライト／ダーク外観に合わせて個別テーマを選び、前回セッションの復元有無、Milkdown でのソース改行表示、見出し間隔を設定できます。
 - **タブとワークスペースルートリンク** —— タブが収まらないときは左右のボタンやマウスホイールで、現在の文書を切り替えずにスクロールできます。/docs/guide.md のようなパスはワークスペースルートから解決し、表示、診断、参照検索、名前変更更新に利用します。

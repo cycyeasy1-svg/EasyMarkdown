@@ -1,190 +1,290 @@
 <!doctype html>
 <html lang="zh-CN">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <script>document.documentElement.classList.add('js')</script>
-  <title>EasyMarkdown — 像操作 Excel 一样操作 Markdown</title>
-  <meta name="description" content="EasyMarkdown：免费开源的 Markdown 编辑器。保持模式零差分保存——未编辑的字节一个都不动；表格可按列筛选。Windows、macOS 与 VSCode 扩展。" />
-  <meta name="keywords" content="EasyMarkdown,Markdown 编辑器,零差分保存,Markdown 表格筛选,保持模式,Typora 替代,WYSIWYG,标签页,文件树,开源" />
-  <link rel="icon" type="image/png" href="./assets/icon.png" />
-  <link rel="canonical" href="https://cycyeasy1-svg.github.io/EasyMarkdown/" />
-  <!-- 给 LLM / 爬虫的 markdown 镜像入口 -->
-  <link rel="alternate" type="text/markdown" href="https://cycyeasy1-svg.github.io/EasyMarkdown/index.md" />
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <script>
+      document.documentElement.classList.add('js')
+    </script>
+    <title>EasyMarkdown — 像操作 Excel 一样操作 Markdown</title>
+    <meta
+      name="description"
+      content="EasyMarkdown：免费开源的 Markdown 编辑器。保持模式零差分保存——未编辑的字节一个都不动；表格可按列筛选。Windows、macOS 与 VSCode 扩展。"
+    />
+    <meta
+      name="keywords"
+      content="EasyMarkdown,Markdown 编辑器,零差分保存,Markdown 表格筛选,保持模式,Typora 替代,WYSIWYG,标签页,文件树,开源"
+    />
+    <link rel="icon" type="image/png" href="./assets/icon.png" />
+    <link rel="canonical" href="https://cycyeasy1-svg.github.io/EasyMarkdown/" />
+    <!-- 给 LLM / 爬虫的 markdown 镜像入口 -->
+    <link
+      rel="alternate"
+      type="text/markdown"
+      href="https://cycyeasy1-svg.github.io/EasyMarkdown/index.md"
+    />
 
-  <!-- Open Graph -->
-  <meta property="og:type" content="website" />
-  <meta property="og:site_name" content="EasyMarkdown" />
-  <meta property="og:title" content="EasyMarkdown — Edit Markdown. Touch nothing else." />
-  <meta property="og:description" content="A free, open-source Markdown editor. Keep mode saves a zero-diff result — the bytes you didn't edit stay byte-for-byte. Excel-style table filtering. Windows, macOS and a VS Code extension." />
-  <meta property="og:url" content="https://cycyeasy1-svg.github.io/EasyMarkdown/" />
-  <meta property="og:locale" content="zh_CN" />
-  <meta property="og:locale:alternate" content="en_US" />
-  <meta property="og:image" content="https://cycyeasy1-svg.github.io/EasyMarkdown/assets/og.jpg" />
-  <meta property="og:image:width" content="1200" />
-  <meta property="og:image:height" content="630" />
-  <meta property="og:image:alt" content="EasyMarkdown — 像操作 Excel 一样操作 Markdown。免费开源，保持模式零差分保存。" />
-  <meta name="twitter:card" content="summary_large_image" />
-  <meta name="twitter:title" content="EasyMarkdown — Edit Markdown. Touch nothing else." />
-  <meta name="twitter:description" content="A free, open-source Markdown editor. Keep mode saves a zero-diff result — the bytes you didn't edit stay byte-for-byte. Excel-style table filtering." />
-  <meta name="twitter:image" content="https://cycyeasy1-svg.github.io/EasyMarkdown/assets/og.jpg" />
+    <!-- Open Graph -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="EasyMarkdown" />
+    <meta property="og:title" content="EasyMarkdown — Edit Markdown. Touch nothing else." />
+    <meta
+      property="og:description"
+      content="A free, open-source Markdown editor. Keep mode saves a zero-diff result — the bytes you didn't edit stay byte-for-byte. Excel-style table filtering. Windows, macOS and a VS Code extension."
+    />
+    <meta property="og:url" content="https://cycyeasy1-svg.github.io/EasyMarkdown/" />
+    <meta property="og:locale" content="zh_CN" />
+    <meta property="og:locale:alternate" content="en_US" />
+    <meta
+      property="og:image"
+      content="https://cycyeasy1-svg.github.io/EasyMarkdown/assets/og.jpg"
+    />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta
+      property="og:image:alt"
+      content="EasyMarkdown — 像操作 Excel 一样操作 Markdown。免费开源，保持模式零差分保存。"
+    />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="EasyMarkdown — Edit Markdown. Touch nothing else." />
+    <meta
+      name="twitter:description"
+      content="A free, open-source Markdown editor. Keep mode saves a zero-diff result — the bytes you didn't edit stay byte-for-byte. Excel-style table filtering."
+    />
+    <meta
+      name="twitter:image"
+      content="https://cycyeasy1-svg.github.io/EasyMarkdown/assets/og.jpg"
+    />
 
-  <!-- 结构化数据 -->
-  <script type="application/ld+json">
-  {
-    "@context": "https://schema.org",
-    "@type": "SoftwareApplication",
-    "name": "EasyMarkdown",
-    "url": "https://cycyeasy1-svg.github.io/EasyMarkdown/",
-    "applicationCategory": "Productivity",
-    "operatingSystem": "Windows, macOS (Apple Silicon & Intel), Android",
-    "softwareVersion": "1.4.0",
-    "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
-    "license": "https://opensource.org/licenses/MIT",
-    "downloadUrl": "https://github.com/cycyeasy1-svg/EasyMarkdown/releases/latest",
-    "screenshot": "https://cycyeasy1-svg.github.io/EasyMarkdown/assets/hero_light.png",
-    "author": {
-      "@type": "Person",
-      "name": "Easy Chen",
-      "url": "https://github.com/cycyeasy1-svg"
-    },
-    "sameAs": ["https://github.com/cycyeasy1-svg/EasyMarkdown"],
-    "description": "A free, open-source Markdown editor. Keep mode treats the original file as the source of truth and rewrites only the lines you edited, so saving leaves a zero diff; tables support Excel-style column filtering. 免费开源的 Markdown 编辑器：保持模式零差分保存，未编辑的字节一个都不动；表格支持 Excel 式列筛选。"
-  }
-  </script>
-  <!-- 無印风：纯系统字体栈，无外部字体 -->
-  <link rel="stylesheet" href="./styles.css" />
-</head>
-<body>
+    <!-- 结构化数据 -->
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "SoftwareApplication",
+        "name": "EasyMarkdown",
+        "url": "https://cycyeasy1-svg.github.io/EasyMarkdown/",
+        "applicationCategory": "Productivity",
+        "operatingSystem": "Windows, macOS (Apple Silicon & Intel), Android",
+        "softwareVersion": "1.5.0",
+        "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+        "license": "https://opensource.org/licenses/MIT",
+        "downloadUrl": "https://github.com/cycyeasy1-svg/EasyMarkdown/releases/latest",
+        "screenshot": "https://cycyeasy1-svg.github.io/EasyMarkdown/assets/hero_light.png",
+        "author": {
+          "@type": "Person",
+          "name": "Easy Chen",
+          "url": "https://github.com/cycyeasy1-svg"
+        },
+        "sameAs": ["https://github.com/cycyeasy1-svg/EasyMarkdown"],
+        "description": "A free, open-source Markdown editor. Keep mode treats the original file as the source of truth and rewrites only the lines you edited, so saving leaves a zero diff; tables support Excel-style column filtering. 免费开源的 Markdown 编辑器：保持模式零差分保存，未编辑的字节一个都不动；表格支持 Excel 式列筛选。"
+      }
+    </script>
+    <!-- 無印风：纯系统字体栈，无外部字体 -->
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <!-- ───────────── 顶部导航 ───────────── -->
+    <header class="nav">
+      <a class="nav-brand" href="#top" aria-label="EasyMarkdown">
+        <img src="./assets/icon.png" alt="" width="24" height="24" />
+        <span class="brand-name">EasyMarkdown</span>
+        <span class="brand-ver" id="navVersion">v1.5.0</span>
+      </a>
+      <nav class="nav-links">
+        <a href="#features" data-i18n="nav.features">特性</a>
+        <a href="#themes" data-i18n="nav.themes">主题</a>
+        <a href="https://github.com/cycyeasy1-svg/EasyMarkdown" target="_blank" rel="noopener"
+          >GITHUB</a
+        >
+      </nav>
+      <button class="lang-toggle" id="langToggle" aria-label="Switch language">EN</button>
+    </header>
 
-  <!-- ───────────── 顶部导航 ───────────── -->
-  <header class="nav">
-    <a class="nav-brand" href="#top" aria-label="EasyMarkdown">
-      <img src="./assets/icon.png" alt="" width="24" height="24" />
-      <span class="brand-name">EasyMarkdown</span>
-      <span class="brand-ver" id="navVersion">v1.4.0</span>
-    </a>
-    <nav class="nav-links">
-      <a href="#features" data-i18n="nav.features">特性</a>
-      <a href="#themes" data-i18n="nav.themes">主题</a>
-      <a href="https://github.com/cycyeasy1-svg/EasyMarkdown" target="_blank" rel="noopener">GITHUB</a>
-    </nav>
-    <button class="lang-toggle" id="langToggle" aria-label="Switch language">EN</button>
-  </header>
-
-  <main id="top">
-
-    <!-- ───────────── Hero ───────────── -->
-    <section class="hero">
-      <p class="kicker label reveal" data-i18n="hero.kicker">免费 · 开源 · 不要账号</p>
-      <h1 class="hero-title">
-        <span class="split-line"><span data-i18n="hero.l1">一个窗口，</span></span><br />
-        <span class="split-line"><span data-i18n="hero.l2">装下所有 .md 文件</span></span>
-      </h1>
-      <p class="hero-sub reveal" data-i18n="hero.sub">
-        一个免费的 Typora 平替，但不止于此。
-      </p>
-      <div class="hero-cta reveal">
-        <a class="btn btn-solid" id="dlWin" href="https://github.com/cycyeasy1-svg/EasyMarkdown/releases/latest" target="_blank" rel="noopener">
-          <span data-i18n="cta.win">下载 Windows 版</span> <span class="arrow-pull">↓</span>
-        </a>
-        <a class="btn btn-solid" id="dlMac" href="https://github.com/cycyeasy1-svg/EasyMarkdown#%E5%AE%89%E8%A3%85" target="_blank" rel="noopener">
-          <span data-i18n="cta.mac">macOS 下载 & 安装</span> <span class="arrow-pull">→</span>
-        </a>
-        <a class="btn btn-solid" id="dlAndroid" href="https://github.com/cycyeasy1-svg/EasyMarkdown/releases/latest" target="_blank" rel="noopener">
-          <span data-i18n="cta.android">下载安卓 APK</span> <span class="arrow-pull">↓</span>
-        </a>
-      </div>
-      <p class="hero-note reveal" data-i18n="hero.note">
-        构建未签名 — Windows：更多信息 → 仍要运行 · macOS（Apple 芯片 / Intel 均可）：右键 → 打开 · 安卓：安装 APK 时允许"未知来源"
-      </p>
-    </section>
-
-    <!-- 商品照式截图 -->
-    <figure class="photo reveal">
-      <img src="./assets/hero_light.png" alt="EasyMarkdown：文件树工作区、标签页与所见即所得编辑" loading="eager" />
-      <figcaption data-i18n="hero.caption">EASYMARKDOWN · 文件树 / 标签页 / 所见即所得</figcaption>
-    </figure>
-
-    <p class="hero-strip reveal">
-      <span>WYSIWYG</span><span class="sep">·</span>
-      <span data-i18n="strip.tabs">标签页</span><span class="sep">·</span>
-      <span data-i18n="strip.tree">文件树</span><span class="sep">·</span>
-      <span>⌘P</span><span class="sep">·</span>
-      <span>LaTeX</span><span class="sep">·</span>
-      <span data-i18n="strip.i18n">EN / 中文</span><span class="sep">·</span>
-      <span data-i18n="strip.themes">6 套主题</span>
-    </p>
-
-    <!-- ───────────── 特性：规格表 ───────────── -->
-    <section class="section" id="features">
-      <div class="section-head reveal">
-        <h2 data-i18n="features.title">它能做什么</h2>
-      </div>
-      <div class="feature-grid">
-        <article class="card reveal">
-          <span class="card-index">01</span>
-          <h3 data-i18n="f1.title">标签页</h3>
-          <p data-i18n="f1.body">双击一个文件，是多一个标签，不是多一个窗口。</p>
-          <kbd>Ctrl/⌘ Tab</kbd>
-        </article>
-        <article class="card reveal">
-          <span class="card-index">02</span>
-          <h3 data-i18n="f2.title">文件夹工作区</h3>
-          <p data-i18n="f2.body">整个文件夹挂在侧边栏，新建、重命名、删除都不用切出去。</p>
-          <kbd>Ctrl/⌘ B</kbd>
-        </article>
-        <article class="card reveal">
-          <span class="card-index">03</span>
-          <h3 data-i18n="f3.title">所见即所得</h3>
-          <p data-i18n="f3.body">打字就渲染。表格、代码高亮、LaTeX、任务清单都认。</p>
-          <kbd>/</kbd>
-        </article>
-        <article class="card reveal">
-          <span class="card-index">04</span>
-          <h3 data-i18n="f4.title">富文本复制</h3>
-          <p data-i18n="f4.body">复制自带格式，粘进微信公众号、邮件、Notion 都不丢样式。</p>
-          <kbd>Ctrl/⌘ C</kbd>
-        </article>
-      </div>
-    </section>
-
-    <!-- ───────────── 主题 ───────────── -->
-    <section class="section" id="themes">
-      <div class="section-head reveal">
-        <h2 data-i18n="themes.title">六套主题</h2>
-      </div>
-      <div class="theme-stage reveal">
-        <div class="theme-shot">
-          <img src="./assets/hero_light.png" alt="EasyMarkdown 主题预览" id="themeImgA" class="on" loading="lazy" />
-          <img src="./assets/theme_dark.png" alt="" id="themeImgB" loading="lazy" />
+    <main id="top">
+      <!-- ───────────── Hero ───────────── -->
+      <section class="hero">
+        <p class="kicker label reveal" data-i18n="hero.kicker">免费 · 开源 · 不要账号</p>
+        <h1 class="hero-title">
+          <span class="split-line"><span data-i18n="hero.l1">一个窗口，</span></span
+          ><br />
+          <span class="split-line"><span data-i18n="hero.l2">装下所有 .md 文件</span></span>
+        </h1>
+        <p class="hero-sub reveal" data-i18n="hero.sub">一个免费的 Typora 平替，但不止于此。</p>
+        <div class="hero-cta reveal">
+          <a
+            class="btn btn-solid"
+            id="dlWin"
+            href="https://github.com/cycyeasy1-svg/EasyMarkdown/releases/latest"
+            target="_blank"
+            rel="noopener"
+          >
+            <span data-i18n="cta.win">下载 Windows 版</span> <span class="arrow-pull">↓</span>
+          </a>
+          <a
+            class="btn btn-solid"
+            id="dlMac"
+            href="https://github.com/cycyeasy1-svg/EasyMarkdown#%E5%AE%89%E8%A3%85"
+            target="_blank"
+            rel="noopener"
+          >
+            <span data-i18n="cta.mac">macOS 下载 & 安装</span> <span class="arrow-pull">→</span>
+          </a>
+          <a
+            class="btn btn-solid"
+            id="dlAndroid"
+            href="https://github.com/cycyeasy1-svg/EasyMarkdown/releases/latest"
+            target="_blank"
+            rel="noopener"
+          >
+            <span data-i18n="cta.android">下载安卓 APK</span> <span class="arrow-pull">↓</span>
+          </a>
         </div>
-        <div class="theme-picker" role="tablist" aria-label="Themes">
-          <button class="swatch active" role="tab" data-img="hero_light.png" style="--sw:#faf6ef"><span data-i18n="themes.light">明亮</span></button>
-          <button class="swatch" role="tab" data-img="theme_dark.png" style="--sw:#22232b"><span data-i18n="themes.dark">暗夜</span></button>
-          <button class="swatch" role="tab" data-img="theme_morandi_mist.png" style="--sw:#aebfd2"><span data-i18n="themes.mist">雾</span></button>
-          <button class="swatch" role="tab" data-img="theme_morandi_sage.png" style="--sw:#7d8a6a"><span data-i18n="themes.sage">鼠尾草</span></button>
-          <button class="swatch" role="tab" data-img="theme_morandi_rose.png" style="--sw:#a8807b"><span data-i18n="themes.rose">玫瑰</span></button>
-          <button class="swatch" role="tab" data-img="theme_morandi_dusk.png" style="--sw:#5d7385"><span data-i18n="themes.dusk">暮色</span></button>
+        <p class="hero-note reveal" data-i18n="hero.note">
+          构建未签名 — Windows：更多信息 → 仍要运行 · macOS（Apple 芯片 / Intel 均可）：右键 → 打开
+          · 安卓：安装 APK 时允许"未知来源"
+        </p>
+      </section>
+
+      <!-- 商品照式截图 -->
+      <figure class="photo reveal">
+        <img
+          src="./assets/hero_light.png"
+          alt="EasyMarkdown：文件树工作区、标签页与所见即所得编辑"
+          loading="eager"
+        />
+        <figcaption data-i18n="hero.caption">
+          EASYMARKDOWN · 文件树 / 标签页 / 所见即所得
+        </figcaption>
+      </figure>
+
+      <p class="hero-strip reveal">
+        <span>WYSIWYG</span><span class="sep">·</span> <span data-i18n="strip.tabs">标签页</span
+        ><span class="sep">·</span> <span data-i18n="strip.tree">文件树</span
+        ><span class="sep">·</span> <span>⌘P</span><span class="sep">·</span> <span>LaTeX</span
+        ><span class="sep">·</span> <span data-i18n="strip.i18n">EN / 中文</span
+        ><span class="sep">·</span>
+        <span data-i18n="strip.themes">6 套主题</span>
+      </p>
+
+      <!-- ───────────── 特性：规格表 ───────────── -->
+      <section class="section" id="features">
+        <div class="section-head reveal">
+          <h2 data-i18n="features.title">它能做什么</h2>
         </div>
+        <div class="feature-grid">
+          <article class="card reveal">
+            <span class="card-index">01</span>
+            <h3 data-i18n="f1.title">标签页</h3>
+            <p data-i18n="f1.body">双击一个文件，是多一个标签，不是多一个窗口。</p>
+            <kbd>Ctrl/⌘ Tab</kbd>
+          </article>
+          <article class="card reveal">
+            <span class="card-index">02</span>
+            <h3 data-i18n="f2.title">文件夹工作区</h3>
+            <p data-i18n="f2.body">整个文件夹挂在侧边栏，新建、重命名、删除都不用切出去。</p>
+            <kbd>Ctrl/⌘ B</kbd>
+          </article>
+          <article class="card reveal">
+            <span class="card-index">03</span>
+            <h3 data-i18n="f3.title">所见即所得</h3>
+            <p data-i18n="f3.body">打字就渲染。表格、代码高亮、LaTeX、任务清单都认。</p>
+            <kbd>/</kbd>
+          </article>
+          <article class="card reveal">
+            <span class="card-index">04</span>
+            <h3 data-i18n="f4.title">富文本复制</h3>
+            <p data-i18n="f4.body">复制自带格式，粘进微信公众号、邮件、Notion 都不丢样式。</p>
+            <kbd>Ctrl/⌘ C</kbd>
+          </article>
+        </div>
+      </section>
+
+      <!-- ───────────── 主题 ───────────── -->
+      <section class="section" id="themes">
+        <div class="section-head reveal">
+          <h2 data-i18n="themes.title">六套主题</h2>
+        </div>
+        <div class="theme-stage reveal">
+          <div class="theme-shot">
+            <img
+              src="./assets/hero_light.png"
+              alt="EasyMarkdown 主题预览"
+              id="themeImgA"
+              class="on"
+              loading="lazy"
+            />
+            <img src="./assets/theme_dark.png" alt="" id="themeImgB" loading="lazy" />
+          </div>
+          <div class="theme-picker" role="tablist" aria-label="Themes">
+            <button class="swatch active" role="tab" data-img="hero_light.png" style="--sw:#faf6ef">
+              <span data-i18n="themes.light">明亮</span>
+            </button>
+            <button class="swatch" role="tab" data-img="theme_dark.png" style="--sw:#22232b">
+              <span data-i18n="themes.dark">暗夜</span>
+            </button>
+            <button
+              class="swatch"
+              role="tab"
+              data-img="theme_morandi_mist.png"
+              style="--sw:#aebfd2"
+            >
+              <span data-i18n="themes.mist">雾</span>
+            </button>
+            <button
+              class="swatch"
+              role="tab"
+              data-img="theme_morandi_sage.png"
+              style="--sw:#7d8a6a"
+            >
+              <span data-i18n="themes.sage">鼠尾草</span>
+            </button>
+            <button
+              class="swatch"
+              role="tab"
+              data-img="theme_morandi_rose.png"
+              style="--sw:#a8807b"
+            >
+              <span data-i18n="themes.rose">玫瑰</span>
+            </button>
+            <button
+              class="swatch"
+              role="tab"
+              data-img="theme_morandi_dusk.png"
+              style="--sw:#5d7385"
+            >
+              <span data-i18n="themes.dusk">暮色</span>
+            </button>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <!-- ───────────── 页脚 ───────────── -->
+    <footer class="footer">
+      <div class="footer-left">
+        <img src="./assets/icon.png" alt="" width="18" height="18" />
+        <span>EASYMARKDOWN · MIT LICENSE</span>
       </div>
-    </section>
-  </main>
+      <nav class="footer-links">
+        <a href="https://github.com/cycyeasy1-svg/EasyMarkdown" target="_blank" rel="noopener"
+          >GITHUB</a
+        >
+        <a
+          href="https://github.com/cycyeasy1-svg/EasyMarkdown/releases"
+          target="_blank"
+          rel="noopener"
+          >RELEASES</a
+        >
+        <a
+          href="https://github.com/cycyeasy1-svg/EasyMarkdown/issues"
+          target="_blank"
+          rel="noopener"
+          >ISSUES</a
+        >
+      </nav>
+      <span class="footer-ver" id="footVersion">v1.5.0</span>
+    </footer>
 
-  <!-- ───────────── 页脚 ───────────── -->
-  <footer class="footer">
-    <div class="footer-left">
-      <img src="./assets/icon.png" alt="" width="18" height="18" />
-      <span>EASYMARKDOWN · MIT LICENSE</span>
-    </div>
-    <nav class="footer-links">
-      <a href="https://github.com/cycyeasy1-svg/EasyMarkdown" target="_blank" rel="noopener">GITHUB</a>
-      <a href="https://github.com/cycyeasy1-svg/EasyMarkdown/releases" target="_blank" rel="noopener">RELEASES</a>
-      <a href="https://github.com/cycyeasy1-svg/EasyMarkdown/issues" target="_blank" rel="noopener">ISSUES</a>
-    </nav>
-    <span class="footer-ver" id="footVersion">v1.4.0</span>
-  </footer>
-
-  <script src="./app.js" defer></script>
-</body>
+    <script src="./app.js" defer></script>
+  </body>
 </html>
