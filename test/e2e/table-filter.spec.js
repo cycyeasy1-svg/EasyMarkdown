@@ -134,3 +134,43 @@ test('multi-table badge aggregates counts, breaks them down in the tooltip, and 
     await cleanup()
   }
 })
+
+test('filtering from a floating header keeps the filtered table in the viewport', async () => {
+  const { page, cleanup } = await launchApp([fixture('filter-sticky.md')])
+  try {
+    await page.locator('.tab', { hasText: 'filter-sticky.md' }).click()
+    const table = page.locator('.km-doc table.km-table[data-ti="0"]')
+    await expect(table).toBeVisible()
+
+    await table.evaluate((element) => {
+      const scroller = element.closest('.editor-scroll')
+      const tableRect = element.getBoundingClientRect()
+      const scrollerRect = scroller.getBoundingClientRect()
+      scroller.scrollTop += tableRect.bottom - scrollerRect.bottom + 80
+    })
+    const floatingFilter = page.locator(
+      '.km-float-header.km-visible .km-filter-btn[data-ti="0"][data-ci="0"]'
+    )
+    await expect(floatingFilter).toBeVisible()
+    const bottomBefore = await table.evaluate((element) => {
+      const scroller = element.closest('.editor-scroll')
+      return element.getBoundingClientRect().bottom - scroller.getBoundingClientRect().top
+    })
+
+    await floatingFilter.click()
+    const pop = page.locator('.km-filter-pop')
+    await pop.locator('.km-fp-search').fill('2026-08-13')
+    await pop.locator('.ok').click()
+    await expect(table.locator('tbody tr:not(.km-filtered)')).toHaveCount(8)
+    const bottomAfter = await table.evaluate((element) => {
+      const scroller = element.closest('.editor-scroll')
+      return element.getBoundingClientRect().bottom - scroller.getBoundingClientRect().top
+    })
+
+    expect(Math.abs(bottomAfter - bottomBefore)).toBeLessThan(2)
+    await expect(table).toBeInViewport()
+    await expect(page.locator('.status-filter')).toContainText('筛选 8/38 条')
+  } finally {
+    await cleanup()
+  }
+})

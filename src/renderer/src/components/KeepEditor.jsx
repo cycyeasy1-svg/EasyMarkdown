@@ -1814,6 +1814,7 @@ function KeepEditor({
       closePop()
       const ti = parseInt(btn.getAttribute('data-ti'))
       const ci = parseInt(btn.getAttribute('data-ci'))
+      const openedFromFloatingHeader = !!btn.closest('.km-float-header')
       const table = host.querySelector('table[data-ti="' + ti + '"]')
       if (!table) return
       filterStateRef.current[ti] = filterStateRef.current[ti] || {}
@@ -1949,7 +1950,7 @@ function KeepEditor({
         // structure. Apply it directly instead of a full re-render (rebuilding a
         // huge table just to hide a few rows was needless seconds of work), and sync
         // the ▼ button's active state since renderTable didn't re-run to set it.
-        applyFilter(ti)
+        applyFilterChange(ti, openedFromFloatingHeader)
         reportFilter()
         const cols = filterStateRef.current[ti]
         const isActive = !!(cols && cols[ci] && cols[ci].size > 0)
@@ -1982,6 +1983,14 @@ function KeepEditor({
       const table = host.querySelector('table[data-ti="' + ti + '"]')
       if (!table) return
       applyFilterRows(ti, table.querySelectorAll('tbody tr'), true)
+    }
+    const applyFilterChange = (ti, preserveViewport = false) => {
+      const tableScroll = tableScrollRef.current
+      if (preserveViewport && tableScroll) {
+        tableScroll.preserveFilterViewport(ti, () => applyFilter(ti))
+      } else {
+        applyFilter(ti)
+      }
     }
     // A table's filters are active only if some column holds a non-empty excluded
     // set (openFilterPop pre-creates an empty per-table object even on cancel).

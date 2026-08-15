@@ -171,7 +171,10 @@ window.addEventListener('message', (e) => {
   } else if (msg.type === 'imageError') {
     const p = imgPending.get(msg.reqId)
     imgPending.delete(msg.reqId)
-    if (p) showToast(msg.code === 'untitled' ? t('img.untitled') : t('img.saveFailed') + ' ' + (msg.code || ''))
+    if (p)
+      showToast(
+        msg.code === 'untitled' ? t('img.untitled') : t('img.saveFailed') + ' ' + (msg.code || '')
+      )
   } else if (msg.type === 'editRejected') {
     const recoveryDraft = pendingEditDrafts.get(msg.requestId) || null
     pendingEditDrafts.delete(msg.requestId)
@@ -410,18 +413,25 @@ function applyMultilineForBlock(bl, b) {
 // ── embeds (mermaid / KaTeX) ──
 const SVG_ATTRS =
   'viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"'
-const icon = (w, body) => '<svg width="' + w + '" height="' + w + '" ' + SVG_ATTRS + '>' + body + '</svg>'
+const icon = (w, body) =>
+  '<svg width="' + w + '" height="' + w + '" ' + SVG_ATTRS + '>' + body + '</svg>'
 const ICON_ZOOM = icon(
   15,
   '<circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/>'
 )
-const ICON_PLUS = icon(16, '<line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>')
+const ICON_PLUS = icon(
+  16,
+  '<line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>'
+)
 const ICON_MINUS = icon(16, '<line x1="5" y1="12" x2="19" y2="12"/>')
 const ICON_FIT = icon(
   16,
   '<polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/>'
 )
-const ICON_CLOSE = icon(16, '<line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>')
+const ICON_CLOSE = icon(
+  16,
+  '<line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>'
+)
 
 // Paint a rendered diagram + append the magnifier affordance (opens the zoom
 // lightbox). Serialization/copy strips `button`s, so this never pollutes output.
@@ -462,9 +472,7 @@ function renderMermaidEl(el) {
 }
 function getKatex() {
   if (!katexPromise) {
-    katexPromise = import('katex')
-      .then((m) => m.default || m)
-      .catch(() => null)
+    katexPromise = import('katex').then((m) => m.default || m).catch(() => null)
   }
   return katexPromise
 }
@@ -796,9 +804,7 @@ function rebaseDraft(draft, nextLines) {
       draft.beforeLine,
       draft.afterLine
     )
-    return start < 0
-      ? null
-      : { ...draft, start, end: start + draft.baseLines.length - 1 }
+    return start < 0 ? null : { ...draft, start, end: start + draft.baseLines.length - 1 }
   }
   if (draft.kind === 'block-insert') {
     const at = locateInsertionAnchor(nextLines, draft.beforeLine, draft.afterLine, draft.at)
@@ -870,12 +876,21 @@ function restorePendingDraft() {
       draft.beforeLine,
       draft.afterLine
     )
-    const cell = lineIdx < 0
-      ? null
-      : host.querySelector(
-          'td[data-line="' + lineIdx + '"][data-ci="' + draft.colIdx + '"],' +
-            'th[data-line="' + lineIdx + '"][data-ci="' + draft.colIdx + '"]'
-        )
+    const cell =
+      lineIdx < 0
+        ? null
+        : host.querySelector(
+            'td[data-line="' +
+              lineIdx +
+              '"][data-ci="' +
+              draft.colIdx +
+              '"],' +
+              'th[data-line="' +
+              lineIdx +
+              '"][data-ci="' +
+              draft.colIdx +
+              '"]'
+          )
     if (cell) {
       openCellPop(cell, null, draft.value)
       return
@@ -1204,8 +1219,16 @@ function openCellPop(td, anchorEl, initialValue) {
       const lineAttr = td.getAttribute('data-line')
       const ciAttr = td.getAttribute('data-ci')
       const sel =
-        'td[data-line="' + lineAttr + '"][data-ci="' + ciAttr + '"],' +
-        'th[data-line="' + lineAttr + '"][data-ci="' + ciAttr + '"]'
+        'td[data-line="' +
+        lineAttr +
+        '"][data-ci="' +
+        ciAttr +
+        '"],' +
+        'th[data-line="' +
+        lineAttr +
+        '"][data-ci="' +
+        ciAttr +
+        '"]'
       td = host.querySelector(sel)
       if (!td) return
     }
@@ -1447,11 +1470,11 @@ function selectionForCell(cell) {
 
 function resolveSelection(selection = selectedCell) {
   if (!selection || !Number.isFinite(selection.ti) || !Number.isFinite(selection.ci)) return null
-  const rowSelector = selection.isHeader
-    ? 'thead tr'
-    : 'tbody tr[data-ri="' + selection.ri + '"]'
+  const rowSelector = selection.isHeader ? 'thead tr' : 'tbody tr[data-ri="' + selection.ri + '"]'
   return host.querySelector(
-    'table.km-table[data-ti="' + selection.ti + '"] ' +
+    'table.km-table[data-ti="' +
+      selection.ti +
+      '"] ' +
       rowSelector +
       ' > ' +
       (selection.isHeader ? 'th' : 'td') +
@@ -1883,6 +1906,7 @@ function openFilterPop(btn) {
   closePop()
   const ti = parseInt(btn.getAttribute('data-ti'))
   const ci = parseInt(btn.getAttribute('data-ci'))
+  const openedFromFloatingHeader = !!btn.closest('.km-float-header')
   const table = host.querySelector('table[data-ti="' + ti + '"]')
   if (!table) return
   filterState[ti] = filterState[ti] || {}
@@ -2011,7 +2035,7 @@ function openFilterPop(btn) {
       if (!Object.keys(filterState[ti]).length) delete filterState[ti]
     }
     closePop()
-    applyFilter(ti)
+    applyFilterChange(ti, openedFromFloatingHeader)
     const cols = filterState[ti]
     const isActive = !!(cols && cols[ci] && cols[ci].size > 0)
     syncColumnFilterButtons(ti, ci, isActive)
@@ -2037,6 +2061,13 @@ function applyFilter(ti) {
     })
     tr.classList.toggle('km-filtered', hide)
   })
+}
+function applyFilterChange(ti, preserveViewport = false) {
+  if (preserveViewport && tableScroll) {
+    tableScroll.preserveFilterViewport(ti, () => applyFilter(ti))
+  } else {
+    applyFilter(ti)
+  }
 }
 // A table's filters are active only if some column holds a non-empty excluded set
 // (openFilterPop pre-creates an empty per-table object even on cancel).
@@ -2115,8 +2146,7 @@ function postLayout() {
   vscode.postMessage({ type: 'layout', layout: layout })
 }
 function setLayout(key, value) {
-  const renderOptionChanged =
-    key === 'blankLineSpacing' && !!layout[key] !== !!value
+  const renderOptionChanged = key === 'blankLineSpacing' && !!layout[key] !== !!value
   layout = { ...layout, [key]: value }
   applyLayout(layout)
   if (renderOptionChanged) rerender()
@@ -2421,11 +2451,7 @@ function openSettingsPop() {
     )
   )
   pop.appendChild(
-    buildToggleRow(
-      t('settings.tableAutoWrap'),
-      t('settings.tableAutoWrapDesc'),
-      'tableAutoWrap'
-    )
+    buildToggleRow(t('settings.tableAutoWrap'), t('settings.tableAutoWrapDesc'), 'tableAutoWrap')
   )
   document.body.appendChild(pop)
   settingsPop = pop
@@ -2507,7 +2533,9 @@ function closeOutlinePop() {
 // revealHeading), so a buried block is reachable by outline jump / anchor /
 // scroll sync alike.
 function expandAncestors(block) {
-  let need = block.hasAttribute('data-hlevel') ? parseInt(block.getAttribute('data-hlevel')) : Infinity
+  let need = block.hasAttribute('data-hlevel')
+    ? parseInt(block.getAttribute('data-hlevel'))
+    : Infinity
   let node = block.previousElementSibling
   while (node && need > 1) {
     if (node.classList && node.classList.contains('km-block') && node.hasAttribute('data-hlevel')) {
@@ -2589,7 +2617,8 @@ function openOutlinePop() {
           draggingIndex < 0 ||
           draggingIndex === index ||
           !haveSameHeadingParent(heads, draggingIndex, index)
-        ) return
+        )
+          return
         event.preventDefault()
         const rect = row.getBoundingClientRect()
         const placement = event.clientY < rect.top + rect.height / 2 ? 'before' : 'after'
@@ -2602,7 +2631,8 @@ function openOutlinePop() {
           draggingIndex < 0 ||
           draggingIndex === index ||
           !haveSameHeadingParent(heads, draggingIndex, index)
-        ) return
+        )
+          return
         event.preventDefault()
         if (activeCellPop || activeBlockEdit) {
           showToast(t('keep.finishDraft'))
@@ -2711,8 +2741,18 @@ function ensureFindBar() {
   rInput.type = 'text'
   rInput.className = 'km-fb-input'
   rInput.placeholder = t('find.replacePlaceholder')
-  const rOne = mkBtn(t('find.replace'), t('find.replaceTip'), () => replaceOne(), 'km-fb-btn km-fb-act')
-  const rAll = mkBtn(t('find.replaceAll'), t('find.replaceAllTip'), () => replaceAll(), 'km-fb-btn km-fb-act')
+  const rOne = mkBtn(
+    t('find.replace'),
+    t('find.replaceTip'),
+    () => replaceOne(),
+    'km-fb-btn km-fb-act'
+  )
+  const rAll = mkBtn(
+    t('find.replaceAll'),
+    t('find.replaceAllTip'),
+    () => replaceAll(),
+    'km-fb-btn km-fb-act'
+  )
   row2.append(rInput, rOne, rAll)
   rInput.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') {
@@ -2772,9 +2812,7 @@ function replaceOne() {
   const { matches: after } = findMatchesInText(newLine, q)
   replCursor = earlier + after.filter((m) => m.index < index + repl.length).length
   rerender()
-  requestAnimationFrame(() =>
-    requestAnimationFrame(() => scrollToSourceLine(li))
-  )
+  requestAnimationFrame(() => requestAnimationFrame(() => scrollToSourceLine(li)))
 }
 function replaceAll() {
   const q = findInput.value
@@ -2885,8 +2923,8 @@ function findRangeIndexForSourceTarget(ranges, query, target) {
   }
   if (!candidates.length) return 0
   const block = candidates[0].block
-  const startLine = exact.length ? line : block?.start ?? line
-  const endLine = exact.length ? line : block?.end ?? line
+  const startLine = exact.length ? line : (block?.start ?? line)
+  const endLine = exact.length ? line : (block?.end ?? line)
   const ordinal = sourceOccurrenceOrdinal(query, target, startLine, endLine)
   return candidates[Math.min(ordinal, candidates.length - 1)].index
 }
@@ -2967,7 +3005,10 @@ function stepFind(dir) {
 function updateFindCount() {
   if (!findCountEl) return
   if (!findQuery) findCountEl.textContent = ''
-  else findCountEl.textContent = findRanges.length ? findIdx + 1 + '/' + findRanges.length : t('find.noResults')
+  else
+    findCountEl.textContent = findRanges.length
+      ? findIdx + 1 + '/' + findRanges.length
+      : t('find.noResults')
 }
 
 // ── links ──
@@ -3153,7 +3194,13 @@ function requestImageSave(file, at, ta) {
   const reqId = ++imgReqSeq
   imgPending.set(reqId, { at, ta })
   file.arrayBuffer().then(
-    (buf) => vscode.postMessage({ type: 'saveImage', reqId, name: imageFileName(file), bytes: new Uint8Array(buf) }),
+    (buf) =>
+      vscode.postMessage({
+        type: 'saveImage',
+        reqId,
+        name: imageFileName(file),
+        bytes: new Uint8Array(buf)
+      }),
     () => imgPending.delete(reqId)
   )
 }
@@ -3322,9 +3369,10 @@ function onClick(e) {
   if (mz && host.contains(mz)) {
     e.preventDefault()
     e.stopPropagation()
-    const contentEl = mz.dataset.zoomKind === 'math'
-      ? mz.closest('.km-math')?.querySelector('.katex-display')
-      : mz.closest('.km-mermaid')?.querySelector('svg')
+    const contentEl =
+      mz.dataset.zoomKind === 'math'
+        ? mz.closest('.km-math')?.querySelector('.katex-display')
+        : mz.closest('.km-mermaid')?.querySelector('svg')
     if (contentEl) openMermaidZoom(contentEl)
     return
   }
@@ -3391,9 +3439,18 @@ function onContextMenu(e) {
       items.push({ label: t('keep.copy'), fn: () => copyElement(block) })
       if (structuralBlock(bi)) {
         items.push('sep')
-        items.push({ label: t('keep.blockInsertAbove'), fn: () => performBlockCommand('insertAbove', bi) })
-        items.push({ label: t('keep.blockInsertBelow'), fn: () => performBlockCommand('insertBelow', bi) })
-        items.push({ label: t('keep.blockDuplicate'), fn: () => performBlockCommand('duplicate', bi) })
+        items.push({
+          label: t('keep.blockInsertAbove'),
+          fn: () => performBlockCommand('insertAbove', bi)
+        })
+        items.push({
+          label: t('keep.blockInsertBelow'),
+          fn: () => performBlockCommand('insertBelow', bi)
+        })
+        items.push({
+          label: t('keep.blockDuplicate'),
+          fn: () => performBlockCommand('duplicate', bi)
+        })
         items.push({ label: t('keep.blockDelete'), fn: () => performBlockCommand('delete', bi) })
       }
     }

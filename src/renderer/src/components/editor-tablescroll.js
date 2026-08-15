@@ -58,6 +58,9 @@ export function enhanceKeepTables(
     refreshContent() {},
     refreshLabels() {},
     refreshSelection() {},
+    preserveFilterViewport(_tableIdx, mutate) {
+      return mutate?.()
+    },
     autoFitColumn() {},
     autoFitTable() {},
     hideColumn() {},
@@ -670,6 +673,7 @@ export function enhanceKeepTables(
       hide: () => {},
       syncContent: () => {},
       syncSelection: () => {},
+      preserveFilterViewport: (mutate) => mutate?.(),
       revealCell: () => false
     }
     controllers.set(stateKey, controller)
@@ -820,12 +824,42 @@ export function enhanceKeepTables(
       return true
     }
 
+    // A filter opened from the fixed header is applied while the live header is
+    // already above the viewport. Hiding many rows can then shrink the table by
+    // thousands of pixels without Chromium adjusting the editor scrollTop (the
+    // focused dropdown lives outside the scroller). The unchanged scrollTop lands
+    // on the next table and makes its header appear to replace the one just used.
+    //
+    // Keep the filtered table's trailing edge at the same viewport coordinate.
+    // This mirrors the user's position near the visible end of the table and, when
+    // the filtered result now fits, naturally brings the whole result back into
+    // view. Temporarily disable native scroll anchoring so the compensation is
+    // deterministic rather than being applied twice by different Chromium builds.
+    const preserveFilterViewport = (mutate) => {
+      if (typeof mutate !== 'function') return undefined
+      if (!scroller) return mutate()
+
+      const previousOverflowAnchor = scroller.style.overflowAnchor
+      scroller.style.overflowAnchor = 'none'
+      const bottomBefore = table.getBoundingClientRect().bottom
+      try {
+        const result = mutate()
+        const bottomAfter = table.getBoundingClientRect().bottom
+        const delta = bottomAfter - bottomBefore
+        if (Number.isFinite(delta) && Math.abs(delta) > 0.5) scroller.scrollTop += delta
+        return result
+      } finally {
+        scroller.style.overflowAnchor = previousOverflowAnchor
+      }
+    }
+
     controller.hide = hideFloat
     controller.update = updateFloat
     controller.prepare = prepare
     controller.onFloatActivated = onFloatActivated
     controller.syncContent = syncContent
     controller.syncSelection = syncSelection
+    controller.preserveFilterViewport = preserveFilterViewport
     controller.revealCell = revealCell
 
     wireHeaderControls(thead)
@@ -945,6 +979,10 @@ export function enhanceKeepTables(
     },
     refreshContent: () => activeController?.syncContent(),
     refreshSelection: () => activeController?.syncSelection(),
+    preserveFilterViewport: (tableIdx, mutate) => {
+      const controller = controllers.get(String(tableIdx))
+      return controller ? controller.preserveFilterViewport(mutate) : mutate?.()
+    },
     refreshLabels: (nextT) => {
       if (typeof nextT === 'function') translate = nextT
       closeColumnPop()

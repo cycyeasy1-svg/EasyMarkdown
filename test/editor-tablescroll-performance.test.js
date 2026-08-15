@@ -171,6 +171,33 @@ describe('keep-table initialization performance guards', () => {
     controls.destroy()
   })
 
+  it('keeps a filtered table trailing edge fixed while its hidden rows collapse', () => {
+    const { host, table } = makeTable({ rows: 12, columns: 3 })
+    const controls = enhanceKeepTables(host, host)
+    let contentBottom = 900
+    host.scrollTop = 300
+    vi.spyOn(table, 'getBoundingClientRect').mockImplementation(() => ({
+      top: 100 - host.scrollTop,
+      bottom: contentBottom - host.scrollTop,
+      left: 0,
+      right: 600,
+      width: 600,
+      height: contentBottom - 100
+    }))
+
+    const bottomBefore = table.getBoundingClientRect().bottom
+    const mutate = vi.fn(() => {
+      contentBottom -= 240
+    })
+    controls.preserveFilterViewport(0, mutate)
+
+    expect(mutate).toHaveBeenCalledOnce()
+    expect(host.scrollTop).toBe(60)
+    expect(table.getBoundingClientRect().bottom).toBe(bottomBefore)
+    expect(host.style.overflowAnchor).toBe('')
+    controls.destroy()
+  })
+
   it('shares one floating layer and one resize observer across many offscreen tables', () => {
     let resizeObservers = 0
     class ResizeObserverMock {
